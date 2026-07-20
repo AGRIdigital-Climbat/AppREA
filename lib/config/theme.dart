@@ -2,20 +2,36 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  static const primary = Color(0xFF1B5E20);
-  static const primaryLight = Color(0xFF4CAF50);
-  static const primaryDark = Color(0xFF0D3311);
+  // REA Primary - Rojo Alerta
+  static const primary = Color(0xFFC0392B);
+  static const primaryLight = Color(0xFFE74C3C);
+  static const primaryDark = Color(0xFF7F1D1D);
+
   static const secondary = Color(0xFF0D47A1);
-  static const background = Color(0xFFFFFFFF);
-  static const surface = Color(0xFFF8F9FA);
+
+  // REA Backgrounds
+  static const background = Color(0xFFFFF8F8);
+  static const surface = Color(0xFFFFFFFF);
   static const card = Color(0xFFFFFFFF);
+
+  // Semantic States
   static const pending = Color(0xFFFFA000);
   static const inProgress = Color(0xFF2196F3);
   static const completed = Color(0xFF4CAF50);
-  static const error = Color(0xFFD32F2F);
+  static const error = Color(0xFFB91C1C);
+  static const closed = Color(0xFF6B7280);
+  static const rejected = Color(0xFFDC2626);
+
+  // REA Specific
+  static const reaButtonPressed = Color(0xFF991B1B);
+  static const reaInputFocused = Color(0xFFFFF8F8);
+  static const reaFooter = Color(0xFF7F1D1D);
+  static const reaFooterText = Color(0xFFFEE2E2);
+
+  // Text
   static const textPrimary = Color(0xFF212121);
   static const textSecondary = Color(0xFF757575);
-  static const divider = Color(0xFFE0E0E0);
+  static const divider = Color(0xFFE2E8F0);
 }
 
 class AppTheme {
@@ -31,12 +47,12 @@ class AppTheme {
       scaffoldBackgroundColor: AppColors.background,
       textTheme: GoogleFonts.robotoTextTheme(),
       appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.background,
-        foregroundColor: AppColors.textPrimary,
+        backgroundColor: AppColors.primary,
+        foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
         titleTextStyle: TextStyle(
-          color: AppColors.textPrimary,
+          color: Colors.white,
           fontSize: 20,
           fontWeight: FontWeight.w600,
         ),

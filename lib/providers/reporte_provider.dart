@@ -1,5 +1,8 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import '../models/reporte.dart';
 import '../models/reporte_offline.dart';
 import '../models/departamento.dart';
 import '../models/provincia.dart';
@@ -19,6 +22,9 @@ class ReporteProvider extends ChangeNotifier {
   List<Departamento> _departamentos = [];
   List<Provincia> _provincias = [];
   List<Municipio> _municipios = [];
+  List<Estado> _estados = [];
+  List<Categoria> _categorias = [];
+  List<TipoEvento> _tiposEvento = [];
   int _pendingCount = 0;
   bool _isLoading = false;
   bool _isLoadingProvincias = false;
@@ -28,6 +34,9 @@ class ReporteProvider extends ChangeNotifier {
   List<Departamento> get departamentos => _departamentos;
   List<Provincia> get provincias => _provincias;
   List<Municipio> get municipios => _municipios;
+  List<Estado> get estados => _estados;
+  List<Categoria> get categorias => _categorias;
+  List<TipoEvento> get tiposEvento => _tiposEvento;
   int get pendingCount => _pendingCount;
   bool get isLoading => _isLoading;
   bool get isLoadingProvincias => _isLoadingProvincias;
@@ -43,8 +52,18 @@ class ReporteProvider extends ChangeNotifier {
     });
 
     await loadReportes();
+    await loadCatalogsLocal();
+
     if (AuthService.instance.isAuthenticated) {
       await loadGeography();
+
+      if (_reportes.isEmpty) {
+        await fetchAndCacheCatalogs();
+        await syncAllFromServer();
+      } else {
+        await fetchAndCacheCatalogs();
+        _syncManager.pullServerUpdates().then((_) => loadReportes());
+      }
     }
   }
 
@@ -85,17 +104,81 @@ class ReporteProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadMunicipios(int idProvincia) async {
+  Future<void> loadMunicipios(int idProvincia, int idDepartamento) async {
     _isLoadingMunicipios = true;
     _municipios = [];
     notifyListeners();
     try {
-      _municipios = await _api.getMunicipios(idProvincia: idProvincia);
+      _municipios = await _api.getMunicipios(
+        idProvincia: idProvincia,
+        idDepartamento: idDepartamento,
+      );
     } catch (e) {
       // Manejar error silenciosamente
     }
     _isLoadingMunicipios = false;
     notifyListeners();
+  }
+
+  Future<void> loadCatalogsLocal() async {
+    final estadosData = await _db.getEstadosLocal();
+    _estados = estadosData.map((e) => Estado.fromJson(e)).toList();
+
+    final categoriasData = await _db.getCategoriasLocal();
+    _categorias = categoriasData.map((c) => Categoria.fromJson(c)).toList();
+
+    final tiposData = await _db.getTiposEventoLocal();
+    _tiposEvento = tiposData.map((t) => TipoEvento.fromJson(t)).toList();
+
+    notifyListeners();
+  }
+
+  Future<Map<String, int>> fetchAndCacheCatalogs() async {
+    int estadosCount = 0;
+    int categoriasCount = 0;
+    int tiposCount = 0;
+
+    try {
+      final estados = await _api.getEstados();
+      _estados = estados;
+      await _db.saveEstados(
+          estados.map((e) => {'id_estado': e.idEstado, 'nombre': e.nombre, 'descripcion': e.descripcion, 'orden': e.orden}).toList());
+      estadosCount = estados.length;
+    } catch (_) {}
+
+    try {
+      final categorias = await _api.getCategorias();
+      _categorias = categorias;
+      await _db.saveCategorias(
+          categorias.map((c) => {'id_categoria': c.idCategoria, 'nombre': c.nombre, 'descripcion': c.descripcion, 'orden': c.orden}).toList());
+      categoriasCount = categorias.length;
+    } catch (_) {}
+
+    try {
+      final tipos = await _api.getTiposEvento();
+      _tiposEvento = tipos;
+      await _db.saveTiposEvento(
+          tipos.map((t) => {'id_tipo_evento': t.idTipoEvento, 'nombre': t.nombre}).toList());
+      tiposCount = tipos.length;
+    } catch (_) {}
+
+    notifyListeners();
+    return {'estados': estadosCount, 'categorias': categoriasCount, 'tipos': tiposCount};
+  }
+
+  String getEstadoNombre(int id) {
+    final match = _estados.where((e) => e.idEstado == id);
+    return match.isNotEmpty ? match.first.nombre : 'Desconocido';
+  }
+
+  String getTipoEventoNombre(int id) {
+    final match = _tiposEvento.where((t) => t.idTipoEvento == id);
+    return match.isNotEmpty ? match.first.nombre : 'Desconocido';
+  }
+
+  String getCategoriaNombre(int id) {
+    final match = _categorias.where((c) => c.idCategoria == id);
+    return match.isNotEmpty ? match.first.nombre : 'Otra';
   }
 
   Future<void> crearReporte(ReporteOffline reporte) async {
@@ -118,6 +201,78 @@ class ReporteProvider extends ChangeNotifier {
   Future<void> sincronizarPendientes() async {
     await _syncManager.syncPendingReports();
     await loadReportes();
+  }
+
+  Future<int> refreshFromServer() async {
+    final result = await _syncManager.pullServerUpdates();
+    await fetchAndCacheCatalogs();
+    await loadReportes();
+    await loadCatalogsLocal();
+    return result;
+  }
+
+  Future<Map<String, int>> syncAllFromServer() async {
+    int reportesCount = 0;
+    int imagenesCount = 0;
+
+    try {
+      final userId = AuthService.instance.userId;
+      if (userId == null) return {'reportes': 0, 'imagenes': 0};
+
+      final appDir = await getApplicationDocumentsDirectory();
+      final reportesDir = Directory('${appDir.path}/reportes');
+
+      int skip = 0;
+      const limit = 50;
+      bool hasMore = true;
+
+      while (hasMore) {
+        final batch = await _api.getMisReportes(
+          idUsuario: userId,
+          skip: skip,
+          limit: limit,
+        );
+
+        if (batch.isEmpty) {
+          hasMore = false;
+          break;
+        }
+
+        for (final data in batch) {
+          await _db.upsertReportFromServer(userId, data);
+          reportesCount++;
+
+          final serverPath = data['fotografia'] as String?;
+          if (serverPath != null && serverPath.isNotEmpty) {
+            final existing = await _db.getReporteByServerId(data['id_reporte'] as int);
+            final hasLocalImage = existing != null &&
+                existing.imagenes != null &&
+                existing.imagenes!.isNotEmpty;
+
+            if (!hasLocalImage) {
+              final fileName = '${data['id_reporte']}_${serverPath.split('/').last}';
+              final savePath = '${reportesDir.path}/$fileName';
+
+              final downloaded = await _api.downloadImage(serverPath, savePath);
+              if (downloaded != null) {
+                await _db.updateReporteLocalImage(data['id_reporte'] as int, downloaded);
+                imagenesCount++;
+              }
+            }
+          }
+        }
+
+        if (batch.length < limit) {
+          hasMore = false;
+        } else {
+          skip += limit;
+        }
+      }
+
+      await loadReportes();
+    } catch (_) {}
+
+    return {'reportes': reportesCount, 'imagenes': imagenesCount};
   }
 
   @override

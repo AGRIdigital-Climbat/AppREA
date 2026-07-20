@@ -49,9 +49,15 @@ class ImageService {
     return savedImage.path;
   }
 
-  Future<String> imageToBase64(String imagePath) async {
-    final bytes = await File(imagePath).readAsBytes();
-    return base64Encode(bytes);
+  Future<String?> imageToBase64(String imagePath) async {
+    try {
+      final file = File(imagePath);
+      if (!await file.exists()) return null;
+      final bytes = await file.readAsBytes();
+      return base64Encode(bytes);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> deleteImage(String imagePath) async {

@@ -24,8 +24,8 @@ class Municipio {
     return Municipio(
       id: json['id'],
       codigoIne: json['codigo_ine'],
-      idDepartamento: json['id_departamento'],
-      idProvincia: json['id_provincia'],
+      idDepartamento: json['id_departamento'] ?? json['departamento']?['id'],
+      idProvincia: json['id_provincia'] ?? json['provincia']?['id'],
       nombre: json['nombre'],
       departamento: json['departamento'] != null
           ? Departamento.fromJson(json['departamento'])

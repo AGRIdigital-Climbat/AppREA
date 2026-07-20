@@ -5,6 +5,7 @@ import '../providers/auth_provider.dart';
 import '../providers/reporte_provider.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
+import 'home_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -15,11 +16,15 @@ class RegisterScreen extends StatefulWidget {
 
 class _RegisterScreenState extends State<RegisterScreen> {
   final _formKey = GlobalKey<FormState>();
-  final _usuarioController = TextEditingController();
   final _contrasenaController = TextEditingController();
+  final _confirmarController = TextEditingController();
   final _nombreController = TextEditingController();
   final _celularController = TextEditingController();
+  final _carnetController = TextEditingController();
   final _comunidadController = TextEditingController();
+
+  bool _obscurePassword = true;
+  bool _obscureConfirm = true;
 
   int? _selectedDepartamento;
   int? _selectedProvincia;
@@ -35,10 +40,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   void dispose() {
-    _usuarioController.dispose();
     _contrasenaController.dispose();
+    _confirmarController.dispose();
     _nombreController.dispose();
     _celularController.dispose();
+    _carnetController.dispose();
     _comunidadController.dispose();
     super.dispose();
   }
@@ -47,15 +53,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     final authProvider = context.read<AuthProvider>();
+    final reporteProvider = context.read<ReporteProvider>();
+
+    String? depNombre;
+    String? provNombre;
+    String? munNombre;
+
+    if (_selectedDepartamento != null) {
+      final dep = reporteProvider.departamentos
+          .where((d) => d.id == _selectedDepartamento);
+      if (dep.isNotEmpty) depNombre = dep.first.nombre;
+    }
+    if (_selectedProvincia != null) {
+      final prov = reporteProvider.provincias
+          .where((p) => p.id == _selectedProvincia);
+      if (prov.isNotEmpty) provNombre = prov.first.nombre;
+    }
+    if (_selectedMunicipio != null) {
+      final mun = reporteProvider.municipios
+          .where((m) => m.id == _selectedMunicipio);
+      if (mun.isNotEmpty) munNombre = mun.first.nombre;
+    }
+
     final success = await authProvider.register(
-      usuario: _usuarioController.text.trim(),
-      contrasena: _contrasenaController.text,
+      usuario: _carnetController.text.trim(),
+      contrasena: _contrasenaController.text.trim(),
       nombre: _nombreController.text.trim(),
       celular: _celularController.text.trim(),
+      carnet: _carnetController.text.trim(),
       comunidad: _comunidadController.text.trim(),
       idDepartamento: _selectedDepartamento,
+      departamentoNombre: depNombre,
       idProvincia: _selectedProvincia,
+      provinciaNombre: provNombre,
       idMunicipio: _selectedMunicipio,
+      municipioNombre: munNombre,
     );
 
     if (mounted) {
@@ -66,7 +98,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
             backgroundColor: AppColors.completed,
           ),
         );
-        Navigator.of(context).pop();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (route) => false,
+        );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -118,6 +153,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   label: 'Nombre completo',
                   hint: 'Ingrese su nombre',
                   controller: _nombreController,
+                  textCapitalization: TextCapitalization.words,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Ingrese su nombre';
@@ -127,22 +163,41 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
-                  label: 'Usuario',
-                  hint: 'Ingrese un usuario',
-                  controller: _usuarioController,
+                  label: 'Carnet de identidad (será tu usuario)',
+                  hint: 'Ingrese su carnet',
+                  controller: _carnetController,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
-                      return 'Ingrese un usuario';
+                      return 'Ingrese su carnet';
                     }
                     return null;
                   },
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Este carnet será tu usuario para iniciar sesión',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary.withValues(alpha: 0.8),
+                  ),
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
                   label: 'Contraseña',
                   hint: 'Ingrese una contraseña',
                   controller: _contrasenaController,
-                  obscureText: true,
+                  obscureText: _obscurePassword,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: AppColors.textSecondary,
+                    ),
+                    onPressed: () {
+                      setState(() => _obscurePassword = !_obscurePassword);
+                    },
+                  ),
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return 'Ingrese una contraseña';
@@ -155,18 +210,39 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
+                  label: 'Confirmar contraseña',
+                  hint: 'Repita la contraseña',
+                  controller: _confirmarController,
+                  obscureText: _obscureConfirm,
+                  suffixIcon: IconButton(
+                    icon: Icon(
+                      _obscureConfirm
+                          ? Icons.visibility_off
+                          : Icons.visibility,
+                      color: AppColors.textSecondary,
+                    ),
+                    onPressed: () {
+                      setState(() => _obscureConfirm = !_obscureConfirm);
+                    },
+                  ),
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Confirme la contraseña';
+                    }
+                    if (value != _contrasenaController.text) {
+                      return 'Las contraseñas no coinciden';
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
                   label: 'Celular',
                   hint: 'Ingrese su celular',
                   controller: _celularController,
                   keyboardType: TextInputType.phone,
                 ),
                 const SizedBox(height: 16),
-                CustomTextField(
-                  label: 'Comunidad',
-                  hint: 'Ingrese su comunidad',
-                  controller: _comunidadController,
-                ),
-                const SizedBox(height: 24),
                 Consumer<ReporteProvider>(
                   builder: (context, reporteProvider, child) {
                     return Column(
@@ -242,7 +318,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                     _selectedMunicipio = null;
                                   });
                                   if (value != null) {
-                                    reporteProvider.loadMunicipios(value);
+                                    reporteProvider.loadMunicipios(
+                                      value,
+                                      _selectedDepartamento!,
+                                    );
                                   }
                                 },
                         ),
@@ -283,6 +362,44 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ],
                     );
                   },
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  label: 'Comunidad',
+                  hint: 'Ingrese su comunidad',
+                  controller: _comunidadController,
+                  textCapitalization: TextCapitalization.words,
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.pending.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.pending.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        color: AppColors.pending,
+                        size: 20,
+                      ),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Importante: Toda la información proporcionada debe ser correcta y será verificada por las autoridades correspondientes.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(height: 32),
                 Consumer<AuthProvider>(

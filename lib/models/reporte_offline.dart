@@ -8,6 +8,9 @@ class ReporteOffline {
   final int provinciaId;
   final int municipioId;
   final String comunidad;
+  final String? departamentoNombre;
+  final String? provinciaNombre;
+  final String? municipioNombre;
   final String fechaEvento;
   final String? horaEvento;
   final int tipoEventoId;
@@ -15,8 +18,10 @@ class ReporteOffline {
   final double? coordenadaLon;
   final String? descripcion;
   final int estadoId;
+  final String? estadoNombre;
   final List<int>? categorias;
   final List<String>? imagenes;
+  final String? fotografiaServerPath;
   final bool sincronizado;
   final bool pendienteEliminacion;
   final bool pendienteActualizacion;
@@ -33,6 +38,9 @@ class ReporteOffline {
     required this.provinciaId,
     required this.municipioId,
     required this.comunidad,
+    this.departamentoNombre,
+    this.provinciaNombre,
+    this.municipioNombre,
     required this.fechaEvento,
     this.horaEvento,
     required this.tipoEventoId,
@@ -40,8 +48,10 @@ class ReporteOffline {
     this.coordenadaLon,
     this.descripcion,
     this.estadoId = 1,
+    this.estadoNombre,
     this.categorias,
     this.imagenes,
+    this.fotografiaServerPath,
     this.sincronizado = false,
     this.pendienteEliminacion = false,
     this.pendienteActualizacion = false,
@@ -62,6 +72,9 @@ class ReporteOffline {
       'provincia_id': provinciaId,
       'municipio_id': municipioId,
       'comunidad': comunidad,
+      'departamento_nombre': departamentoNombre,
+      'provincia_nombre': provinciaNombre,
+      'municipio_nombre': municipioNombre,
       'fecha_evento': fechaEvento,
       'hora_evento': horaEvento,
       'tipo_evento_id': tipoEventoId,
@@ -69,8 +82,10 @@ class ReporteOffline {
       'coordenada_lon': coordenadaLon,
       'descripcion': descripcion,
       'estado_id': estadoId,
+      'estado_nombre': estadoNombre,
       'categorias': categorias != null ? jsonEncode(categorias) : null,
       'imagenes': imagenes != null ? jsonEncode(imagenes) : null,
+      'fotografia_server_path': fotografiaServerPath,
       'sincronizado': sincronizado ? 1 : 0,
       'pendiente_eliminacion': pendienteEliminacion ? 1 : 0,
       'pendiente_actualizacion': pendienteActualizacion ? 1 : 0,
@@ -90,19 +105,24 @@ class ReporteOffline {
       provinciaId: map['provincia_id'],
       municipioId: map['municipio_id'],
       comunidad: map['comunidad'],
+      departamentoNombre: map['departamento_nombre'],
+      provinciaNombre: map['provincia_nombre'],
+      municipioNombre: map['municipio_nombre'],
       fechaEvento: map['fecha_evento'],
       horaEvento: map['hora_evento'],
       tipoEventoId: map['tipo_evento_id'],
-      coordenadaLat: map['coordenada_lat'],
-      coordenadaLon: map['coordenada_lon'],
+      coordenadaLat: double.tryParse(map['coordenada_lat']?.toString() ?? ''),
+      coordenadaLon: double.tryParse(map['coordenada_lon']?.toString() ?? ''),
       descripcion: map['descripcion'],
       estadoId: map['estado_id'],
+      estadoNombre: map['estado_nombre'],
       categorias: map['categorias'] != null
           ? List<int>.from(jsonDecode(map['categorias']))
           : null,
       imagenes: map['imagenes'] != null
           ? List<String>.from(jsonDecode(map['imagenes']))
           : null,
+      fotografiaServerPath: map['fotografia_server_path'],
       sincronizado: map['sincronizado'] == 1,
       pendienteEliminacion: map['pendiente_eliminacion'] == 1,
       pendienteActualizacion: map['pendiente_actualizacion'] == 1,
@@ -136,6 +156,7 @@ class ReporteOffline {
   ReporteOffline copyWith({
     int? idLocal,
     int? idServer,
+    String? fotografiaServerPath,
     bool? sincronizado,
     bool? pendienteEliminacion,
     bool? pendienteActualizacion,
@@ -151,6 +172,9 @@ class ReporteOffline {
       provinciaId: provinciaId,
       municipioId: municipioId,
       comunidad: comunidad,
+      departamentoNombre: departamentoNombre,
+      provinciaNombre: provinciaNombre,
+      municipioNombre: municipioNombre,
       fechaEvento: fechaEvento,
       horaEvento: horaEvento,
       tipoEventoId: tipoEventoId,
@@ -160,6 +184,7 @@ class ReporteOffline {
       estadoId: estadoId,
       categorias: categorias,
       imagenes: imagenes,
+      fotografiaServerPath: fotografiaServerPath ?? this.fotografiaServerPath,
       sincronizado: sincronizado ?? this.sincronizado,
       pendienteEliminacion: pendienteEliminacion ?? this.pendienteEliminacion,
       pendienteActualizacion:

@@ -10,7 +10,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get isAuthenticated => _authService.isAuthenticated;
-  String? get userName => _authService.currentToken?.nombre;
+  String? get userName => _authService.userName;
   int? get userId => _authService.userId;
 
   Future<void> initialize() async {
@@ -38,10 +38,14 @@ class AuthProvider extends ChangeNotifier {
     required String contrasena,
     required String nombre,
     String? celular,
+    String? carnet,
     String? comunidad,
     int? idDepartamento,
+    String? departamentoNombre,
     int? idProvincia,
+    String? provinciaNombre,
     int? idMunicipio,
+    String? municipioNombre,
   }) async {
     _isLoading = true;
     _error = null;
@@ -52,15 +56,19 @@ class AuthProvider extends ChangeNotifier {
       contrasena: contrasena,
       nombre: nombre,
       celular: celular,
+      carnet: carnet,
       comunidad: comunidad,
       idDepartamento: idDepartamento,
+      departamentoNombre: departamentoNombre,
       idProvincia: idProvincia,
+      provinciaNombre: provinciaNombre,
       idMunicipio: idMunicipio,
+      municipioNombre: municipioNombre,
     );
 
     _isLoading = false;
     if (!success) {
-      _error = 'Error al registrar usuario';
+      _error = _authService.lastError ?? 'Error al registrar usuario';
     }
     notifyListeners();
     return success;

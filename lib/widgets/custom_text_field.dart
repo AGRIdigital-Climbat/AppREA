@@ -6,6 +6,7 @@ class CustomTextField extends StatelessWidget {
   final String? hint;
   final TextEditingController? controller;
   final TextInputType? keyboardType;
+  final TextCapitalization textCapitalization;
   final bool obscureText;
   final Widget? prefixIcon;
   final Widget? suffixIcon;
@@ -14,6 +15,7 @@ class CustomTextField extends StatelessWidget {
   final bool enabled;
   final bool readOnly;
   final VoidCallback? onTap;
+  final ValueChanged<String>? onChanged;
 
   const CustomTextField({
     super.key,
@@ -21,6 +23,7 @@ class CustomTextField extends StatelessWidget {
     this.hint,
     this.controller,
     this.keyboardType,
+    this.textCapitalization = TextCapitalization.none,
     this.obscureText = false,
     this.prefixIcon,
     this.suffixIcon,
@@ -29,6 +32,7 @@ class CustomTextField extends StatelessWidget {
     this.enabled = true,
     this.readOnly = false,
     this.onTap,
+    this.onChanged,
   });
 
   @override
@@ -36,24 +40,28 @@ class CustomTextField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          label,
-          style: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
-            color: AppColors.textPrimary,
+        if (label.isNotEmpty) ...[
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textPrimary,
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
+          const SizedBox(height: 8),
+        ],
         TextFormField(
           controller: controller,
           keyboardType: keyboardType,
+          textCapitalization: textCapitalization,
           obscureText: obscureText,
           validator: validator,
           maxLines: maxLines,
           enabled: enabled,
           readOnly: readOnly,
           onTap: onTap,
+          onChanged: onChanged,
           style: const TextStyle(
             fontSize: 16,
             color: AppColors.textPrimary,

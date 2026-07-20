@@ -1,16 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/theme.dart';
-import '../providers/reporte_provider.dart';
-import '../providers/auth_provider.dart';
-import '../providers/connectivity_provider.dart';
-import '../models/reporte_offline.dart';
+import '../services/auth_service.dart';
 import '../services/permission_service.dart';
 import '../services/location_service.dart';
 import '../services/image_service.dart';
+import '../providers/reporte_provider.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
+import 'reporte_preview_screen.dart';
 
 class ReporteFormScreen extends StatefulWidget {
   const ReporteFormScreen({super.key});
@@ -25,18 +26,27 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
   final _descripcionController = TextEditingController();
   final _fechaController = TextEditingController();
   final _horaController = TextEditingController();
+  final _departamentoController = TextEditingController();
+  final _provinciaController = TextEditingController();
+  final _municipioController = TextEditingController();
 
   int? _selectedDepartamento;
   int? _selectedProvincia;
   int? _selectedMunicipio;
   int? _selectedTipoEvento;
   DateTime _fechaEvento = DateTime.now();
-  TimeOfDay _horaEvento = TimeOfDay.now();
+  int? _horaNumero;
+  bool? _esPM;
   double? _latitud;
   double? _longitud;
+  double? _precision;
+  bool _obteniendoCoords = false;
+  bool _coordsManual = false;
+  final _latController = TextEditingController();
+  final _lonController = TextEditingController();
   final List<String> _imagenes = [];
   final List<int> _categoriasSeleccionadas = [];
-  bool _isSubmitting = false;
+  final bool _isSubmitting = false;
 
   final ImagePicker _picker = ImagePicker();
 
@@ -45,9 +55,24 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     super.initState();
     _fechaController.text =
         '${_fechaEvento.day}/${_fechaEvento.month}/${_fechaEvento.year}';
-    _horaController.text =
-        '${_horaEvento.hour.toString().padLeft(2, '0')}:${_horaEvento.minute.toString().padLeft(2, '0')}';
-    _getCurrentLocation();
+    _horaController.text = '';
+    _loadProfileData();
+  }
+
+  void _loadProfileData() {
+    final profile = AuthService.instance.getSavedProfile();
+    final depId = profile['id_departamento'] as int?;
+    final provId = profile['id_provincia'] as int?;
+    final munId = profile['id_municipio'] as int?;
+    if (profile.isNotEmpty) {
+      _selectedDepartamento = depId;
+      _selectedProvincia = provId;
+      _selectedMunicipio = munId;
+      _comunidadController.text = profile['comunidad'] as String? ?? '';
+      _departamentoController.text = profile['departamento_nombre'] as String? ?? '';
+      _provinciaController.text = profile['provincia_nombre'] as String? ?? '';
+      _municipioController.text = profile['municipio_nombre'] as String? ?? '';
+    }
   }
 
   @override
@@ -56,19 +81,72 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     _descripcionController.dispose();
     _fechaController.dispose();
     _horaController.dispose();
+    _departamentoController.dispose();
+    _provinciaController.dispose();
+    _municipioController.dispose();
+    _latController.dispose();
+    _lonController.dispose();
     super.dispose();
   }
 
-  Future<void> _getCurrentLocation() async {
+  Future<void> _obtenerCoordenadasConPrecision() async {
+    setState(() => _obteniendoCoords = true);
     final hasPermission = await PermissionService.requestLocationPermission();
-    if (hasPermission) {
-      final position = await LocationService().getCurrentLocation();
-      if (position != null && mounted) {
-        setState(() {
-          _latitud = position.latitude;
-          _longitud = position.longitude;
-        });
+    if (!hasPermission) {
+      if (mounted) {
+        setState(() => _obteniendoCoords = false);
+        PermissionService.showPermissionDeniedDialog(context, 'ubicacion');
       }
+      return;
+    }
+
+    final start = DateTime.now();
+    const timeout = Duration(seconds: 45);
+    double? bestLat, bestLon, bestAcc;
+
+    while (DateTime.now().difference(start) < timeout && mounted) {
+      final pos = await LocationService().getCurrentLocation();
+      if (pos != null && mounted) {
+        if (bestAcc == null || pos.accuracy < bestAcc) {
+          bestLat = pos.latitude;
+          bestLon = pos.longitude;
+          bestAcc = pos.accuracy;
+        }
+        if (pos.accuracy <= 30) {
+          setState(() {
+            _latitud = pos.latitude;
+            _longitud = pos.longitude;
+            _precision = pos.accuracy;
+            _obteniendoCoords = false;
+          });
+          return;
+        }
+      }
+      await Future.delayed(const Duration(seconds: 2));
+    }
+
+    if (!mounted) return;
+    setState(() => _obteniendoCoords = false);
+
+    if (bestAcc != null) {
+      setState(() {
+        _latitud = bestLat;
+        _longitud = bestLon;
+        _precision = bestAcc;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Precision alcanzada: ± ${bestAcc.toStringAsFixed(0)} m'),
+          backgroundColor: AppColors.pending,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No se pudo obtener la ubicacion'),
+          backgroundColor: AppColors.error,
+        ),
+      );
     }
   }
 
@@ -76,7 +154,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _fechaEvento,
-      firstDate: DateTime.now().subtract(const Duration(days: 30)),
+      firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
     if (picked != null) {
@@ -88,114 +166,125 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     }
   }
 
-  Future<void> _selectTime() async {
-    final picked = await showTimePicker(
-      context: context,
-      initialTime: _horaEvento,
-    );
-    if (picked != null) {
-      setState(() {
-        _horaEvento = picked;
-        _horaController.text =
-            '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
-      });
+  void _onSelectHora(int? h) {
+    setState(() {
+      _horaNumero = h;
+      _actualizarHoraController();
+    });
+  }
+
+  void _onToggleAmpm(bool? pm) {
+    setState(() {
+      _esPM = _esPM == pm ? null : pm;
+      _actualizarHoraController();
+    });
+  }
+
+  void _actualizarHoraController() {
+    if (_horaNumero != null && _esPM != null) {
+      final h24 = _esPM!
+          ? (_horaNumero == 12 ? 12 : _horaNumero! + 12)
+          : (_horaNumero == 12 ? 0 : _horaNumero!);
+      _horaController.text = '${h24.toString().padLeft(2, '0')}:00';
+    } else {
+      _horaController.text = '';
     }
+  }
+
+  Widget _ampmBtn(String label, bool isPM) {
+    final selected = _esPM == isPM;
+    return GestureDetector(
+      onTap: () => _onToggleAmpm(isPM),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? AppColors.primary : AppColors.divider,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+            color: selected ? Colors.white : AppColors.textSecondary,
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _takePhoto() async {
     final hasPermission = await PermissionService.requestCameraPermission();
     if (!hasPermission) {
       if (mounted) {
-        PermissionService.showPermissionDeniedDialog(context, 'cámara');
+        PermissionService.showPermissionDeniedDialog(context, 'camara');
       }
       return;
     }
-
     final image = await _picker.pickImage(
       source: ImageSource.camera,
       imageQuality: 80,
     );
-
     if (image != null) {
       final savedPath = await ImageService().saveImageLocally(image);
       setState(() {
-        _imagenes.add(savedPath);
+        _imagenes
+          ..clear()
+          ..add(savedPath);
       });
     }
   }
 
   Future<void> _pickFromGallery() async {
-    final images = await _picker.pickMultiImage(
-      imageQuality: 80,
-    );
-
-    for (final image in images.take(5 - _imagenes.length)) {
+    final image = await _picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
+    if (image != null) {
       final savedPath = await ImageService().saveImageLocally(image);
       setState(() {
-        _imagenes.add(savedPath);
+        _imagenes
+          ..clear()
+          ..add(savedPath);
       });
     }
   }
 
-  Future<void> _submitReport() async {
+  void _goToPreview() {
     if (!_formKey.currentState!.validate()) return;
-    if (_selectedDepartamento == null ||
-        _selectedProvincia == null ||
-        _selectedMunicipio == null) {
+    if (_horaNumero == null || _esPM == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Seleccione departamento, provincia y municipio'),
+          content: Text('Seleccione la hora del evento'),
           backgroundColor: AppColors.error,
         ),
       );
       return;
     }
 
-    setState(() {
-      _isSubmitting = true;
-    });
-
-    final authProvider = context.read<AuthProvider>();
-    final reporteProvider = context.read<ReporteProvider>();
-
-    final reporte = ReporteOffline(
-      usuarioId: authProvider.userId!,
-      departamentoId: _selectedDepartamento!,
-      provinciaId: _selectedProvincia!,
-      municipioId: _selectedMunicipio!,
-      comunidad: _comunidadController.text.trim(),
-      fechaEvento:
-          '${_fechaEvento.year}-${_fechaEvento.month.toString().padLeft(2, '0')}-${_fechaEvento.day.toString().padLeft(2, '0')}',
-      horaEvento: _horaController.text,
-      tipoEventoId: _selectedTipoEvento ?? 1,
-      coordenadaLat: _latitud,
-      coordenadaLon: _longitud,
-      descripcion: _descripcionController.text.trim(),
-      categorias:
-          _categoriasSeleccionadas.isNotEmpty ? _categoriasSeleccionadas : null,
-      imagenes: _imagenes.isNotEmpty ? _imagenes : null,
-      fechaCreacion: DateTime.now(),
-    );
-
-    await reporteProvider.crearReporte(reporte);
-
-    if (mounted) {
-      setState(() {
-        _isSubmitting = false;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.read<ConnectivityProvider>().isConnected
-                ? 'Reporte enviado exitosamente'
-                : 'Reporte guardado localmente',
-          ),
-          backgroundColor: AppColors.completed,
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReportePreviewScreen(
+          departamentoId: _selectedDepartamento ?? 0,
+          provinciaId: _selectedProvincia ?? 0,
+          municipioId: _selectedMunicipio ?? 0,
+          comunidad: _comunidadController.text.trim(),
+          departamentoNombre: _departamentoController.text,
+          provinciaNombre: _provinciaController.text,
+          municipioNombre: _municipioController.text,
+          fechaEvento:
+              '${_fechaEvento.year}-${_fechaEvento.month.toString().padLeft(2, '0')}-${_fechaEvento.day.toString().padLeft(2, '0')}',
+          fechaEventoDisplay: _fechaController.text,
+          horaEvento: _horaController.text,
+          tipoEventoId: _selectedTipoEvento ?? 1,
+          descripcion: _descripcionController.text.trim(),
+          imagenes: _imagenes,
+          categorias: _categoriasSeleccionadas,
+          latitud: _latitud,
+          longitud: _longitud,
         ),
-      );
-      Navigator.of(context).pop();
-    }
+      ),
+    );
   }
 
   @override
@@ -216,27 +305,43 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _buildSectionTitle('Ubicación'),
-              const SizedBox(height: 16),
-              _buildLocationFields(),
-              const SizedBox(height: 24),
               _buildSectionTitle('Datos del Evento'),
-              const SizedBox(height: 16),
+              _buildSectionHint('Seleccione tipo, fecha y hora del suceso.'),
+              const SizedBox(height: 12),
               _buildEventFields(),
               const SizedBox(height: 24),
-              _buildSectionTitle('Evidencia Fotográfica'),
-              const SizedBox(height: 16),
+              _buildSectionTitle('Descripcion'),
+              _buildSectionHint('Detalle breve de lo ocurrido.'),
+              const SizedBox(height: 12),
+              _buildDescripcionField(),
+              const SizedBox(height: 24),
+              _buildSectionTitle('Ubicacion'),
+              _buildSectionHint('Datos cargados de su perfil.'),
+              const SizedBox(height: 12),
+              _buildUbicacionSection(),
+              const SizedBox(height: 24),
+              _buildSectionTitle('Coordenadas GPS'),
+              _buildSectionHint('Registre la coordenada o tome la ubicacion donde ocurrio el evento.'),
+              const SizedBox(height: 8),
+              _buildCoordinatesSection(),
+              const SizedBox(height: 24),
+              _buildSectionTitle('Evidencia Fotografica'),
+              _buildSectionHint('Capture o seleccione imagenes del evento.'),
+              const SizedBox(height: 12),
               _buildPhotoSection(),
               const SizedBox(height: 24),
-              _buildSectionTitle('Categorías de Afectación'),
-              const SizedBox(height: 16),
+              _buildSectionTitle('Categorias de Afectacion'),
+              _buildSectionHint('Seleccione a quienes afecto el evento.'),
+              const SizedBox(height: 12),
               _buildCategoriesSection(),
-              const SizedBox(height: 32),
+              const SizedBox(height: 24),
+              _buildVerifyBanner(),
+              const SizedBox(height: 16),
               CustomButton(
-                text: 'Enviar Reporte',
-                onPressed: _submitReport,
+                text: 'Revisar y Enviar',
+                onPressed: _goToPreview,
                 isLoading: _isSubmitting,
-                icon: Icons.send,
+                icon: Icons.preview,
               ),
               const SizedBox(height: 24),
             ],
@@ -257,199 +362,425 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     );
   }
 
-  Widget _buildLocationFields() {
-    return Consumer<ReporteProvider>(
-      builder: (context, reporteProvider, child) {
-        return Column(
-          children: [
-            DropdownButtonFormField<int>(
-              initialValue: _selectedDepartamento,
-              decoration: const InputDecoration(
-                labelText: 'Departamento *',
-                border: OutlineInputBorder(),
-              ),
-              items: reporteProvider.departamentos.map((dep) {
-                return DropdownMenuItem(
-                  value: dep.id,
-                  child: Text(dep.nombre),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedDepartamento = value;
-                  _selectedProvincia = null;
-                  _selectedMunicipio = null;
-                });
-                if (value != null) {
-                  reporteProvider.loadProvincias(value);
-                }
-              },
-              validator: (value) {
-                if (value == null) return 'Seleccione un departamento';
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<int>(
-              initialValue: _selectedProvincia,
-              decoration: const InputDecoration(
-                labelText: 'Provincia *',
-                border: OutlineInputBorder(),
-              ),
-              items: reporteProvider.provincias.map((prov) {
-                return DropdownMenuItem(
-                  value: prov.id,
-                  child: Text(prov.nombre),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedProvincia = value;
-                  _selectedMunicipio = null;
-                });
-                if (value != null) {
-                  reporteProvider.loadMunicipios(value);
-                }
-              },
-              validator: (value) {
-                if (value == null) return 'Seleccione una provincia';
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<int>(
-              initialValue: _selectedMunicipio,
-              decoration: const InputDecoration(
-                labelText: 'Municipio *',
-                border: OutlineInputBorder(),
-              ),
-              items: reporteProvider.municipios.map((mun) {
-                return DropdownMenuItem(
-                  value: mun.id,
-                  child: Text(mun.nombre),
-                );
-              }).toList(),
-              onChanged: (value) {
-                setState(() {
-                  _selectedMunicipio = value;
-                });
-              },
-              validator: (value) {
-                if (value == null) return 'Seleccione un municipio';
-                return null;
-              },
-            ),
-            const SizedBox(height: 16),
-            CustomTextField(
-              label: 'Comunidad *',
-              hint: 'Nombre de la comunidad',
-              controller: _comunidadController,
-              validator: (value) {
-                if (value == null || value.isEmpty) {
-                  return 'Ingrese la comunidad';
-                }
-                return null;
-              },
-            ),
-            if (_latitud != null && _longitud != null) ...[
-              const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: AppColors.completed.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.location_on,
-                      color: AppColors.completed,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Ubicación: ${_latitud!.toStringAsFixed(4)}, ${_longitud!.toStringAsFixed(4)}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.completed,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-        );
-      },
+  Widget _buildSectionHint(String hint) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Text(
+        hint,
+        style: TextStyle(
+          fontSize: 13,
+          color: AppColors.textSecondary.withValues(alpha: 0.7),
+        ),
+      ),
     );
   }
 
   Widget _buildEventFields() {
     return Column(
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: CustomTextField(
-                label: 'Fecha *',
-                controller: _fechaController,
-                onTap: _selectDate,
-                readOnly: true,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Seleccione fecha';
-                  }
-                  return null;
-                },
+        Consumer<ReporteProvider>(
+          builder: (context, rp, child) {
+            return DropdownButtonFormField<int>(
+              initialValue: _selectedTipoEvento,
+              decoration: const InputDecoration(
+                labelText: 'Tipo de Evento *',
+                border: OutlineInputBorder(),
               ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: CustomTextField(
-                label: 'Hora',
-                controller: _horaController,
-                onTap: _selectTime,
-                readOnly: true,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        DropdownButtonFormField<int>(
-          initialValue: _selectedTipoEvento,
-          decoration: const InputDecoration(
-            labelText: 'Tipo de Evento *',
-            border: OutlineInputBorder(),
-          ),
-          items: const [
-            DropdownMenuItem(value: 1, child: Text('Inundación')),
-            DropdownMenuItem(value: 2, child: Text('Riada')),
-            DropdownMenuItem(value: 3, child: Text('Deslizamiento')),
-            DropdownMenuItem(value: 4, child: Text('Helada')),
-            DropdownMenuItem(value: 5, child: Text('Granizada')),
-            DropdownMenuItem(value: 6, child: Text('Sequía')),
-            DropdownMenuItem(value: 7, child: Text('Incendios')),
-            DropdownMenuItem(value: 8, child: Text('Otros')),
-          ],
-          onChanged: (value) {
-            setState(() {
-              _selectedTipoEvento = value;
-            });
-          },
-          validator: (value) {
-            if (value == null) return 'Seleccione tipo de evento';
-            return null;
+              items: rp.tiposEvento.isEmpty
+                  ? const [
+                      DropdownMenuItem(value: 1, child: Text('Inundacion')),
+                      DropdownMenuItem(value: 2, child: Text('Riada')),
+                      DropdownMenuItem(value: 3, child: Text('Deslizamiento')),
+                      DropdownMenuItem(value: 4, child: Text('Helada')),
+                      DropdownMenuItem(value: 5, child: Text('Granizada')),
+                      DropdownMenuItem(value: 6, child: Text('Sequia')),
+                      DropdownMenuItem(value: 7, child: Text('Incendios')),
+                      DropdownMenuItem(value: 8, child: Text('Otros')),
+                    ]
+                  : rp.tiposEvento
+                      .map((t) => DropdownMenuItem(
+                          value: t.idTipoEvento, child: Text(t.nombre)))
+                      .toList(),
+              onChanged: (value) {
+                setState(() {
+                  _selectedTipoEvento = value;
+                });
+              },
+              validator: (value) {
+                if (value == null) return 'Seleccione tipo de evento';
+                return null;
+              },
+            );
           },
         ),
         const SizedBox(height: 16),
         CustomTextField(
-          label: 'Descripción',
-          hint: 'Describa el evento...',
-          controller: _descripcionController,
-          maxLines: 4,
+          label: 'Fecha del Evento *',
+          controller: _fechaController,
+          onTap: _selectDate,
+          readOnly: true,
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Seleccione fecha';
+            }
+            return null;
+          },
+        ),
+        const SizedBox(height: 16),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Hora del Evento *',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: DropdownButtonFormField<int?>(
+                    initialValue: _horaNumero,
+                    decoration: const InputDecoration(
+                      hintText: 'Hr',
+                      border: OutlineInputBorder(),
+                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                    ),
+                    isExpanded: true,
+                    items: [
+                      const DropdownMenuItem(value: null, child: Text('--')),
+                            for (int i = 1; i <= 12; i++)
+                              DropdownMenuItem(
+                                value: i,
+                                child: Text('${i.toString().padLeft(2, '0')}:00'),
+                              ),
+                    ],
+                    onChanged: _onSelectHora,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _ampmBtn('AM', false),
+                const SizedBox(width: 4),
+                _ampmBtn('PM', true),
+              ],
+            ),
+          ],
         ),
       ],
     );
+  }
+
+  Widget _buildDescripcionField() {
+    return CustomTextField(
+      label: '',
+      hint: 'Ej: Inundacion por desborde de rio en la zona baja...',
+      controller: _descripcionController,
+      maxLines: 4,
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Ingrese una descripcion';
+        }
+        return null;
+      },
+    );
+  }
+
+  Widget _buildUbicacionSection() {
+    final items = <({String label, String value})>[
+      if (_departamentoController.text.isNotEmpty)
+        (label: 'Departamento', value: _departamentoController.text),
+      if (_provinciaController.text.isNotEmpty)
+        (label: 'Provincia', value: _provinciaController.text),
+      if (_municipioController.text.isNotEmpty)
+        (label: 'Municipio', value: _municipioController.text),
+      if (_comunidadController.text.isNotEmpty)
+        (label: 'Comunidad', value: _comunidadController.text),
+    ];
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.divider),
+      ),
+      color: AppColors.surface,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.location_on, size: 18, color: AppColors.primary),
+                const SizedBox(width: 8),
+                const Text(
+                  'Ubicación registrada',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppColors.completed.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Perfil',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.completed,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ...items.map((e) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    width: 100,
+                    child: Text(
+                      '${e.label}:',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                  Expanded(
+                    child: Text(
+                      e.value,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            )),
+            if (items.isEmpty)
+              const Padding(
+                padding: EdgeInsets.only(top: 4),
+                child: Text(
+                  'Complete su perfil para registrar ubicación.',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCoordinatesSection() {
+    final hasCoords = _latitud != null && _longitud != null;
+
+    Color precColor() {
+      if (_precision == null) return AppColors.textSecondary;
+      return _precision! <= 30 ? AppColors.completed : AppColors.pending;
+    }
+
+    String precText() {
+      if (_precision == null) return '';
+      return ' ± ${_precision!.toStringAsFixed(0)} m';
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildToggleRow(),
+          const SizedBox(height: 14),
+          _coordDisplayRow(hasCoords, precColor(), precText()),
+          const SizedBox(height: 14),
+          if (_coordsManual) _manualInputs() else _gpsButton(hasCoords),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildToggleRow() {
+    return Row(
+      children: [
+        _toggleBtn('GPS', Icons.my_location, false),
+        const SizedBox(width: 8),
+        _toggleBtn('Manual', Icons.edit, true),
+      ],
+    );
+  }
+
+  Widget _toggleBtn(String label, IconData icon, bool isManual) {
+    final selected = _coordsManual == isManual;
+    return Expanded(
+      child: OutlinedButton(
+        onPressed: () => setState(() => _coordsManual = isManual),
+        style: OutlinedButton.styleFrom(
+          backgroundColor: selected ? AppColors.primary.withValues(alpha: 0.1) : null,
+          foregroundColor: selected ? AppColors.primary : AppColors.textSecondary,
+          side: BorderSide(color: selected ? AppColors.primary : AppColors.divider),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, size: 16),
+            const SizedBox(width: 4),
+            Text(label, style: const TextStyle(fontSize: 13)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _gpsButton(bool hasCoords) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _obteniendoCoords ? null : _obtenerCoordenadasConPrecision,
+        icon: _obteniendoCoords
+            ? const SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2, color: AppColors.primary,
+                ),
+              )
+            : const Icon(Icons.my_location, size: 18),
+        label: Text(_obteniendoCoords
+            ? 'Buscando precision < 30 m...'
+            : hasCoords
+                ? 'Obtener nuevas coordenadas'
+                : 'Obtener coordenadas'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.primary,
+          padding: const EdgeInsets.symmetric(vertical: 12),
+        ),
+      ),
+    );
+  }
+
+  Widget _coordDisplayRow(bool hasCoords, Color precColor, String precText) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: hasCoords ? precColor.withValues(alpha: 0.08) : AppColors.background.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: hasCoords ? precColor.withValues(alpha: 0.3) : AppColors.divider),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            hasCoords ? Icons.location_on : Icons.location_off,
+            size: 18,
+            color: hasCoords ? precColor : AppColors.textSecondary,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: hasCoords
+                ? RichText(
+                    text: TextSpan(
+                      style: const TextStyle(fontSize: 13, fontFamily: 'monospace'),
+                      children: [
+                        TextSpan(
+                          text: '${_latitud!.toStringAsFixed(6)}, ${_longitud!.toStringAsFixed(6)}',
+                          style: TextStyle(fontWeight: FontWeight.w600, color: precColor),
+                        ),
+                        TextSpan(
+                          text: precText,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w400,
+                            color: precColor.withValues(alpha: 0.7),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Text(
+                    'Sin coordenadas',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+          ),
+          if (hasCoords)
+            GestureDetector(
+              onTap: () => setState(() {
+                _latitud = null;
+                _longitud = null;
+                _precision = null;
+                _latController.clear();
+                _lonController.clear();
+              }),
+              child: const Icon(Icons.close, size: 18, color: AppColors.error),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _manualInputs() {
+    return Row(
+      children: [
+        Expanded(
+          child: CustomTextField(
+            label: 'Latitud',
+            hint: 'Ej: -16.500000',
+            controller: _latController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+            onChanged: _aplicarManual,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: CustomTextField(
+            label: 'Longitud',
+            hint: 'Ej: -68.150000',
+            controller: _lonController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+            onChanged: _aplicarManual,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _aplicarManual(String _) {
+    final lat = double.tryParse(_latController.text.trim().replaceAll(',', '.'));
+    final lon = double.tryParse(_lonController.text.trim().replaceAll(',', '.'));
+    if (lat != null && lon != null) {
+      setState(() {
+        _latitud = lat;
+        _longitud = lon;
+        _precision = null;
+      });
+    }
   }
 
   Widget _buildPhotoSection() {
@@ -474,7 +805,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
               child: OutlinedButton.icon(
                 onPressed: _pickFromGallery,
                 icon: const Icon(Icons.photo_library),
-                label: const Text('Galería'),
+                label: const Text('Galeria'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.primary,
                   padding: const EdgeInsets.symmetric(vertical: 16),
@@ -499,9 +830,22 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
                       height: 100,
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(8),
-                        image: DecorationImage(
-                          image: NetworkImage(_imagenes[index]),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.file(
+                          File(_imagenes[index]),
+                          width: 100,
+                          height: 100,
                           fit: BoxFit.cover,
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            color: AppColors.surface,
+                            child: const Icon(
+                              Icons.broken_image,
+                              size: 40,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -539,40 +883,77 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
   }
 
   Widget _buildCategoriesSection() {
-    final categorias = [
-      {'id': 1, 'nombre': 'Niñas y Niños'},
-      {'id': 2, 'nombre': 'Adolescentes'},
-      {'id': 3, 'nombre': 'Mujeres Lactantes'},
-      {'id': 4, 'nombre': 'Mujeres Embarazadas'},
-      {'id': 5, 'nombre': 'Adultos Mayores'},
-      {'id': 6, 'nombre': 'Personas con Discapacidad'},
-      {'id': 7, 'nombre': 'Personas con Enfermedad Inhabilitante'},
-    ];
+    return Consumer<ReporteProvider>(
+      builder: (context, rp, child) {
+        final categorias = rp.categorias.isEmpty
+            ? [
+                {'id': 1, 'nombre': 'Ninas y Ninos'},
+                {'id': 2, 'nombre': 'Adolescentes'},
+                {'id': 3, 'nombre': 'Mujeres Lactantes'},
+                {'id': 4, 'nombre': 'Mujeres Embarazadas'},
+                {'id': 5, 'nombre': 'Adultos Mayores'},
+                {'id': 6, 'nombre': 'Personas con Discapacidad'},
+                {'id': 7, 'nombre': 'Personas con Enfermedad Inhabilitante'},
+              ]
+            : rp.categorias
+                .map((c) => {'id': c.idCategoria, 'nombre': c.nombre})
+                .toList();
 
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: categorias.map((cat) {
-        final isSelected = _categoriasSeleccionadas.contains(cat['id']);
-        return FilterChip(
-          label: Text(cat['nombre'] as String),
-          selected: isSelected,
-          onSelected: (selected) {
-            setState(() {
-              if (selected) {
-                _categoriasSeleccionadas.add(cat['id'] as int);
-              } else {
-                _categoriasSeleccionadas.remove(cat['id']);
-              }
-            });
-          },
-          selectedColor: AppColors.primary.withValues(alpha: 0.2),
-          checkmarkColor: AppColors.primary,
-          labelStyle: TextStyle(
-            color: isSelected ? AppColors.primary : AppColors.textSecondary,
-          ),
+        return Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: categorias.map((cat) {
+            final isSelected = _categoriasSeleccionadas.contains(cat['id']);
+            return FilterChip(
+              label: Text(cat['nombre'] as String),
+              selected: isSelected,
+              onSelected: (selected) {
+                setState(() {
+                  if (selected) {
+                    _categoriasSeleccionadas.add(cat['id'] as int);
+                  } else {
+                    _categoriasSeleccionadas.remove(cat['id']);
+                  }
+                });
+              },
+              selectedColor: AppColors.primary.withValues(alpha: 0.2),
+              checkmarkColor: AppColors.primary,
+              labelStyle: TextStyle(
+                color: isSelected ? AppColors.primary : AppColors.textSecondary,
+              ),
+            );
+          }).toList(),
         );
-      }).toList(),
+      },
+    );
+  }
+
+  Widget _buildVerifyBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.pending.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.pending.withValues(alpha: 0.3)),
+      ),
+      child: const Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, color: AppColors.pending, size: 20),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Importante: Toda la informacion proporcionada debe ser correcta y sera verificada por las autoridades correspondientes.',
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.textSecondary,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

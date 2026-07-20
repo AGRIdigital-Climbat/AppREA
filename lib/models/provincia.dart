@@ -3,14 +3,14 @@ import 'departamento.dart';
 class Provincia {
   final int id;
   final String codigoIne;
-  final int idDepartamento;
+  final int? idDepartamento;
   final String nombre;
   final Departamento? departamento;
 
   Provincia({
     required this.id,
     required this.codigoIne,
-    required this.idDepartamento,
+    this.idDepartamento,
     required this.nombre,
     this.departamento,
   });
@@ -31,7 +31,7 @@ class Provincia {
     return {
       'id': id,
       'codigo_ine': codigoIne,
-      'id_departamento': idDepartamento,
+      if (idDepartamento != null) 'id_departamento': idDepartamento,
       'nombre': nombre,
     };
   }
