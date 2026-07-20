@@ -18,18 +18,30 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
   bool _isProfileEditing = false;
+  bool _isSyncing = false;
   final _perfilTabKey = GlobalKey<PerfilTabState>();
+  late AnimationController _syncAnimController;
 
   @override
   void initState() {
     super.initState();
+    _syncAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 1),
+    )..repeat();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ReporteProvider>().initialize();
       context.read<ConnectivityProvider>().initialize();
     });
+  }
+
+  @override
+  void dispose() {
+    _syncAnimController.dispose();
+    super.dispose();
   }
 
   @override
@@ -362,32 +374,65 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (pendingReports.isEmpty || !connectivity.isConnected) {
                   return const SizedBox.shrink();
                 }
-                return ElevatedButton.icon(
-                  onPressed: () async {
-                    final messenger =
-                        ScaffoldMessenger.of(context);
-                    await reporte.sincronizarPendientes();
-                    if (mounted) {
-                      messenger.showSnackBar(
-                        const SnackBar(
-                          content: Text('Sincronizando reportes...'),
+                return _isSyncing
+                    ? ElevatedButton.icon(
+                        onPressed: null,
+                        icon: RotationTransition(
+                          turns: _syncAnimController,
+                          child: const Icon(Icons.sync, size: 16),
+                        ),
+                        label: const Text('Sincronizando...'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          textStyle: const TextStyle(fontSize: 13),
+                          backgroundColor: AppColors.primary.withValues(alpha: 0.6),
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.6),
+                          disabledForegroundColor: Colors.white70,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                      )
+                    : ElevatedButton.icon(
+                        onPressed: () async {
+                          setState(() => _isSyncing = true);
+                          final messenger = ScaffoldMessenger.of(context);
+                          try {
+                            await reporte.sincronizarPendientes();
+                            if (mounted) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text('Sincronización completada'),
+                                  backgroundColor: AppColors.completed,
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (mounted) {
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  content: Text('Error al sincronizar: $e'),
+                                  backgroundColor: AppColors.error,
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (mounted) setState(() => _isSyncing = false);
+                          }
+                        },
+                        icon: const Icon(Icons.sync, size: 16),
+                        label: Text('Sincronizar (${pendingReports.length})'),
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          textStyle: const TextStyle(fontSize: 13),
                           backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                       );
-                    }
-                  },
-                  icon: const Icon(Icons.sync, size: 16),
-                  label: const Text('Sincronizar'),
-                  style: ElevatedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                    textStyle: const TextStyle(fontSize: 13),
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                  ),
-                );
               },
             ),
           ],
