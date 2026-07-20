@@ -108,7 +108,6 @@ class SyncManager {
   }
 
   Future<void> _syncSingleReport(ReporteOffline reporte) async {
-    final data = await _buildPayload(reporte);
     final Reporte? response;
 
     if (reporte.idServer != null) {
@@ -117,6 +116,10 @@ class SyncManager {
         await _db.markAsDeleted(reporte.idLocal!);
         return;
       } else if (reporte.pendienteActualizacion) {
+        final data = reporte.toApiFormat();
+        if (reporte.fotografiaServerPath != null) {
+          data['fotografia'] = reporte.fotografiaServerPath;
+        }
         response = await _api.updateReporte(reporte.idServer!, data);
         await _db.updateEstado(reporte.idLocal!, response.idEstado, response.estado?.nombre);
         await _db.markAsSynced(reporte.idLocal!, reporte.idServer!);
@@ -124,14 +127,28 @@ class SyncManager {
         return;
       }
     } else {
-      response = await _api.createReporte(data);
+      final hasLocalImage = reporte.imagenes != null && reporte.imagenes!.isNotEmpty;
+
+      if (hasLocalImage) {
+        final data = _buildMultipartFields(reporte);
+        response = await _api.createReporteConFoto(
+          filePath: reporte.imagenes!.first,
+          data: data,
+        );
+      } else {
+        final data = reporte.toApiFormat();
+        if (reporte.fotografiaServerPath != null) {
+          data['fotografia'] = reporte.fotografiaServerPath;
+        }
+        response = await _api.createReporte(data);
+      }
+
       await _db.updateEstado(reporte.idLocal!, response.idEstado, response.estado?.nombre);
       await _db.markAsSynced(reporte.idLocal!, response.idReporte!);
     }
 
-    final fotoPath = data['fotografia'] as String?;
-    if (fotoPath != null && reporte.fotografiaServerPath == null) {
-      await _db.saveFotografiaServerPath(reporte.idLocal!, fotoPath);
+    if (response.fotografia != null && reporte.fotografiaServerPath == null) {
+      await _db.saveFotografiaServerPath(reporte.idLocal!, response.fotografia!);
     }
 
     if (response.departamento?.nombre != null ||
@@ -146,24 +163,22 @@ class SyncManager {
     }
   }
 
-  Future<Map<String, dynamic>> _buildPayload(ReporteOffline reporte) async {
-    final data = reporte.toApiFormat();
-    if (reporte.fotografiaServerPath != null) {
-      data['fotografia'] = reporte.fotografiaServerPath;
-    } else if (reporte.imagenes != null && reporte.imagenes!.isNotEmpty) {
-      final uploadResp = await _api.uploadFile(
-        filePath: reporte.imagenes!.first,
-        idMunicipio: reporte.municipioId,
-        comunidad: reporte.comunidad,
-      );
-      final uploadData = uploadResp['data'];
-      if (uploadData is Map && uploadData['path'] is String) {
-        data['fotografia'] = uploadData['path'] as String;
-      } else {
-        throw Exception('Upload succeeded but no path returned');
-      }
-    }
-    return data;
+  Map<String, dynamic> _buildMultipartFields(ReporteOffline reporte) {
+    return {
+      'id_usuario': reporte.usuarioId,
+      'id_departamento': reporte.departamentoId,
+      'id_provincia': reporte.provinciaId,
+      'id_municipio': reporte.municipioId,
+      'comunidad': reporte.comunidad,
+      'fecha_evento': reporte.fechaEvento,
+      'hora_evento': reporte.horaEvento,
+      'id_tipo_evento': reporte.tipoEventoId,
+      'coordenada_lat': reporte.coordenadaLat,
+      'coordenada_lon': reporte.coordenadaLon,
+      'descripcion': reporte.descripcion,
+      'id_estado': reporte.estadoId,
+      'categorias': reporte.categorias?.toString(),
+    };
   }
 
   Future<void> _handleSyncError(ReporteOffline reporte, String error) async {

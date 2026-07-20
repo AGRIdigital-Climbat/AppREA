@@ -1,5 +1,5 @@
 class ApiConfig {
-  static const String baseUrl = 'https://delayed-deluxe-terrorism-bare.trycloudflare.com/api/v1';
+  static const String baseUrl = 'https://electric-responsibilities-charlie-permitted.trycloudflare.com//api/v1';
   
   static const String authEndpoint = '$baseUrl/auth';
   static const String sharedEndpoint = '$baseUrl/shared';

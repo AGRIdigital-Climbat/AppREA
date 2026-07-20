@@ -219,6 +219,39 @@ class ApiService {
     return Reporte.fromJson(body['data']);
   }
 
+  Future<Reporte> createReporteConFoto({
+    required String filePath,
+    required Map<String, dynamic> data,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('${ApiConfig.reaEndpoint}/reportes/con-foto'),
+    );
+
+    if (_token != null) {
+      request.headers['Authorization'] = 'Bearer $_token';
+    }
+    request.headers['Accept'] = 'application/json';
+
+    final contentType = _getImageContentType(filePath);
+    request.files.add(await http.MultipartFile.fromPath(
+      'file',
+      filePath,
+      contentType: MediaType.parse(contentType),
+    ));
+
+    data.forEach((key, value) {
+      if (value != null) {
+        request.fields[key] = value.toString();
+      }
+    });
+
+    final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamedResponse);
+    final body = await _handleResponse(response);
+    return Reporte.fromJson(body['data']);
+  }
+
   Future<Reporte> updateReporte(int id, Map<String, dynamic> data) async {
     final response = await http.put(
       Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
