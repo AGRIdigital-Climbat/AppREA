@@ -5,14 +5,21 @@ import '../models/reporte_offline.dart';
 class ReporteCard extends StatelessWidget {
   final ReporteOffline reporte;
   final VoidCallback? onTap;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
+  final String? tipoEventoNombre;
 
   const ReporteCard({
     super.key,
     required this.reporte,
     this.onTap,
+    this.onEdit,
+    this.onDelete,
+    this.tipoEventoNombre,
   });
 
   Color _getBadgeColor() {
+    if (reporte.esBorrador) return Colors.orange.shade700;
     if (reporte.sincronizado && reporte.estadoNombre != null) {
       switch (reporte.estadoNombre!.toLowerCase()) {
         case 'pendiente':
@@ -35,6 +42,7 @@ class ReporteCard extends StatelessWidget {
   }
 
   IconData _getBadgeIcon() {
+    if (reporte.esBorrador) return Icons.edit_note;
     if (reporte.sincronizado && reporte.estadoNombre != null) {
       switch (reporte.estadoNombre!.toLowerCase()) {
         case 'pendiente':
@@ -57,6 +65,7 @@ class ReporteCard extends StatelessWidget {
   }
 
   String _getBadgeText() {
+    if (reporte.esBorrador) return 'Borrador';
     if (reporte.sincronizado) {
       return reporte.estadoNombre ?? 'Sincronizado';
     }
@@ -93,6 +102,36 @@ class ReporteCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   _buildSmallBadge(),
+                  if (!reporte.sincronizado || reporte.esBorrador) ...[
+                    if (onEdit != null) ...[
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: onEdit,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Icon(Icons.edit_outlined, size: 14, color: AppColors.primary),
+                        ),
+                      ),
+                    ],
+                    if (onDelete != null) ...[
+                      const SizedBox(width: 4),
+                      GestureDetector(
+                        onTap: onDelete,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: const Icon(Icons.delete_outline, size: 14, color: AppColors.error),
+                        ),
+                      ),
+                    ],
+                  ],
                 ],
               ),
               const SizedBox(height: 8),
@@ -115,6 +154,19 @@ class ReporteCard extends StatelessWidget {
                   ],
                 ],
               ),
+              if (tipoEventoNombre != null && tipoEventoNombre!.isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(Icons.warning_amber_rounded, size: 13, color: AppColors.pending),
+                    const SizedBox(width: 4),
+                    Text(
+                      tipoEventoNombre!,
+                      style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                    ),
+                  ],
+                ),
+              ],
               if (reporte.descripcion != null && reporte.descripcion!.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
@@ -160,7 +212,11 @@ class ReporteCard extends StatelessWidget {
     String text;
     Color color;
 
-    if (reporte.sincronizado) {
+    if (reporte.esBorrador) {
+      icon = Icons.edit_note;
+      text = 'Borrador - Toque para enviar o editar';
+      color = Colors.orange.shade700;
+    } else if (reporte.sincronizado) {
       icon = Icons.cloud_done;
       text = 'Sincronizado';
       color = AppColors.completed;

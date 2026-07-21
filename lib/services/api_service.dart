@@ -31,6 +31,31 @@ class ApiService {
     return headers;
   }
 
+  Future<http.Response> _requestWithRetry(
+    Future<http.Response> Function() request, {
+    int maxRetries = 2,
+  }) async {
+    http.Response? lastResponse;
+    for (int attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        lastResponse = await request();
+        if (lastResponse.statusCode != 502 &&
+            lastResponse.statusCode != 503 &&
+            lastResponse.statusCode != 504) {
+          return lastResponse;
+        }
+      } on SocketException {
+        if (attempt == maxRetries) rethrow;
+      } on http.ClientException {
+        if (attempt == maxRetries) rethrow;
+      } on HttpException {
+        if (attempt == maxRetries) rethrow;
+      }
+      await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
+    }
+    return lastResponse!;
+  }
+
   Future<Map<String, dynamic>> _handleResponse(http.Response response) async {
     if (response.body.isEmpty) {
       if (response.statusCode >= 200 && response.statusCode < 300) {
@@ -49,17 +74,19 @@ class ApiService {
   }
 
   Future<TokenResponse> login(String usuario, String contrasena) async {
-    final response = await http.post(
-      Uri.parse('${ApiConfig.authEndpoint}/login'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: jsonEncode({
-        'usuario': usuario,
-        'contrasena': contrasena,
-      }),
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.authEndpoint}/login'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'usuario': usuario,
+          'contrasena': contrasena,
+        }),
+      ).timeout(const Duration(seconds: 15))
+    );
     final body = await _handleResponse(response);
     return TokenResponse.fromJson(body);
   }
@@ -165,10 +192,12 @@ class ApiService {
     int skip = 0,
     int limit = 50,
   }) async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes/mis-resumen?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes/mis-resumen?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
     return (body['data'] as List)
         .map((json) => Map<String, dynamic>.from(json))
@@ -180,10 +209,12 @@ class ApiService {
     int skip = 0,
     int limit = 50,
   }) async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes/mis-reportes?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes/mis-reportes?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
     final body = await _handleResponse(response);
     return (body['data'] as List)
         .map((json) => Map<String, dynamic>.from(json))
@@ -210,11 +241,13 @@ class ApiService {
   }
 
   Future<Reporte> createReporte(Map<String, dynamic> data) async {
-    final response = await http.post(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes'),
-      headers: _headers,
-      body: jsonEncode(data),
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes'),
+        headers: _headers,
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 15))
+    );
     final body = await _handleResponse(response);
     return Reporte.fromJson(body['data']);
   }
@@ -223,41 +256,47 @@ class ApiService {
     required String filePath,
     required Map<String, dynamic> data,
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes/con-foto'),
-    );
+    Future<http.Response> doUpload() async {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes/con-foto'),
+      );
 
-    if (_token != null) {
-      request.headers['Authorization'] = 'Bearer $_token';
-    }
-    request.headers['Accept'] = 'application/json';
-
-    final contentType = _getImageContentType(filePath);
-    request.files.add(await http.MultipartFile.fromPath(
-      'file',
-      filePath,
-      contentType: MediaType.parse(contentType),
-    ));
-
-    data.forEach((key, value) {
-      if (value != null) {
-        request.fields[key] = value.toString();
+      if (_token != null) {
+        request.headers['Authorization'] = 'Bearer $_token';
       }
-    });
+      request.headers['Accept'] = 'application/json';
 
-    final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
-    final response = await http.Response.fromStream(streamedResponse);
+      final contentType = _getImageContentType(filePath);
+      request.files.add(await http.MultipartFile.fromPath(
+        'file',
+        filePath,
+        contentType: MediaType.parse(contentType),
+      ));
+
+      data.forEach((key, value) {
+        if (value != null) {
+          request.fields[key] = value.toString();
+        }
+      });
+
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+      return http.Response.fromStream(streamedResponse);
+    }
+
+    final response = await _requestWithRetry(doUpload);
     final body = await _handleResponse(response);
     return Reporte.fromJson(body['data']);
   }
 
   Future<Reporte> updateReporte(int id, Map<String, dynamic> data) async {
-    final response = await http.put(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
-      headers: _headers,
-      body: jsonEncode(data),
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
+        headers: _headers,
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 15))
+    );
     final body = await _handleResponse(response);
     return Reporte.fromJson(body['data']);
   }
@@ -319,10 +358,12 @@ class ApiService {
   }
 
   Future<List<TipoEvento>> getTiposEvento() async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.edanEndpoint}/tipo-evento'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/tipo-evento'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
     return (body['data'] as List)
         .map((json) => TipoEvento.fromJson(json))
@@ -330,10 +371,12 @@ class ApiService {
   }
 
   Future<List<Estado>> getEstados() async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.reaEndpoint}/estados'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.reaEndpoint}/estados'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
     return (body['data'] as List)
         .map((json) => Estado.fromJson(json))
@@ -341,10 +384,12 @@ class ApiService {
   }
 
   Future<List<Categoria>> getCategorias() async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.reaEndpoint}/categorias'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.reaEndpoint}/categorias'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
     return (body['data'] as List)
         .map((json) => Categoria.fromJson(json))

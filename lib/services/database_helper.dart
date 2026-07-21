@@ -20,7 +20,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
     );
@@ -53,6 +53,7 @@ class DatabaseHelper {
         sincronizado INTEGER DEFAULT 0,
         pendiente_eliminacion INTEGER DEFAULT 0,
         pendiente_actualizacion INTEGER DEFAULT 0,
+        es_borrador INTEGER DEFAULT 0,
         fecha_creacion TEXT NOT NULL,
         fecha_modificacion TEXT,
         intentos_sync INTEGER DEFAULT 0,
@@ -124,6 +125,9 @@ class DatabaseHelper {
       await db.execute('CREATE TABLE catalogo_categorias (id_categoria INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)');
       await db.execute('CREATE TABLE catalogo_tipos_evento (id_tipo_evento INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
     }
+    if (oldVersion < 6) {
+      await db.execute('ALTER TABLE reportes_offline ADD COLUMN es_borrador INTEGER DEFAULT 0');
+    }
   }
 
   Future<int> insertReporte(ReporteOffline reporte) async {
@@ -146,7 +150,7 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query(
       'reportes_offline',
-      where: 'sincronizado = 0',
+      where: 'sincronizado = 0 AND es_borrador = 0',
       orderBy: 'fecha_creacion ASC',
     );
     return maps.map((map) => ReporteOffline.fromMap(map)).toList();
@@ -207,6 +211,13 @@ class DatabaseHelper {
   Future<ReporteOffline?> getReporteByServerId(int idServer) async {
     final db = await database;
     final maps = await db.query('reportes_offline', where: 'id_server = ?', whereArgs: [idServer], limit: 1);
+    if (maps.isEmpty) return null;
+    return ReporteOffline.fromMap(maps.first);
+  }
+
+  Future<ReporteOffline?> getReporteByIdLocal(int idLocal) async {
+    final db = await database;
+    final maps = await db.query('reportes_offline', where: 'id_local = ?', whereArgs: [idLocal], limit: 1);
     if (maps.isEmpty) return null;
     return ReporteOffline.fromMap(maps.first);
   }

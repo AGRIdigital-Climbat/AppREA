@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:http/http.dart' as http;
+import '../config/api_config.dart';
 
 class ConnectivityService {
   static final ConnectivityService _instance = ConnectivityService._();
@@ -45,10 +46,22 @@ class ConnectivityService {
       if (results.isEmpty || results.first == ConnectivityResult.none) return false;
 
       final response = await http
-          .head(Uri.parse('https://clients3.google.com/generate_204'))
-          .timeout(const Duration(seconds: 5));
-      return response.statusCode == 204;
+          .head(Uri.parse(ApiConfig.baseUrl))
+          .timeout(const Duration(seconds: 8));
+      return response.statusCode > 0;
     } catch (e) {
+      return false;
+    }
+  }
+
+  Future<bool> checkNow() async {
+    try {
+      _isConnected = await _checkConnection();
+      _connectionController.add(_isConnected);
+      return _isConnected;
+    } catch (e) {
+      _isConnected = false;
+      _connectionController.add(false);
       return false;
     }
   }

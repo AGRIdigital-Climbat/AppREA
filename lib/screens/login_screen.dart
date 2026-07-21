@@ -65,25 +65,11 @@ class _LoginScreenState extends State<LoginScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Container(
+                  Image.asset(
+                    'assets/images/SINAGER.png',
                     width: 100,
                     height: 100,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: AppColors.primary.withValues(alpha: 0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
-                        ),
-                      ],
-                    ),
-                    child: const Icon(
-                      Icons.warning_amber_rounded,
-                      size: 50,
-                      color: Colors.white,
-                    ),
+                    fit: BoxFit.contain,
                   ),
                   const SizedBox(height: 32),
                   const Text(

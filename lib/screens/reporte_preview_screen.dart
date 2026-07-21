@@ -6,10 +6,9 @@ import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../config/theme.dart';
+import '../models/reporte_offline.dart';
 import '../providers/auth_provider.dart';
 import '../providers/reporte_provider.dart';
-import '../providers/connectivity_provider.dart';
-import '../models/reporte_offline.dart';
 import '../widgets/custom_button.dart';
 
 class ReportePreviewScreen extends StatelessWidget {
@@ -30,6 +29,7 @@ class ReportePreviewScreen extends StatelessWidget {
   final double? latitud;
   final double? longitud;
   final DateTime fechaCreacion;
+  final ReporteOffline? reporteExistente;
 
   ReportePreviewScreen({
     super.key,
@@ -50,6 +50,7 @@ class ReportePreviewScreen extends StatelessWidget {
     this.latitud,
     this.longitud,
     DateTime? fechaCreacion,
+    this.reporteExistente,
   }) : fechaCreacion = fechaCreacion ?? DateTime.now();
 
   String _getTipoEvento(int id, ReporteProvider rp) {
@@ -78,9 +79,22 @@ class ReportePreviewScreen extends StatelessWidget {
             _buildDocument(context),
             const SizedBox(height: 20),
             CustomButton(
-              text: 'Confirmar y Enviar',
+              text: 'Enviar reporte',
               onPressed: () => _showConfirmDialog(context),
               icon: Icons.send,
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => _saveDraft(context),
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Guardar como borrador'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange.shade700,
+                  side: BorderSide(color: Colors.orange.shade300),
+                ),
+              ),
             ),
             const SizedBox(height: 12),
             SizedBox(
@@ -427,7 +441,6 @@ class ReportePreviewScreen extends StatelessWidget {
   Future<void> _submitReport(BuildContext context) async {
     final authProvider = context.read<AuthProvider>();
     final reporteProvider = context.read<ReporteProvider>();
-    final connectivity = context.read<ConnectivityProvider>();
 
     if (!context.mounted) return;
 
@@ -451,6 +464,107 @@ class ReportePreviewScreen extends StatelessWidget {
       ),
     );
 
+    if (reporteExistente != null) {
+      final reporteActualizado = ReporteOffline(
+        idLocal: reporteExistente!.idLocal,
+        idServer: reporteExistente!.idServer,
+        usuarioId: reporteExistente!.usuarioId,
+        departamentoId: departamentoId,
+        provinciaId: provinciaId,
+        municipioId: municipioId,
+        comunidad: comunidad,
+        departamentoNombre: departamentoNombre.isNotEmpty ? departamentoNombre : null,
+        provinciaNombre: provinciaNombre.isNotEmpty ? provinciaNombre : null,
+        municipioNombre: municipioNombre.isNotEmpty ? municipioNombre : null,
+        fechaEvento: fechaEvento,
+        horaEvento: horaEvento,
+        tipoEventoId: tipoEventoId,
+        coordenadaLat: latitud,
+        coordenadaLon: longitud,
+        descripcion: descripcion,
+        categorias: categorias.isNotEmpty ? categorias : null,
+        imagenes: imagenes.isNotEmpty ? imagenes : null,
+        estadoId: reporteExistente!.estadoId,
+        fotografiaServerPath: reporteExistente!.fotografiaServerPath,
+        sincronizado: false,
+        pendienteEliminacion: false,
+        pendienteActualizacion: true,
+        fechaCreacion: reporteExistente!.fechaCreacion,
+      );
+
+      await reporteProvider.actualizarReporte(reporteActualizado);
+
+      if (context.mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reporte actualizado'),
+            backgroundColor: AppColors.completed,
+          ),
+        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    } else {
+      final reporte = ReporteOffline(
+        usuarioId: authProvider.userId!,
+        departamentoId: departamentoId,
+        provinciaId: provinciaId,
+        municipioId: municipioId,
+        comunidad: comunidad,
+        departamentoNombre: departamentoNombre.isNotEmpty ? departamentoNombre : null,
+        provinciaNombre: provinciaNombre.isNotEmpty ? provinciaNombre : null,
+        municipioNombre: municipioNombre.isNotEmpty ? municipioNombre : null,
+        fechaEvento: fechaEvento,
+        horaEvento: horaEvento,
+        tipoEventoId: tipoEventoId,
+        coordenadaLat: latitud,
+        coordenadaLon: longitud,
+        descripcion: descripcion,
+        categorias: categorias.isNotEmpty ? categorias : null,
+        imagenes: imagenes.isNotEmpty ? imagenes : null,
+        fechaCreacion: DateTime.now(),
+      );
+
+      final result = await reporteProvider.crearReporteConEnvio(reporte);
+
+      if (context.mounted) {
+        Navigator.of(context).pop();
+
+        String message;
+        Color bgColor;
+
+        switch (result) {
+          case CrearReporteResult.enviado:
+            message = 'Reporte enviado correctamente';
+            bgColor = AppColors.completed;
+            break;
+          case CrearReporteResult.pendiente:
+            message = 'Reporte guardado como pendiente';
+            bgColor = AppColors.pending;
+            break;
+          case CrearReporteResult.borrador:
+            message = 'Borrador guardado. Puede editarlo o enviarlo cuando quiera';
+            bgColor = Colors.orange.shade700;
+            break;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(message),
+            backgroundColor: bgColor,
+          ),
+        );
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
+    }
+  }
+
+  Future<void> _saveDraft(BuildContext context) async {
+    final authProvider = context.read<AuthProvider>();
+    final reporteProvider = context.read<ReporteProvider>();
+
+    if (!context.mounted) return;
+
     final reporte = ReporteOffline(
       usuarioId: authProvider.userId!,
       departamentoId: departamentoId,
@@ -468,21 +582,17 @@ class ReportePreviewScreen extends StatelessWidget {
       descripcion: descripcion,
       categorias: categorias.isNotEmpty ? categorias : null,
       imagenes: imagenes.isNotEmpty ? imagenes : null,
+      esBorrador: true,
       fechaCreacion: DateTime.now(),
     );
 
-    await reporteProvider.crearReporte(reporte);
+    await reporteProvider.guardarBorrador(reporte);
 
     if (context.mounted) {
-      Navigator.of(context).pop();
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            connectivity.isConnected
-                ? 'Reporte enviado exitosamente'
-                : 'Reporte guardado localmente',
-          ),
-          backgroundColor: AppColors.completed,
+          content: const Text('Borrador guardado. Puede editarlo o enviarlo cuando quiera'),
+          backgroundColor: Colors.orange.shade700,
         ),
       );
       Navigator.of(context).popUntil((route) => route.isFirst);

@@ -127,6 +127,11 @@ class SyncManager {
         return;
       }
     } else {
+      if (reporte.pendienteEliminacion) {
+        await _db.markAsDeleted(reporte.idLocal!);
+        return;
+      }
+
       final hasLocalImage = reporte.imagenes != null && reporte.imagenes!.isNotEmpty;
 
       if (hasLocalImage) {
@@ -192,12 +197,18 @@ class SyncManager {
   }
 
   Future<void> deleteReporte(int idLocal) async {
-    await _db.markAsPendingDeletion(idLocal);
-    _pendingCountController.add(await _getPendingCount());
+    final reporte = await _db.getReporteByIdLocal(idLocal);
 
-    if (_connectivity.isConnected) {
-      await syncPendingReports();
+    if (reporte != null && reporte.idServer == null) {
+      await _db.markAsDeleted(idLocal);
+    } else {
+      await _db.markAsPendingDeletion(idLocal);
+      if (_connectivity.isConnected) {
+        await syncPendingReports();
+      }
     }
+
+    _pendingCountController.add(await _getPendingCount());
   }
 
   Future<void> updateReporte(ReporteOffline reporte) async {

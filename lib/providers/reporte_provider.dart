@@ -13,6 +13,8 @@ import '../services/sync_manager.dart';
 import '../services/auth_service.dart';
 import '../services/connectivity_service.dart';
 
+enum CrearReporteResult { enviado, pendiente, borrador }
+
 class ReporteProvider extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
   final ApiService _api = ApiService.instance;
@@ -191,6 +193,112 @@ class ReporteProvider extends ChangeNotifier {
     if (ConnectivityService().isConnected) {
       await _syncManager.syncPendingReports();
     }
+  }
+
+  Future<CrearReporteResult> crearReporteConEnvio(ReporteOffline reporte) async {
+    await _db.insertReporte(reporte);
+
+    final userId = AuthService.instance.userId;
+    if (userId == null) {
+      _pendingCount++;
+      notifyListeners();
+      await loadReportes();
+      return CrearReporteResult.pendiente;
+    }
+
+    final reportes = await _db.getReportes(userId);
+    final inserted = reportes.lastWhere(
+      (r) => r.fechaCreacion.isAtSameMomentAs(reporte.fechaCreacion),
+      orElse: () => reporte,
+    );
+
+    if (!ConnectivityService().isConnected || inserted.idLocal == null) {
+      _pendingCount++;
+      notifyListeners();
+      await loadReportes();
+      return CrearReporteResult.pendiente;
+    }
+
+    try {
+      final hasLocalImage = inserted.imagenes != null && inserted.imagenes!.isNotEmpty;
+
+      if (hasLocalImage) {
+        final data = inserted.toApiFormat();
+        data['categorias'] = inserted.categorias?.toString();
+        final response = await _api.createReporteConFoto(
+          filePath: inserted.imagenes!.first,
+          data: data,
+        );
+        await _db.updateEstado(inserted.idLocal!, response.idEstado, response.estado?.nombre);
+        await _db.markAsSynced(inserted.idLocal!, response.idReporte!);
+        if (response.fotografia != null) {
+          await _db.saveFotografiaServerPath(inserted.idLocal!, response.fotografia!);
+        }
+      } else {
+        final data = inserted.toApiFormat();
+        if (inserted.fotografiaServerPath != null) {
+          data['fotografia'] = inserted.fotografiaServerPath;
+        }
+        final response = await _api.createReporte(data);
+        await _db.updateEstado(inserted.idLocal!, response.idEstado, response.estado?.nombre);
+        await _db.markAsSynced(inserted.idLocal!, response.idReporte!);
+      }
+
+      await loadReportes();
+      return CrearReporteResult.enviado;
+    } catch (e) {
+      debugPrint('[crearReporteConEnvio] Error enviando reporte: $e');
+      _pendingCount++;
+      notifyListeners();
+      await loadReportes();
+      return CrearReporteResult.pendiente;
+    }
+  }
+
+  Future<void> actualizarReporte(ReporteOffline reporte) async {
+    await _db.updateReporte(reporte);
+
+    if (ConnectivityService().isConnected) {
+      await _syncManager.syncPendingReports();
+    }
+
+    await loadReportes();
+  }
+
+  Future<void> guardarBorrador(ReporteOffline reporte) async {
+    final borrador = ReporteOffline(
+      idLocal: reporte.idLocal,
+      idServer: reporte.idServer,
+      usuarioId: reporte.usuarioId,
+      departamentoId: reporte.departamentoId,
+      provinciaId: reporte.provinciaId,
+      municipioId: reporte.municipioId,
+      comunidad: reporte.comunidad,
+      departamentoNombre: reporte.departamentoNombre,
+      provinciaNombre: reporte.provinciaNombre,
+      municipioNombre: reporte.municipioNombre,
+      fechaEvento: reporte.fechaEvento,
+      horaEvento: reporte.horaEvento,
+      tipoEventoId: reporte.tipoEventoId,
+      coordenadaLat: reporte.coordenadaLat,
+      coordenadaLon: reporte.coordenadaLon,
+      descripcion: reporte.descripcion,
+      estadoId: reporte.estadoId,
+      categorias: reporte.categorias,
+      imagenes: reporte.imagenes,
+      esBorrador: true,
+      sincronizado: false,
+      pendienteEliminacion: false,
+      pendienteActualizacion: false,
+      fechaCreacion: reporte.fechaCreacion,
+    );
+
+    if (borrador.idLocal != null) {
+      await _db.updateReporte(borrador);
+    } else {
+      await _db.insertReporte(borrador);
+    }
+    await loadReportes();
   }
 
   Future<void> eliminarReporte(int idLocal) async {

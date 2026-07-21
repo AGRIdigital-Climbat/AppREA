@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../config/theme.dart';
+import '../models/reporte_offline.dart';
 import '../services/auth_service.dart';
 import '../services/permission_service.dart';
 import '../services/location_service.dart';
@@ -14,7 +15,9 @@ import '../widgets/custom_text_field.dart';
 import 'reporte_preview_screen.dart';
 
 class ReporteFormScreen extends StatefulWidget {
-  const ReporteFormScreen({super.key});
+  final ReporteOffline? reporte;
+
+  const ReporteFormScreen({super.key, this.reporte});
 
   @override
   State<ReporteFormScreen> createState() => _ReporteFormScreenState();
@@ -53,10 +56,74 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
   @override
   void initState() {
     super.initState();
-    _fechaController.text =
-        '${_fechaEvento.day}/${_fechaEvento.month}/${_fechaEvento.year}';
-    _horaController.text = '';
-    _loadProfileData();
+
+    if (widget.reporte != null) {
+      _loadFromReporte(widget.reporte!);
+    } else {
+      _fechaController.text =
+          '${_fechaEvento.day}/${_fechaEvento.month}/${_fechaEvento.year}';
+      _horaController.text = '';
+      _loadProfileData();
+    }
+  }
+
+  void _loadFromReporte(ReporteOffline r) {
+    _selectedDepartamento = r.departamentoId;
+    _selectedProvincia = r.provinciaId;
+    _selectedMunicipio = r.municipioId;
+    _departamentoController.text = r.departamentoNombre ?? '';
+    _provinciaController.text = r.provinciaNombre ?? '';
+    _municipioController.text = r.municipioNombre ?? '';
+    _comunidadController.text = r.comunidad;
+    _selectedTipoEvento = r.tipoEventoId;
+    _descripcionController.text = r.descripcion ?? '';
+    _latitud = r.coordenadaLat;
+    _longitud = r.coordenadaLon;
+    _coordsManual = r.coordenadaLat != null;
+
+    if (r.imagenes != null && r.imagenes!.isNotEmpty) {
+      _imagenes.addAll(r.imagenes!);
+    }
+    if (r.categorias != null) {
+      _categoriasSeleccionadas.addAll(r.categorias!);
+    }
+
+    try {
+      _fechaEvento = DateTime.parse(r.fechaEvento);
+      _fechaController.text =
+          '${_fechaEvento.day}/${_fechaEvento.month}/${_fechaEvento.year}';
+    } catch (_) {
+      _fechaController.text = r.fechaEvento;
+    }
+
+    if (r.horaEvento != null && r.horaEvento!.isNotEmpty) {
+      _horaController.text = r.horaEvento!;
+      final horaText = r.horaEvento!;
+      final parts = horaText.split(':');
+      if (parts.length >= 1) {
+        final h24 = int.tryParse(parts[0]) ?? 0;
+        if (h24 == 0) {
+          _horaNumero = 12;
+          _esPM = false;
+        } else if (h24 == 12) {
+          _horaNumero = 12;
+          _esPM = true;
+        } else if (h24 > 12) {
+          _horaNumero = h24 - 12;
+          _esPM = true;
+        } else {
+          _horaNumero = h24;
+          _esPM = false;
+        }
+      }
+    }
+
+    if (_latitud != null) {
+      _latController.text = _latitud!.toStringAsFixed(6);
+    }
+    if (_longitud != null) {
+      _lonController.text = _longitud!.toStringAsFixed(6);
+    }
   }
 
   void _loadProfileData() {
@@ -282,6 +349,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
           categorias: _categoriasSeleccionadas,
           latitud: _latitud,
           longitud: _longitud,
+          reporteExistente: widget.reporte,
         ),
       ),
     );
@@ -292,7 +360,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: const Text('Nuevo Reporte'),
+        title: Text(widget.reporte != null ? 'Editar Reporte' : 'Nuevo Reporte'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
@@ -415,7 +483,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
         ),
         const SizedBox(height: 16),
         CustomTextField(
-          label: 'Fecha del Evento *',
+          label: 'Fecha inicial del Evento *',
           controller: _fechaController,
           onTap: _selectDate,
           readOnly: true,

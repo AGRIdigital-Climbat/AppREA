@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../config/theme.dart';
 import '../models/reporte_offline.dart';
 import '../providers/reporte_provider.dart';
+import 'reporte_form_screen.dart';
 
 class ReporteDetailScreen extends StatelessWidget {
   final ReporteOffline reporte;
@@ -47,7 +48,65 @@ class ReporteDetailScreen extends StatelessWidget {
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
-        child: _buildDocument(context),
+        child: Column(
+          children: [
+            if (reporte.esBorrador) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.shade300),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.edit_note, color: Colors.orange.shade700, size: 32),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Este reporte es un borrador',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.orange.shade800,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Puede editarlo o enviarlo cuando quiera.',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: Colors.orange.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => ReporteFormScreen(reporte: reporte),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.send, size: 18),
+                        label: const Text('Enviar reporte'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
+            _buildDocument(context),
+          ],
+        ),
       ),
     );
   }
@@ -340,9 +399,11 @@ class ReporteDetailScreen extends StatelessWidget {
         ),
       ),
       child: Text(
-        reporte.sincronizado
-            ? 'Reporte registrado en el sistema SINAGER-SAT.'
-            : 'Reporte pendiente de sincronizacion con el servidor.',
+        reporte.esBorrador
+            ? 'Este borrador no ha sido enviado al servidor.'
+            : reporte.sincronizado
+                ? 'Reporte registrado en el sistema SINAGER-SAT.'
+                : 'Reporte pendiente de sincronizacion con el servidor.',
         style: TextStyle(
           fontSize: 11,
           color: AppColors.textSecondary.withValues(alpha: 0.7),

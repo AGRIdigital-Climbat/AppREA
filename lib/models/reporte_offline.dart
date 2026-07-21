@@ -25,6 +25,7 @@ class ReporteOffline {
   final bool sincronizado;
   final bool pendienteEliminacion;
   final bool pendienteActualizacion;
+  final bool esBorrador;
   final DateTime fechaCreacion;
   final DateTime? fechaModificacion;
   final int intentosSync;
@@ -55,13 +56,14 @@ class ReporteOffline {
     this.sincronizado = false,
     this.pendienteEliminacion = false,
     this.pendienteActualizacion = false,
+    this.esBorrador = false,
     required this.fechaCreacion,
     this.fechaModificacion,
     this.intentosSync = 0,
     this.ultimoError,
   });
 
-  bool get necesitaSync => !sincronizado || pendienteEliminacion || pendienteActualizacion;
+  bool get necesitaSync => !esBorrador && (!sincronizado || pendienteEliminacion || pendienteActualizacion);
 
   Map<String, dynamic> toMap() {
     return {
@@ -89,6 +91,7 @@ class ReporteOffline {
       'sincronizado': sincronizado ? 1 : 0,
       'pendiente_eliminacion': pendienteEliminacion ? 1 : 0,
       'pendiente_actualizacion': pendienteActualizacion ? 1 : 0,
+      'es_borrador': esBorrador ? 1 : 0,
       'fecha_creacion': fechaCreacion.toIso8601String(),
       'fecha_modificacion': fechaModificacion?.toIso8601String(),
       'intentos_sync': intentosSync,
@@ -126,6 +129,7 @@ class ReporteOffline {
       sincronizado: map['sincronizado'] == 1,
       pendienteEliminacion: map['pendiente_eliminacion'] == 1,
       pendienteActualizacion: map['pendiente_actualizacion'] == 1,
+      esBorrador: map['es_borrador'] == 1,
       fechaCreacion: DateTime.parse(map['fecha_creacion']),
       fechaModificacion: map['fecha_modificacion'] != null
           ? DateTime.parse(map['fecha_modificacion'])
@@ -160,6 +164,7 @@ class ReporteOffline {
     bool? sincronizado,
     bool? pendienteEliminacion,
     bool? pendienteActualizacion,
+    bool? esBorrador,
     DateTime? fechaModificacion,
     int? intentosSync,
     String? ultimoError,
@@ -189,6 +194,7 @@ class ReporteOffline {
       pendienteEliminacion: pendienteEliminacion ?? this.pendienteEliminacion,
       pendienteActualizacion:
           pendienteActualizacion ?? this.pendienteActualizacion,
+      esBorrador: esBorrador ?? this.esBorrador,
       fechaCreacion: fechaCreacion,
       fechaModificacion: fechaModificacion ?? this.fechaModificacion,
       intentosSync: intentosSync ?? this.intentosSync,

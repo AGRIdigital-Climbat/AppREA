@@ -7,6 +7,7 @@ import '../providers/connectivity_provider.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../widgets/reporte_card.dart';
+import '../models/reporte_offline.dart';
 import 'reporte_form_screen.dart';
 import 'reporte_detail_screen.dart';
 import 'login_screen.dart';
@@ -229,18 +230,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ),
       child: Row(
         children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.shield_outlined,
-              size: 28,
-              color: Colors.white,
-            ),
+          Image.asset(
+            'assets/images/SINAGER.png',
+            width: 62,
+            height: 62,
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -468,6 +461,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ...pendingReports.take(3).map(
                 (r) => ReporteCard(
                   reporte: r,
+                  tipoEventoNombre: reporte.getTipoEventoNombre(r.tipoEventoId),
                   onTap: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(
@@ -476,6 +470,15 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       ),
                     );
                   },
+                  onEdit: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            ReporteFormScreen(reporte: r),
+                      ),
+                    );
+                  },
+                  onDelete: () => _confirmDelete(context, r),
                 ),
               ),
       ],
@@ -529,6 +532,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         else
           ReporteCard(
             reporte: syncedReports.first,
+            tipoEventoNombre: reporte.getTipoEventoNombre(syncedReports.first.tipoEventoId),
             onTap: () {
               Navigator.of(context).push(
                 MaterialPageRoute(
@@ -552,6 +556,30 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       onEditingChanged: (editing) {
         setState(() => _isProfileEditing = editing);
       },
+    );
+  }
+
+  void _confirmDelete(BuildContext context, ReporteOffline reporte) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Reporte'),
+        content: const Text('¿Está seguro de eliminar este reporte?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              context.read<ReporteProvider>().eliminarReporte(reporte.idLocal!);
+              Navigator.of(ctx).pop();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -682,16 +710,29 @@ class _ReportesHistorialTabState extends State<ReportesHistorialTab> {
                   itemCount: reportes.length,
                   itemBuilder: (context, index) {
                     final reporte = reportes[index];
-                    return ReporteCard(
-                      reporte: reporte,
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) =>
-                                ReporteDetailScreen(reporte: reporte),
-                          ),
-                        );
-                      },
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: ReporteCard(
+                        reporte: reporte,
+                        tipoEventoNombre: reporteProvider.getTipoEventoNombre(reporte.tipoEventoId),
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ReporteDetailScreen(reporte: reporte),
+                            ),
+                          );
+                        },
+                        onEdit: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ReporteFormScreen(reporte: reporte),
+                            ),
+                          );
+                        },
+                        onDelete: () => _confirmDelete(context, reporte),
+                      ),
                     );
                   },
                 ),
@@ -724,6 +765,30 @@ class _ReportesHistorialTabState extends State<ReportesHistorialTab> {
         backgroundColor: AppColors.surface,
         showCheckmark: false,
         padding: const EdgeInsets.symmetric(horizontal: 8),
+      ),
+    );
+  }
+
+  void _confirmDelete(BuildContext context, ReporteOffline reporte) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Reporte'),
+        content: const Text('¿Está seguro de eliminar este reporte?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              context.read<ReporteProvider>().eliminarReporte(reporte.idLocal!);
+              Navigator.of(ctx).pop();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Eliminar'),
+          ),
+        ],
       ),
     );
   }

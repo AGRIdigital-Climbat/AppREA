@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../providers/reporte_provider.dart';
 import '../widgets/reporte_card.dart';
+import '../models/reporte_offline.dart';
 import 'reporte_detail_screen.dart';
+import 'reporte_form_screen.dart';
 
 class ReportesListScreen extends StatefulWidget {
   const ReportesListScreen({super.key});
@@ -144,6 +146,7 @@ class _ReportesListScreenState extends State<ReportesListScreen> {
               final reporte = reportes[index];
               return ReporteCard(
                 reporte: reporte,
+                tipoEventoNombre: reporteProvider.getTipoEventoNombre(reporte.tipoEventoId),
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
@@ -151,11 +154,43 @@ class _ReportesListScreenState extends State<ReportesListScreen> {
                     ),
                   );
                 },
+                onEdit: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => ReporteFormScreen(reporte: reporte),
+                    ),
+                  );
+                },
+                onDelete: () => _confirmDelete(context, reporte),
               );
             },
           ),
         );
       },
+    );
+  }
+
+  void _confirmDelete(BuildContext context, ReporteOffline reporte) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar Reporte'),
+        content: const Text('¿Está seguro de eliminar este reporte?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              context.read<ReporteProvider>().eliminarReporte(reporte.idLocal!);
+              Navigator.of(ctx).pop();
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
     );
   }
 }
