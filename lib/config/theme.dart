@@ -15,10 +15,17 @@ class AppColors {
   static const card = Color(0xFFFFFFFF);
 
   // Semantic States
-  static const pending = Color(0xFFFFA000);
-  static const inProgress = Color(0xFF2196F3);
-  static const completed = Color(0xFF4CAF50);
+  static const enviado = Color(0xFF2196F3);
+  static const enRevision = Color(0xFFFFB300);
+  static const aprobado = Color(0xFF4CAF50);
   static const error = Color(0xFFB91C1C);
+  static const rechazado = Color(0xFFF44336);
+  static const cerrado = Color(0xFF607D8B);
+
+  // Utility colors (non-state)
+  static const pending = Color(0xFFFFA000);
+  static const completed = Color(0xFF4CAF50);
+  static const inProgress = Color(0xFF2196F3);
   static const closed = Color(0xFF6B7280);
   static const rejected = Color(0xFFDC2626);
 

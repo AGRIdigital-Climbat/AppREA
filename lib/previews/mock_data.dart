@@ -35,7 +35,7 @@ final mockReporteOfflineStats = ReporteOffline(
   tipoEventoId: 1,
   descripcion: 'Inundación por desborde de río en la zona baja de la comunidad.',
   estadoId: 1,
-  estadoNombre: 'Revisado',
+  estadoNombre: 'En revisión',
   categorias: [1, 4],
   sincronizado: true,
   fechaCreacion: DateTime(2026, 7, 15, 12, 0),

@@ -202,16 +202,16 @@ class ReporteDetailScreen extends StatelessWidget {
   Color _getReportStatusColor() {
     if (reporte.estadoNombre == null) return AppColors.textSecondary;
     switch (reporte.estadoNombre!.toLowerCase()) {
-      case 'pendiente':
-        return AppColors.pending;
-      case 'revisado':
-        return AppColors.primary;
-      case 'atendido':
-        return AppColors.completed;
-      case 'cerrado':
-        return AppColors.closed;
+      case 'enviado':
+        return AppColors.enviado;
+      case 'en revisión':
+        return AppColors.enRevision;
+      case 'aprobado':
+        return AppColors.aprobado;
       case 'rechazado':
-        return AppColors.rejected;
+        return AppColors.rechazado;
+      case 'cerrado':
+        return AppColors.cerrado;
       default:
         return AppColors.textSecondary;
     }
@@ -220,16 +220,16 @@ class ReporteDetailScreen extends StatelessWidget {
   IconData _getReportStatusIcon() {
     if (reporte.estadoNombre == null) return Icons.info_outline;
     switch (reporte.estadoNombre!.toLowerCase()) {
-      case 'pendiente':
-        return Icons.schedule;
-      case 'revisado':
+      case 'enviado':
+        return Icons.send;
+      case 'en revisión':
         return Icons.visibility;
-      case 'atendido':
+      case 'aprobado':
         return Icons.check_circle;
-      case 'cerrado':
-        return Icons.lock;
       case 'rechazado':
         return Icons.cancel;
+      case 'cerrado':
+        return Icons.lock;
       default:
         return Icons.info_outline;
     }

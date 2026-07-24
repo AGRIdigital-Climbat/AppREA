@@ -22,39 +22,39 @@ class ReporteCard extends StatelessWidget {
     if (reporte.esBorrador) return Colors.orange.shade700;
     if (reporte.sincronizado && reporte.estadoNombre != null) {
       switch (reporte.estadoNombre!.toLowerCase()) {
-        case 'pendiente':
-          return AppColors.pending;
-        case 'revisado':
-          return AppColors.primary;
-        case 'atendido':
-          return AppColors.completed;
-        case 'cerrado':
-          return AppColors.closed;
+        case 'enviado':
+          return AppColors.enviado;
+        case 'en revisión':
+          return AppColors.enRevision;
+        case 'aprobado':
+          return AppColors.aprobado;
         case 'rechazado':
-          return AppColors.rejected;
+          return AppColors.rechazado;
+        case 'cerrado':
+          return AppColors.cerrado;
         default:
           return AppColors.textSecondary;
       }
     }
-    if (reporte.sincronizado) return AppColors.completed;
+    if (reporte.sincronizado) return AppColors.aprobado;
     if (reporte.intentosSync >= 20) return AppColors.error;
-    return AppColors.pending;
+    return AppColors.enviado;
   }
 
   IconData _getBadgeIcon() {
     if (reporte.esBorrador) return Icons.edit_note;
     if (reporte.sincronizado && reporte.estadoNombre != null) {
       switch (reporte.estadoNombre!.toLowerCase()) {
-        case 'pendiente':
-          return Icons.schedule;
-        case 'revisado':
+        case 'enviado':
+          return Icons.send;
+        case 'en revisión':
           return Icons.visibility;
-        case 'atendido':
+        case 'aprobado':
           return Icons.check_circle;
-        case 'cerrado':
-          return Icons.lock;
         case 'rechazado':
           return Icons.cancel;
+        case 'cerrado':
+          return Icons.lock;
         default:
           return Icons.info_outline;
       }

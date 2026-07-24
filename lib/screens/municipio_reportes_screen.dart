@@ -155,15 +155,15 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
   Color _getEstadoColor(int? idEstado) {
     switch (idEstado) {
       case 1:
-        return AppColors.pending;
+        return AppColors.enviado;
       case 2:
-        return AppColors.inProgress;
+        return AppColors.enRevision;
       case 3:
-        return AppColors.completed;
+        return AppColors.aprobado;
       case 4:
-        return AppColors.closed;
+        return AppColors.rechazado;
       case 5:
-        return AppColors.rejected;
+        return AppColors.cerrado;
       default:
         return AppColors.textSecondary;
     }
