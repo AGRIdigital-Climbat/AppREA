@@ -126,6 +126,56 @@ class ApiService {
     return body;
   }
 
+  Future<int> verificarIdentidad({
+    required String carnet,
+    required String celular,
+    required int idDepartamento,
+    required int idProvincia,
+    required int idMunicipio,
+    required String comunidad,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.authEndpoint}/verificar-identidad'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'carnet': carnet.trim(),
+          'celular': celular.trim(),
+          'id_departamento': idDepartamento,
+          'id_provincia': idProvincia,
+          'id_municipio': idMunicipio,
+          'comunidad': comunidad.trim().toLowerCase(),
+        }),
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    final data = body['data'] as Map<String, dynamic>;
+    return data['id_usuario'] as int;
+  }
+
+  Future<void> cambiarContrasena({
+    required int idUsuario,
+    required String nuevaContrasena,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.authEndpoint}/cambiar-contrasena'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: jsonEncode({
+          'id_usuario': idUsuario,
+          'nueva_contrasena': nuevaContrasena,
+        }),
+      ).timeout(const Duration(seconds: 15))
+    );
+    await _handleResponse(response);
+  }
+
   Future<List<Departamento>> getDepartamentos() async {
     final response = await http.get(
       Uri.parse('${ApiConfig.sharedEndpoint}/departamentos'),
@@ -177,10 +227,12 @@ class ApiService {
     final params = <String>['skip=$skip', 'limit=$limit'];
     if (idEstado != null) params.add('id_estado=$idEstado');
     if (idMunicipio != null) params.add('id_municipio=$idMunicipio');
-    final response = await http.get(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes?${params.join('&')}'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
     return (body['data'] as List)
         .map((json) => Reporte.fromJson(json))

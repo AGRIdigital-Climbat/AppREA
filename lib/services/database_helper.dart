@@ -20,7 +20,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
     );
@@ -127,6 +127,9 @@ class DatabaseHelper {
     }
     if (oldVersion < 6) {
       await db.execute('ALTER TABLE reportes_offline ADD COLUMN es_borrador INTEGER DEFAULT 0');
+    }
+    if (oldVersion < 7) {
+      await db.execute('ALTER TABLE reportes_offline ADD COLUMN imagen_descargada INTEGER DEFAULT 0');
     }
   }
 
@@ -480,5 +483,36 @@ class DatabaseHelper {
       where: 'id_local = ?',
       whereArgs: [idLocal],
     );
+  }
+
+  Future<List<ReporteOffline>> getReportesSinDescargar(int usuarioId) async {
+    final db = await database;
+    final maps = await db.query(
+      'reportes_offline',
+      where: 'usuario_id = ? AND fotografia_server_path IS NOT NULL AND imagen_descargada = 0 AND (imagenes IS NULL OR imagenes = ?)',
+      whereArgs: [usuarioId, '[]'],
+    );
+    return maps.map((map) => ReporteOffline.fromMap(map)).toList();
+  }
+
+  Future<void> marcarImagenDescargada(int idLocal) async {
+    final db = await database;
+    await db.update(
+      'reportes_offline',
+      {'imagen_descargada': 1},
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<void> clearAll() async {
+    final db = await database;
+    await db.delete('reportes_offline');
+    await db.delete('borradores');
+    await db.delete('sincronizaciones');
+    await db.delete('catalogo_estados');
+    await db.delete('catalogo_categorias');
+    await db.delete('catalogo_tipos_evento');
+    _database = null;
   }
 }

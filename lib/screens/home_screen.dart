@@ -10,6 +10,7 @@ import '../widgets/reporte_card.dart';
 import '../models/reporte_offline.dart';
 import 'reporte_form_screen.dart';
 import 'reporte_detail_screen.dart';
+import 'municipio_reportes_screen.dart';
 import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -108,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           children: [
             _buildDashboardTab(),
             _buildHistorialTab(),
+            const MunicipioReportesTab(),
             _buildPerfilTab(),
           ],
         ),
@@ -128,14 +130,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.dashboard_outlined),
-            activeIcon: Icon(Icons.dashboard),
-            label: 'Dashboard',
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: 'Inicio',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.list_outlined),
             activeIcon: Icon(Icons.list),
             label: 'Historial',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.location_city_outlined),
+            activeIcon: Icon(Icons.location_city),
+            label: 'Municipio',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.person_outlined),
@@ -144,16 +151,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
         ],
       ),
-      floatingActionButton: _selectedIndex != 2
-          ? FloatingActionButton(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const ReporteFormScreen()),
-                );
-              },
-              child: const Icon(Icons.add),
-            )
-          : null,
     );
   }
 
@@ -321,17 +318,22 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ),
       child: Column(
         children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(height: 6),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: color,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 6),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(

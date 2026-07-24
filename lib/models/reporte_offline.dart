@@ -22,6 +22,7 @@ class ReporteOffline {
   final List<int>? categorias;
   final List<String>? imagenes;
   final String? fotografiaServerPath;
+  final bool imagenDescargada;
   final bool sincronizado;
   final bool pendienteEliminacion;
   final bool pendienteActualizacion;
@@ -53,6 +54,7 @@ class ReporteOffline {
     this.categorias,
     this.imagenes,
     this.fotografiaServerPath,
+    this.imagenDescargada = false,
     this.sincronizado = false,
     this.pendienteEliminacion = false,
     this.pendienteActualizacion = false,
@@ -88,6 +90,7 @@ class ReporteOffline {
       'categorias': categorias != null ? jsonEncode(categorias) : null,
       'imagenes': imagenes != null ? jsonEncode(imagenes) : null,
       'fotografia_server_path': fotografiaServerPath,
+      'imagen_descargada': imagenDescargada ? 1 : 0,
       'sincronizado': sincronizado ? 1 : 0,
       'pendiente_eliminacion': pendienteEliminacion ? 1 : 0,
       'pendiente_actualizacion': pendienteActualizacion ? 1 : 0,
@@ -126,6 +129,7 @@ class ReporteOffline {
           ? List<String>.from(jsonDecode(map['imagenes']))
           : null,
       fotografiaServerPath: map['fotografia_server_path'],
+      imagenDescargada: map['imagen_descargada'] == 1,
       sincronizado: map['sincronizado'] == 1,
       pendienteEliminacion: map['pendiente_eliminacion'] == 1,
       pendienteActualizacion: map['pendiente_actualizacion'] == 1,
@@ -190,6 +194,7 @@ class ReporteOffline {
       categorias: categorias,
       imagenes: imagenes,
       fotografiaServerPath: fotografiaServerPath ?? this.fotografiaServerPath,
+      imagenDescargada: imagenDescargada,
       sincronizado: sincronizado ?? this.sincronizado,
       pendienteEliminacion: pendienteEliminacion ?? this.pendienteEliminacion,
       pendienteActualizacion:

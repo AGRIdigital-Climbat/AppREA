@@ -66,6 +66,7 @@ class ReporteProvider extends ChangeNotifier {
         await fetchAndCacheCatalogs();
         _syncManager.pullServerUpdates().then((_) => loadReportes());
       }
+      descargarImagenesPendientes();
     }
   }
 
@@ -309,6 +310,44 @@ class ReporteProvider extends ChangeNotifier {
   Future<void> sincronizarPendientes() async {
     await _syncManager.syncPendingReports();
     await loadReportes();
+    descargarImagenesPendientes();
+  }
+
+  Future<void> descargarImagenesPendientes() async {
+    try {
+      final userId = AuthService.instance.userId;
+      if (userId == null) return;
+
+      final reportes = await _db.getReportesSinDescargar(userId);
+      if (reportes.isEmpty) return;
+
+      final appDir = await getApplicationDocumentsDirectory();
+      final reportesDir = Directory('${appDir.path}/reportes');
+      if (!await reportesDir.exists()) {
+        await reportesDir.create(recursive: true);
+      }
+
+      for (final reporte in reportes) {
+        if (reporte.fotografiaServerPath == null ||
+            reporte.fotografiaServerPath!.isEmpty) continue;
+
+        try {
+          final serverPath = reporte.fotografiaServerPath!;
+          final fileName = '${reporte.idServer}_${serverPath.split('/').last}';
+          final savePath = '${reportesDir.path}/$fileName';
+
+          final downloaded = await _api.downloadImage(serverPath, savePath);
+          if (downloaded != null) {
+            await _db.updateReporteLocalImage(reporte.idServer!, downloaded);
+            await _db.marcarImagenDescargada(reporte.idLocal!);
+          }
+        } catch (_) {
+          // No marcar — queda pendiente para el próximo intento
+        }
+      }
+    } catch (_) {
+      // Error general — no bloquea la app
+    }
   }
 
   Future<int> refreshFromServer() async {
@@ -316,6 +355,7 @@ class ReporteProvider extends ChangeNotifier {
     await fetchAndCacheCatalogs();
     await loadReportes();
     await loadCatalogsLocal();
+    descargarImagenesPendientes();
     return result;
   }
 
@@ -364,6 +404,10 @@ class ReporteProvider extends ChangeNotifier {
               final downloaded = await _api.downloadImage(serverPath, savePath);
               if (downloaded != null) {
                 await _db.updateReporteLocalImage(data['id_reporte'] as int, downloaded);
+                final reporte = await _db.getReporteByServerId(data['id_reporte'] as int);
+                if (reporte != null) {
+                  await _db.marcarImagenDescargada(reporte.idLocal!);
+                }
                 imagenesCount++;
               }
             }

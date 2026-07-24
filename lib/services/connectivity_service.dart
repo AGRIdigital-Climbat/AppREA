@@ -14,6 +14,7 @@ class ConnectivityService {
 
   Stream<bool> get connectionStream => _connectionController.stream;
   bool _isConnected = false;
+  Timer? _periodicTimer;
 
   bool get isConnected => _isConnected;
 
@@ -33,9 +34,17 @@ class ConnectivityService {
           _isConnected = connected;
           _connectionController.add(connected);
         }
-      } catch (e) {
-        // Silenciar errores de conectividad
-      }
+      } catch (e) {}
+    });
+
+    _periodicTimer = Timer.periodic(const Duration(seconds: 30), (_) async {
+      try {
+        final connected = await _checkConnection();
+        if (_isConnected != connected) {
+          _isConnected = connected;
+          _connectionController.add(connected);
+        }
+      } catch (e) {}
     });
   }
 
@@ -47,7 +56,7 @@ class ConnectivityService {
 
       final response = await http
           .head(Uri.parse(ApiConfig.baseUrl))
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 5));
       return response.statusCode > 0;
     } catch (e) {
       return false;
@@ -67,6 +76,7 @@ class ConnectivityService {
   }
 
   void dispose() {
+    _periodicTimer?.cancel();
     _connectionController.close();
   }
 }

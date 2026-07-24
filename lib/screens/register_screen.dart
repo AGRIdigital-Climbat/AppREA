@@ -150,8 +150,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 32),
                 CustomTextField(
-                  label: 'Nombre completo',
-                  hint: 'Ingrese su nombre',
+                  label: 'Nombre y apellido completo',
+                  hint: 'Ej. Juan Perez',
                   controller: _nombreController,
                   textCapitalization: TextCapitalization.words,
                   validator: (value) {
@@ -164,7 +164,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 16),
                 CustomTextField(
                   label: 'Carnet de identidad (será tu usuario)',
-                  hint: 'Ingrese su carnet',
+                  hint: 'Solo número',
                   controller: _carnetController,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
@@ -183,8 +183,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
-                  label: 'Contraseña',
-                  hint: 'Ingrese una contraseña',
+                  label: 'Contraseña nueva',
+                  hint: 'Min. 6 caracteres',
                   controller: _contrasenaController,
                   obscureText: _obscurePassword,
                   suffixIcon: IconButton(
@@ -237,8 +237,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
-                  label: 'Celular',
-                  hint: 'Ingrese su celular',
+                  label: 'Número de celular',
+                  hint: 'Ej. 76000000',
                   controller: _celularController,
                   keyboardType: TextInputType.phone,
                 ),

@@ -2,6 +2,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
+import '../services/database_helper.dart';
+import '../services/image_service.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._();
@@ -48,12 +50,31 @@ class AuthService {
           .timeout(const Duration(seconds: 3));
 
       if (token != null && userId != null) {
+        final idMunicipio = _prefs!.getInt('profile_id_municipio');
+        final municipioNombre = _prefs!.getString('profile_municipio_nombre');
+        final idDepartamento = _prefs!.getInt('profile_id_departamento');
+        final departamentoNombre = _prefs!.getString('profile_departamento_nombre');
+        final idProvincia = _prefs!.getInt('profile_id_provincia');
+        final provinciaNombre = _prefs!.getString('profile_provincia_nombre');
+        final celular = _prefs!.getString('profile_celular');
+        final carnet = _prefs!.getString('profile_carnet');
+        final comunidad = _prefs!.getString('profile_comunidad');
+
         _currentToken = TokenResponse(
           accessToken: token,
           tokenType: 'bearer',
           userId: int.parse(userId),
           usuario: usuario ?? '',
           nombre: nombre ?? '',
+          idMunicipio: idMunicipio,
+          municipioNombre: municipioNombre,
+          idDepartamento: idDepartamento,
+          departamentoNombre: departamentoNombre,
+          idProvincia: idProvincia,
+          provinciaNombre: provinciaNombre,
+          celular: celular,
+          carnet: carnet,
+          comunidad: comunidad,
         );
         _api.setToken(token);
       }
@@ -201,5 +222,8 @@ class AuthService {
     await _prefs!.remove('profile_provincia_nombre');
     await _prefs!.remove('profile_id_municipio');
     await _prefs!.remove('profile_municipio_nombre');
+
+    await DatabaseHelper.instance.clearAll();
+    await ImageService().clearAllImages();
   }
 }
