@@ -169,6 +169,23 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
     }
   }
 
+  IconData _getEstadoIcon(int? idEstado) {
+    switch (idEstado) {
+      case 1:
+        return Icons.send;
+      case 2:
+        return Icons.visibility;
+      case 3:
+        return Icons.check_circle;
+      case 4:
+        return Icons.cancel;
+      case 5:
+        return Icons.lock;
+      default:
+        return Icons.help_outline;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -429,13 +446,20 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
                         color: estadoColor.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Text(
-                        r.estado?.nombre ?? 'Enviado',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: estadoColor,
-                        ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_getEstadoIcon(r.idEstado), size: 12, color: estadoColor),
+                          const SizedBox(width: 4),
+                          Text(
+                            r.estado?.nombre ?? 'Enviado',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: estadoColor,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -898,13 +922,20 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
                             color: estadoColor.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Text(
-                            r.estado?.nombre ?? 'Enviado',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: estadoColor,
-                            ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(_getEstadoIcon(r.idEstado), size: 14, color: estadoColor),
+                              const SizedBox(width: 4),
+                              Text(
+                                r.estado?.nombre ?? 'Enviado',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: estadoColor,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
