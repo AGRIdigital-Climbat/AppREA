@@ -16,11 +16,15 @@ class AuthService {
 
   TokenResponse? _currentToken;
   String? _lastError;
+  int? _idRol;
+  String? _rolName;
 
   TokenResponse? get currentToken => _currentToken;
   String? get lastError => _lastError;
   bool get isAuthenticated => _currentToken != null;
   int? get userId => _currentToken?.userId;
+  int? get idRol => _idRol;
+  String? get rolName => _rolName;
   String? get userName {
     final nombre = _prefs?.getString('profile_nombre');
     return nombre;
@@ -48,8 +52,16 @@ class AuthService {
       final nombre = await _storage
           .read(key: 'nombre')
           .timeout(const Duration(seconds: 3));
+      final idRolStr = await _storage
+          .read(key: 'id_rol')
+          .timeout(const Duration(seconds: 3));
+      final rolName = await _storage
+          .read(key: 'rol_name')
+          .timeout(const Duration(seconds: 3));
 
       if (token != null && userId != null) {
+        _idRol = idRolStr != null ? int.tryParse(idRolStr) : null;
+        _rolName = rolName;
         final idMunicipio = _prefs!.getInt('profile_id_municipio');
         final municipioNombre = _prefs!.getString('profile_municipio_nombre');
         final idDepartamento = _prefs!.getInt('profile_id_departamento');
@@ -125,6 +137,11 @@ class AuthService {
       await _storage.write(key: 'user_id', value: token.userId.toString());
       await _storage.write(key: 'usuario', value: token.usuario);
       await _storage.write(key: 'nombre', value: token.nombre);
+      await _storage.write(key: 'id_rol', value: token.idRol?.toString() ?? '');
+      await _storage.write(key: 'rol_name', value: token.rol ?? '');
+
+      _idRol = token.idRol;
+      _rolName = token.rol;
 
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool('has_logged_in', true);
@@ -202,12 +219,16 @@ class AuthService {
 
   Future<void> logout() async {
     _currentToken = null;
+    _idRol = null;
+    _rolName = null;
     _api.setToken(null);
 
     await _storage.delete(key: 'auth_token');
     await _storage.delete(key: 'user_id');
     await _storage.delete(key: 'usuario');
     await _storage.delete(key: 'nombre');
+    await _storage.delete(key: 'id_rol');
+    await _storage.delete(key: 'rol_name');
 
     _prefs ??= await SharedPreferences.getInstance();
     await _prefs!.setBool('has_logged_in', false);

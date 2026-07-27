@@ -12,6 +12,10 @@ class AuthProvider extends ChangeNotifier {
   bool get isAuthenticated => _authService.isAuthenticated;
   String? get userName => _authService.userName;
   int? get userId => _authService.userId;
+  int? get idRol => _authService.idRol;
+  String? get rolName => _authService.rolName;
+  bool get isUGR => _authService.idRol != null && _authService.idRol != 7;
+  bool get canAccessEDAN => isUGR;
 
   Future<void> initialize() async {
     await _authService.initialize();
