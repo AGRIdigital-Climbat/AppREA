@@ -7,7 +7,7 @@ import '../providers/connectivity_provider.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../widgets/reporte_card.dart';
-import '../widgets/app_side_menu.dart';
+import '../widgets/app_drawer.dart';
 import '../models/reporte_offline.dart';
 import 'reporte_form_screen.dart';
 import 'reporte_detail_screen.dart';
@@ -26,7 +26,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   int _selectedIndex = 0;
   bool _isProfileEditing = false;
   bool _isSyncing = false;
-  bool _isMenuOpen = false;
   final _perfilTabKey = GlobalKey<PerfilTabState>();
   late AnimationController _syncAnimController;
 
@@ -54,7 +53,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return Consumer<AuthProvider>(
       builder: (context, auth, child) {
         final canAccessEDAN = auth.canAccessEDAN;
-        final menuItems = _buildMenuItems(canAccessEDAN);
 
         final tabs = <Widget>[
           _buildDashboardTab(),
@@ -68,128 +66,123 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           _selectedIndex = 0;
         }
 
+        final bottomNavItems = <BottomNavigationBarItem>[
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.home_outlined),
+            activeIcon: Icon(Icons.home),
+            label: 'Inicio',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.list_outlined),
+            activeIcon: Icon(Icons.list),
+            label: 'Historial',
+          ),
+          if (canAccessEDAN)
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.description_outlined),
+              activeIcon: Icon(Icons.description),
+              label: 'EDAN',
+            ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.location_city_outlined),
+            activeIcon: Icon(Icons.location_city),
+            label: 'Municipio',
+          ),
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.person_outlined),
+            activeIcon: Icon(Icons.person),
+            label: 'Perfil',
+          ),
+        ];
+
         return Scaffold(
           backgroundColor: AppColors.background,
-          body: Row(
-            children: [
-              AppSideMenu(
-                isExpanded: _isMenuOpen,
-                onToggle: () => setState(() => _isMenuOpen = !_isMenuOpen),
-                selectedIndex: _selectedIndex,
-                onItemTap: (index) {
-                  setState(() {
-                    _selectedIndex = index;
-                    if (_isProfileEditing) {
-                      _isProfileEditing = false;
-                      _perfilTabKey.currentState?.resetEditing();
-                    }
-                  });
-                },
-                userName: auth.userName ?? 'Usuario',
-                roleName: auth.rolName ?? 'Responsable Local',
-                items: menuItems,
-                onLogout: () => _handleLogoutFromMenu(context),
+          drawer: AppDrawer(
+            userName: auth.userName ?? 'Usuario',
+            roleName: auth.rolName ?? 'Responsable Local',
+            canAccessEDAN: canAccessEDAN,
+            onEDANTap: () {
+              if (canAccessEDAN) {
+                setState(() => _selectedIndex = 2);
+              }
+            },
+            onLogout: () => _handleLogout(context),
+          ),
+          appBar: AppBar(
+            leading: Builder(
+              builder: (context) => IconButton(
+                onPressed: () => Scaffold.of(context).openDrawer(),
+                icon: const Icon(Icons.menu_rounded, size: 24),
               ),
-              const VerticalDivider(width: 1, thickness: 1),
-              Expanded(
-                child: Column(
-                  children: [
-                    _buildTopBar(auth),
-                    Expanded(
-                      child: IndexedStack(
-                        index: _selectedIndex,
-                        children: tabs,
+            ),
+            title: Text(_getTabTitle(canAccessEDAN)),
+            actions: [
+              Consumer<ConnectivityProvider>(
+                builder: (context, connectivity, child) {
+                  final isOnline = connectivity.isConnected;
+                  return Container(
+                    margin: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isOnline ? AppColors.completed : Colors.white,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isOnline ? AppColors.completed : AppColors.error,
+                        width: 1.5,
                       ),
                     ),
-                  ],
-                ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isOnline ? Icons.wifi : Icons.wifi_off,
+                          size: 12,
+                          color: isOnline ? Colors.white : AppColors.error,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          isOnline ? 'En linea' : 'Sin conexion',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isOnline ? Colors.white : AppColors.error,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
             ],
+          ),
+          body: SafeArea(
+            child: IndexedStack(
+              index: _selectedIndex,
+              children: tabs,
+            ),
+          ),
+          bottomNavigationBar: BottomNavigationBar(
+            currentIndex: _selectedIndex,
+            onTap: (index) {
+              setState(() {
+                _selectedIndex = index;
+                if (_isProfileEditing) {
+                  _isProfileEditing = false;
+                  _perfilTabKey.currentState?.resetEditing();
+                }
+              });
+            },
+            selectedItemColor: AppColors.primary,
+            unselectedItemColor: AppColors.textSecondary,
+            type: BottomNavigationBarType.fixed,
+            items: bottomNavItems,
           ),
         );
       },
     );
   }
 
-  Widget _buildTopBar(AuthProvider auth) {
-    return Container(
-      height: 48,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          if (_isProfileEditing)
-            IconButton(
-              onPressed: () {
-                setState(() => _isProfileEditing = false);
-              },
-              icon: const Icon(Icons.arrow_back_ios, size: 20),
-              padding: EdgeInsets.zero,
-            )
-          else
-            const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _isProfileEditing
-                  ? 'Editar perfil'
-                  : _getSelectedTabTitle(auth.canAccessEDAN),
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: AppColors.textPrimary,
-              ),
-            ),
-          ),
-          Consumer<ConnectivityProvider>(
-            builder: (context, connectivity, child) {
-              final isOnline = connectivity.isConnected;
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isOnline ? AppColors.completed : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isOnline ? AppColors.completed : AppColors.error,
-                    width: 1.5,
-                  ),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      isOnline ? Icons.wifi : Icons.wifi_off,
-                      size: 12,
-                      color: isOnline ? Colors.white : AppColors.error,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      isOnline ? 'En linea' : 'Sin conexion',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: isOnline ? Colors.white : AppColors.error,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _getSelectedTabTitle(bool canAccessEDAN) {
+  String _getTabTitle(bool canAccessEDAN) {
     switch (_selectedIndex) {
       case 0:
         return 'REA - Inicio';
@@ -206,49 +199,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
-  List<SideMenuItem> _buildMenuItems(bool canAccessEDAN) {
-    final items = <SideMenuItem>[];
-
-    items.add(const SideMenuItem(
-      icon: Icons.home_outlined,
-      activeIcon: Icons.home,
-      title: 'Inicio',
-      sectionTitle: 'REA',
-    ));
-
-    items.add(const SideMenuItem(
-      icon: Icons.list_outlined,
-      activeIcon: Icons.list,
-      title: 'Historial',
-    ));
-
-    if (canAccessEDAN) {
-      items.add(const SideMenuItem(
-        icon: Icons.description_outlined,
-        activeIcon: Icons.description,
-        title: 'Reportes EDAN',
-        sectionTitle: 'EDAN',
-        showDivider: true,
-      ));
-    }
-
-    items.add(const SideMenuItem(
-      icon: Icons.location_city_outlined,
-      activeIcon: Icons.location_city,
-      title: 'Municipio',
-      sectionTitle: 'General',
-    ));
-
-    items.add(const SideMenuItem(
-      icon: Icons.person_outlined,
-      activeIcon: Icons.person,
-      title: 'Perfil',
-    ));
-
-    return items;
-  }
-
-  Future<void> _handleLogoutFromMenu(BuildContext context) async {
+  Future<void> _handleLogout(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
