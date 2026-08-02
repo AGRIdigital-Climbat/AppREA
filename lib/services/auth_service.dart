@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/usuario.dart';
@@ -18,6 +20,7 @@ class AuthService {
   String? _lastError;
   int? _idRol;
   String? _rolName;
+  dynamic _permisos;
 
   TokenResponse? get currentToken => _currentToken;
   String? get lastError => _lastError;
@@ -25,10 +28,13 @@ class AuthService {
   int? get userId => _currentToken?.userId;
   int? get idRol => _idRol;
   String? get rolName => _rolName;
+  dynamic get permisos => _permisos;
   String? get userName {
     final nombre = _prefs?.getString('profile_nombre');
     return nombre;
   }
+  String? get correo => _prefs?.getString('profile_correo');
+  String? get cargo => _prefs?.getString('profile_cargo');
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
@@ -58,10 +64,17 @@ class AuthService {
       final rolName = await _storage
           .read(key: 'rol_name')
           .timeout(const Duration(seconds: 3));
+      final permisosStr = await _storage
+          .read(key: 'permisos')
+          .timeout(const Duration(seconds: 3));
 
       if (token != null && userId != null) {
         _idRol = idRolStr != null ? int.tryParse(idRolStr) : null;
         _rolName = rolName;
+        if (permisosStr != null) {
+          final decoded = _decodePermisos(permisosStr);
+          _permisos = decoded;
+        }
         final idMunicipio = _prefs!.getInt('profile_id_municipio');
         final municipioNombre = _prefs!.getString('profile_municipio_nombre');
         final idDepartamento = _prefs!.getInt('profile_id_departamento');
@@ -71,6 +84,8 @@ class AuthService {
         final celular = _prefs!.getString('profile_celular');
         final carnet = _prefs!.getString('profile_carnet');
         final comunidad = _prefs!.getString('profile_comunidad');
+        final correo = _prefs!.getString('profile_correo');
+        final cargo = _prefs!.getString('profile_cargo');
 
         _currentToken = TokenResponse(
           accessToken: token,
@@ -87,6 +102,8 @@ class AuthService {
           celular: celular,
           carnet: carnet,
           comunidad: comunidad,
+          correo: correo,
+          cargo: cargo,
         );
         _api.setToken(token);
       }
@@ -109,6 +126,8 @@ class AuthService {
     data['provincia_nombre'] = _prefs!.getString('profile_provincia_nombre');
     data['id_municipio'] = _prefs!.getInt('profile_id_municipio');
     data['municipio_nombre'] = _prefs!.getString('profile_municipio_nombre');
+    data['correo'] = _prefs!.getString('profile_correo') ?? '';
+    data['cargo'] = _prefs!.getString('profile_cargo') ?? '';
     return data;
   }
 
@@ -125,6 +144,8 @@ class AuthService {
     if (profile['provincia_nombre'] != null) _prefs!.setString('profile_provincia_nombre', profile['provincia_nombre'] as String);
     if (profile['id_municipio'] != null) _prefs!.setInt('profile_id_municipio', profile['id_municipio'] as int);
     if (profile['municipio_nombre'] != null) _prefs!.setString('profile_municipio_nombre', profile['municipio_nombre'] as String);
+    if (profile['correo'] != null) _prefs!.setString('profile_correo', profile['correo'] as String);
+    if (profile['cargo'] != null) _prefs!.setString('profile_cargo', profile['cargo'] as String);
   }
 
   Future<bool> login(String usuario, String contrasena) async {
@@ -142,15 +163,21 @@ class AuthService {
 
       _idRol = token.idRol;
       _rolName = token.rol;
+      _permisos = token.permisos;
 
       _prefs ??= await SharedPreferences.getInstance();
       await _prefs!.setBool('has_logged_in', true);
+
+      final permisosJson = jsonEncode(token.permisos);
+      await _storage.write(key: 'permisos', value: permisosJson);
 
       await saveProfileLocally({
         'nombre': token.nombre,
         'celular': token.celular ?? '',
         'carnet': token.carnet ?? token.usuario,
         'comunidad': token.comunidad ?? '',
+        'correo': token.correo ?? '',
+        'cargo': token.cargo ?? '',
         'usuario': token.usuario,
         'id_departamento': token.idDepartamento,
         'departamento_nombre': token.departamentoNombre,
@@ -174,6 +201,8 @@ class AuthService {
     String? celular,
     String? carnet,
     String? comunidad,
+    String? correo,
+    String? cargo,
     int? idDepartamento,
     String? departamentoNombre,
     int? idProvincia,
@@ -189,6 +218,8 @@ class AuthService {
         celular: celular,
         carnet: carnet,
         comunidad: comunidad,
+        correo: correo,
+        cargo: cargo,
         idDepartamento: idDepartamento,
         idProvincia: idProvincia,
         idMunicipio: idMunicipio,
@@ -199,6 +230,8 @@ class AuthService {
         'celular': celular ?? '',
         'carnet': carnet ?? usuario,
         'comunidad': comunidad ?? '',
+        'correo': correo ?? '',
+        'cargo': cargo ?? '',
         'usuario': usuario,
         'id_departamento': idDepartamento,
         'departamento_nombre': departamentoNombre,
@@ -221,30 +254,46 @@ class AuthService {
     _currentToken = null;
     _idRol = null;
     _rolName = null;
+    _permisos = null;
     _api.setToken(null);
 
-    await _storage.delete(key: 'auth_token');
-    await _storage.delete(key: 'user_id');
-    await _storage.delete(key: 'usuario');
-    await _storage.delete(key: 'nombre');
-    await _storage.delete(key: 'id_rol');
-    await _storage.delete(key: 'rol_name');
+    try {
+      await _storage.delete(key: 'auth_token');
+      await _storage.delete(key: 'user_id');
+      await _storage.delete(key: 'usuario');
+      await _storage.delete(key: 'nombre');
+      await _storage.delete(key: 'id_rol');
+      await _storage.delete(key: 'rol_name');
+      await _storage.delete(key: 'permisos');
 
-    _prefs ??= await SharedPreferences.getInstance();
-    await _prefs!.setBool('has_logged_in', false);
-    await _prefs!.remove('profile_nombre');
-    await _prefs!.remove('profile_celular');
-    await _prefs!.remove('profile_carnet');
-    await _prefs!.remove('profile_comunidad');
-    await _prefs!.remove('profile_usuario');
-    await _prefs!.remove('profile_id_departamento');
-    await _prefs!.remove('profile_departamento_nombre');
-    await _prefs!.remove('profile_id_provincia');
-    await _prefs!.remove('profile_provincia_nombre');
-    await _prefs!.remove('profile_id_municipio');
-    await _prefs!.remove('profile_municipio_nombre');
+      _prefs ??= await SharedPreferences.getInstance();
+      await _prefs!.setBool('has_logged_in', false);
+      await _prefs!.remove('profile_nombre');
+      await _prefs!.remove('profile_celular');
+      await _prefs!.remove('profile_carnet');
+      await _prefs!.remove('profile_comunidad');
+      await _prefs!.remove('profile_usuario');
+      await _prefs!.remove('profile_id_departamento');
+      await _prefs!.remove('profile_departamento_nombre');
+      await _prefs!.remove('profile_id_provincia');
+      await _prefs!.remove('profile_provincia_nombre');
+      await _prefs!.remove('profile_id_municipio');
+      await _prefs!.remove('profile_municipio_nombre');
+      await _prefs!.remove('profile_correo');
+      await _prefs!.remove('profile_cargo');
 
-    await DatabaseHelper.instance.clearAll();
-    await ImageService().clearAllImages();
+      await DatabaseHelper.instance.clearAll();
+      await ImageService().clearAllImages();
+    } catch (e) {
+      debugPrint('[logout] Error al limpiar datos locales: $e');
+    }
+  }
+
+  dynamic _decodePermisos(String encoded) {
+    try {
+      return jsonDecode(encoded);
+    } catch (_) {
+      return null;
+    }
   }
 }

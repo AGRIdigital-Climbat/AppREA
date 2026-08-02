@@ -14,8 +14,19 @@ class AuthProvider extends ChangeNotifier {
   int? get userId => _authService.userId;
   int? get idRol => _authService.idRol;
   String? get rolName => _authService.rolName;
-  bool get isUGR => _authService.idRol != null && _authService.idRol != 7;
-  bool get canAccessEDAN => isUGR;
+
+  bool _hasModulePermission(String moduleKey) {
+    final permisos = _authService.permisos;
+    if (permisos == null) return false;
+    if (permisos is String) return permisos == 'full_access';
+    if (permisos is Map) return permisos.containsKey(moduleKey);
+    return false;
+  }
+
+  bool get canAccessPreEdan => _hasModulePermission('REA');
+  bool get canAccessEdan => _hasModulePermission('EDAN');
+  bool get canAccessRida => _hasModulePermission('RIDA') || _hasModulePermission('full_access');
+  bool get canAccessSinb => _hasModulePermission('SIN-B') || _hasModulePermission('full_access');
 
   Future<void> initialize() async {
     await _authService.initialize();
@@ -44,6 +55,8 @@ class AuthProvider extends ChangeNotifier {
     String? celular,
     String? carnet,
     String? comunidad,
+    String? correo,
+    String? cargo,
     int? idDepartamento,
     String? departamentoNombre,
     int? idProvincia,
@@ -62,6 +75,8 @@ class AuthProvider extends ChangeNotifier {
       celular: celular,
       carnet: carnet,
       comunidad: comunidad,
+      correo: correo,
+      cargo: cargo,
       idDepartamento: idDepartamento,
       departamentoNombre: departamentoNombre,
       idProvincia: idProvincia,

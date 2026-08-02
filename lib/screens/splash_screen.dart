@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
+import '../config/role_router.dart';
 import '../providers/auth_provider.dart';
 import 'login_screen.dart';
-import 'home_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -47,7 +47,7 @@ class _SplashScreenState extends State<SplashScreen>
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(
           builder: (_) =>
-              authProvider.isAuthenticated ? const HomeScreen() : const LoginScreen(),
+              authProvider.isAuthenticated ? homeForRole(authProvider) : const LoginScreen(),
         ),
       );
     }
@@ -62,7 +62,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.primary,
+      backgroundColor: Palettes.sinager.primary,
       body: Center(
         child: FadeTransition(
           opacity: _fadeAnimation,

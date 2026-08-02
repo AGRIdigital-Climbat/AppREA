@@ -23,6 +23,7 @@ class DatabaseHelper {
       version: 7,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
+      onOpen: _onOpen,
     );
   }
 
@@ -57,7 +58,8 @@ class DatabaseHelper {
         fecha_creacion TEXT NOT NULL,
         fecha_modificacion TEXT,
         intentos_sync INTEGER DEFAULT 0,
-        ultimo_error TEXT
+        ultimo_error TEXT,
+        imagen_descargada INTEGER DEFAULT 0
       )
     ''');
 
@@ -106,6 +108,16 @@ class DatabaseHelper {
         nombre TEXT NOT NULL
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE municipio_geojson (
+        municipio_id INTEGER PRIMARY KEY,
+        codigo_ine TEXT NOT NULL,
+        nombre TEXT,
+        geojson TEXT NOT NULL,
+        fecha_actualizacion TEXT
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -131,6 +143,18 @@ class DatabaseHelper {
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE reportes_offline ADD COLUMN imagen_descargada INTEGER DEFAULT 0');
     }
+  }
+
+  Future<void> _onOpen(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS municipio_geojson (
+        municipio_id INTEGER PRIMARY KEY,
+        codigo_ine TEXT NOT NULL,
+        nombre TEXT,
+        geojson TEXT NOT NULL,
+        fecha_actualizacion TEXT
+      )
+    ''');
   }
 
   Future<int> insertReporte(ReporteOffline reporte) async {
@@ -423,20 +447,20 @@ class DatabaseHelper {
     final row = {
       'usuario_id': usuarioId,
       'id_server': idServer,
-      'departamento_id': data['id_departamento'] as int,
-      'provincia_id': data['id_provincia'] as int,
-      'municipio_id': data['id_municipio'] as int,
-      'comunidad': data['comunidad'] as String,
+      'departamento_id': (data['id_departamento'] as num?)?.toInt() ?? 0,
+      'provincia_id': (data['id_provincia'] as num?)?.toInt() ?? 0,
+      'municipio_id': (data['id_municipio'] as num?)?.toInt() ?? 0,
+      'comunidad': (data['comunidad'] as String?) ?? '',
       'departamento_nombre': data['departamento']?['nombre'] as String?,
       'provincia_nombre': data['provincia']?['nombre'] as String?,
       'municipio_nombre': data['municipio']?['nombre'] as String?,
-      'fecha_evento': data['fecha_evento'] as String,
+      'fecha_evento': (data['fecha_evento'] as String?) ?? DateTime.now().toIso8601String(),
       'hora_evento': data['hora_evento'] as String?,
-      'tipo_evento_id': data['id_tipo_evento'] as int,
+      'tipo_evento_id': (data['id_tipo_evento'] as num?)?.toInt() ?? 0,
       'coordenada_lat': double.tryParse(data['coordenada_lat']?.toString() ?? ''),
       'coordenada_lon': double.tryParse(data['coordenada_lon']?.toString() ?? ''),
       'descripcion': data['descripcion'] as String?,
-      'estado_id': data['id_estado'] as int? ?? 1,
+      'estado_id': (data['id_estado'] as num?)?.toInt() ?? 1,
       'estado_nombre': data['estado']?['nombre'] as String?,
       'categorias': categorias != null ? jsonEncode(categorias) : null,
       'fotografia_server_path': data['fotografia'] as String?,
@@ -485,6 +509,38 @@ class DatabaseHelper {
     );
   }
 
+  Future<void> saveMunicipioGeojson({
+    required int municipioId,
+    required String codigoIne,
+    String? nombre,
+    required String geojson,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'municipio_geojson',
+      {
+        'municipio_id': municipioId,
+        'codigo_ine': codigoIne,
+        'nombre': nombre,
+        'geojson': geojson,
+        'fecha_actualizacion': DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<Map<String, dynamic>?> getMunicipioGeojsonLocal(int municipioId) async {
+    final db = await database;
+    final maps = await db.query(
+      'municipio_geojson',
+      where: 'municipio_id = ?',
+      whereArgs: [municipioId],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return maps.first;
+  }
+
   Future<List<ReporteOffline>> getReportesSinDescargar(int usuarioId) async {
     final db = await database;
     final maps = await db.query(
@@ -513,6 +569,7 @@ class DatabaseHelper {
     await db.delete('catalogo_estados');
     await db.delete('catalogo_categorias');
     await db.delete('catalogo_tipos_evento');
+    await db.delete('municipio_geojson');
     _database = null;
   }
 }

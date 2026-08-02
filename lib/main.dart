@@ -40,7 +40,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'REA - Reporte de Eventos Adversos',
+      title: 'EDAN - Evaluación de Daños y Necesidades',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       locale: const Locale('es', 'BO'),

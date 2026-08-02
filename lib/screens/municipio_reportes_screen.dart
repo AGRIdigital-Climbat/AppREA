@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../config/api_config.dart';
 import '../models/reporte.dart';
+import '../providers/reporte_provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 
@@ -23,8 +25,8 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
   List<Reporte> _reportes = [];
   bool _isLoading = true;
   bool _isOnline = true;
-  bool _isMapView = false;
-  bool _isSatellite = true;
+  bool _isMapView = true;
+  bool _isSatellite = false;
   String? _selectedDate;
 
   @override
@@ -297,14 +299,14 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
             child: SegmentedButton<bool>(
               segments: const [
                 ButtonSegment(
-                  value: false,
-                  icon: Icon(Icons.list_rounded),
-                  label: Text('Lista'),
-                ),
-                ButtonSegment(
                   value: true,
                   icon: Icon(Icons.map_rounded),
                   label: Text('Mapa'),
+                ),
+                ButtonSegment(
+                  value: false,
+                  icon: Icon(Icons.list_rounded),
+                  label: Text('Lista'),
                 ),
               ],
               selected: {_isMapView},
@@ -347,7 +349,6 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
       onRefresh: _loadReportes,
       child: ListView.builder(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 80),
         itemCount: dateKeys.length,
         itemBuilder: (context, index) {
           final dateKey = dateKeys[index];
@@ -443,7 +444,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: estadoColor.withValues(alpha: 0.1),
+                        color: estadoColor.withValues(alpha: 0.05),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -525,8 +526,17 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
 
     final hasCoordinates = markers.isNotEmpty;
 
+    final geojson = context.watch<ReporteProvider>().municipioGeojson;
+    final hasPolygon = geojson != null && geojson.polygons.isNotEmpty;
+    final polygonBounds = hasPolygon
+        ? LatLngBounds.fromPoints(
+            geojson.polygons.expand((ring) => ring).toList())
+        : null;
+
     LatLng center;
-    if (hasCoordinates) {
+    if (hasPolygon) {
+      center = polygonBounds!.center;
+    } else if (hasCoordinates) {
       final validLat = filtered
           .where((r) => r.coordenadaLat != null && !r.coordenadaLat!.isNaN && !r.coordenadaLat!.isInfinite)
           .map((r) => r.coordenadaLat!);
@@ -568,11 +578,17 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
       children: [
         RepaintBoundary(
           child: FlutterMap(
-            key: const ValueKey('municipio_map'),
+            key: ValueKey('municipio_map_$hasPolygon'),
             mapController: _mapController,
             options: MapOptions(
               initialCenter: center,
-              initialZoom: hasCoordinates ? 14 : 10,
+              initialZoom: hasPolygon ? 13 : (hasCoordinates ? 14 : 10),
+              initialCameraFit: polygonBounds != null
+                  ? CameraFit.bounds(
+                      bounds: polygonBounds,
+                      padding: const EdgeInsets.all(40),
+                    )
+                  : null,
               minZoom: 5,
               maxZoom: 18,
               interactionOptions: const InteractionOptions(
@@ -581,6 +597,18 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
             ),
             children: [
               if (_isSatellite) satelliteTileLayer else streetTileLayer,
+              if (hasPolygon)
+                PolygonLayer(
+                  polygons: [
+                    for (final ring in geojson.polygons)
+                      Polygon(
+                        points: ring,
+                        color: AppColors.primary.withValues(alpha: 0.05),
+                        borderColor: AppColors.primary,
+                        borderStrokeWidth: 2,
+                      ),
+                  ],
+                ),
               if (hasCoordinates)
                 MarkerClusterLayerWidget(
                   options: MarkerClusterLayerOptions(
@@ -800,6 +828,10 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
   }
 
   void _centerMapOnDate() {
+    final geojson = context.read<ReporteProvider>().municipioGeojson;
+    final hasPolygon = geojson != null && geojson.polygons.isNotEmpty;
+    if (hasPolygon) return;
+
     final filtered = _filteredReportes;
     final withCoords = filtered
         .where((r) =>
@@ -870,6 +902,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -903,7 +936,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
                         Icon(
                           _getEventIcon(r.tipoEvento?.nombre),
                           size: 24,
-                          color: AppColors.primary,
+                          color: AppColors.primaryLight,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -919,13 +952,13 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                           decoration: BoxDecoration(
-                            color: estadoColor.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(_getEstadoIcon(r.idEstado), size: 14, color: estadoColor),
+                        color: estadoColor.withValues(alpha: 0.05),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(_getEstadoIcon(r.idEstado), size: 14, color: estadoColor),
                               const SizedBox(width: 4),
                               Text(
                                 r.estado?.nombre ?? 'Enviado',

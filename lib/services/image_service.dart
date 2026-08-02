@@ -76,12 +76,12 @@ class ImageService {
   Future<void> clearAllImages() async {
     try {
       final appDir = await getApplicationDocumentsDirectory();
-      final files = appDir.listSync();
-      for (final file in files) {
-        if (file is File) {
-          final ext = path.extension(file.path).toLowerCase();
+      final entities = appDir.listSync(recursive: true);
+      for (final entity in entities) {
+        if (entity is File) {
+          final ext = path.extension(entity.path).toLowerCase();
           if (ext == '.jpg' || ext == '.jpeg' || ext == '.png' || ext == '.webp' || ext == '.gif') {
-            await file.delete();
+            await entity.delete();
           }
         }
       }

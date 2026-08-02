@@ -5,7 +5,7 @@ import '../providers/auth_provider.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
 import 'forgot_password_screen.dart';
-import 'home_screen.dart';
+import '../config/role_router.dart';
 import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -40,7 +40,7 @@ class _LoginScreenState extends State<LoginScreen> {
     if (mounted) {
       if (success) {
         Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(builder: (_) => homeForRole(authProvider)),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -55,33 +55,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Image.asset(
-                    'assets/images/SINAGER.png',
-                    width: 100,
-                    height: 100,
-                    fit: BoxFit.contain,
-                  ),
-                  const SizedBox(height: 32),
-                  const Text(
-                    'REA',
-                    style: TextStyle(
-                      fontSize: 36,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                      letterSpacing: 2,
-                    ),
-                  ),
+    const palette = Palettes.sinager;
+    return PaletteScope(
+      palette: palette,
+      child: Theme(
+        data: AppTheme.buildTheme(palette),
+        child: Scaffold(
+          backgroundColor: palette.background,
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Image.asset(
+                        'assets/images/SINAGER.png',
+                        width: 100,
+                        height: 100,
+                        fit: BoxFit.contain,
+                      ),
+                      const SizedBox(height: 32),
+                      Text(
+                        'REA',
+                        style: TextStyle(
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                          color: palette.primary,
+                          letterSpacing: 2,
+                        ),
+                      ),
                   const SizedBox(height: 8),
                   const Text(
                     'Reporte de Eventos Adversos',
@@ -175,10 +180,10 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       );
                     },
-                    child: const Text(
+                    child: Text(
                       '¿No tiene cuenta? Regístrese',
                       style: TextStyle(
-                        color: AppColors.primary,
+                        color: palette.primary,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
@@ -189,6 +194,8 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
       ),
-    );
+      ),
+    ),
+  );
   }
 }

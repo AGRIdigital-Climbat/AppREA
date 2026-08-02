@@ -140,7 +140,7 @@ class _ReportesListScreenState extends State<ReportesListScreen> {
             await reporteProvider.loadReportes();
           },
           child: ListView.builder(
-            padding: const EdgeInsets.only(top: 8, bottom: 80),
+            padding: const EdgeInsets.only(top: 8),
             itemCount: reportes.length,
             itemBuilder: (context, index) {
               final reporte = reportes[index];

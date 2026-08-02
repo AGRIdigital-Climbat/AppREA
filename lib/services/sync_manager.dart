@@ -220,4 +220,9 @@ class SyncManager {
       await syncPendingReports();
     }
   }
+
+  void reset() {
+    _isSyncing = false;
+    _pendingCountController.add(0);
+  }
 }

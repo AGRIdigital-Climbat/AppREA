@@ -123,12 +123,15 @@ class TokenResponse {
   final String? celular;
   final String? carnet;
   final String? comunidad;
+  final String? correo;
+  final String? cargo;
   final int? idDepartamento;
   final String? departamentoNombre;
   final int? idProvincia;
   final String? provinciaNombre;
   final int? idMunicipio;
   final String? municipioNombre;
+  final dynamic permisos;
 
   TokenResponse({
     required this.accessToken,
@@ -141,12 +144,15 @@ class TokenResponse {
     this.celular,
     this.carnet,
     this.comunidad,
+    this.correo,
+    this.cargo,
     this.idDepartamento,
     this.departamentoNombre,
     this.idProvincia,
     this.provinciaNombre,
     this.idMunicipio,
     this.municipioNombre,
+    this.permisos,
   });
 
   factory TokenResponse.fromJson(Map<String, dynamic> json) {
@@ -159,15 +165,18 @@ class TokenResponse {
       nombre: data['nombre'],
       idRol: data['id_rol'],
       rol: data['rol'],
-      celular: data['celular'],
-      carnet: data['carnet'],
-      comunidad: data['comunidad'],
+      celular: data['celular'] ?? '',
+      carnet: data['carnet'] ?? '',
+      comunidad: data['comunidad'] ?? '',
+      correo: data['correo'] ?? '',
+      cargo: data['cargo'] ?? '',
       idDepartamento: data['departamento']?['id'],
       departamentoNombre: data['departamento']?['nombre'],
       idProvincia: data['provincia']?['id'],
       provinciaNombre: data['provincia']?['nombre'],
       idMunicipio: data['municipio']?['id'],
       municipioNombre: data['municipio']?['nombre'],
+      permisos: data['permisos'],
     );
   }
 }

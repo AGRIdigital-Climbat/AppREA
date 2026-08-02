@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppColors {
-  // REA Primary - Rojo Alerta
+  // EDAN Primary - Rojo Alerta
   static const primary = Color(0xFFC0392B);
   static const primaryLight = Color(0xFFE74C3C);
   static const primaryDark = Color(0xFF7F1D1D);
 
   static const secondary = Color(0xFF0D47A1);
 
-  // REA Backgrounds
+  // EDAN Backgrounds
   static const background = Color(0xFFFFF8F8);
   static const surface = Color(0xFFFFFFFF);
   static const card = Color(0xFFFFFFFF);
@@ -29,7 +29,7 @@ class AppColors {
   static const closed = Color(0xFF6B7280);
   static const rejected = Color(0xFFDC2626);
 
-  // REA Specific
+  // EDAN Specific
   static const reaButtonPressed = Color(0xFF991B1B);
   static const reaInputFocused = Color(0xFFFFF8F8);
   static const reaFooter = Color(0xFF7F1D1D);
@@ -41,24 +41,110 @@ class AppColors {
   static const divider = Color(0xFFE2E8F0);
 }
 
+@immutable
+class ToolPalette {
+  final Color primary;
+  final Color background;
+  final Color footer;
+  final Color accent;
+
+  const ToolPalette({
+    required this.primary,
+    required this.background,
+    required this.footer,
+    required this.accent,
+  });
+}
+
+class Palettes {
+  static const sinager = ToolPalette(
+    primary: Color(0xFF1A365D),
+    background: Color(0xFFF8FAFC),
+    footer: Color(0xFF0F172A),
+    accent: Color(0xFF3B82F6),
+  );
+
+  static const edan = ToolPalette(
+    primary: Color(0xFFE67E22),
+    background: Color(0xFFFFF7ED),
+    footer: Color(0xFF7C2D12),
+    accent: Color(0xFFC24100),
+  );
+
+  static const rea = ToolPalette(
+    primary: Color(0xFFC0392B),
+    background: Color(0xFFFEF2F2),
+    footer: Color(0xFF7F1D1D),
+    accent: Color(0xFF991B1B),
+  );
+
+  static const rida = ToolPalette(
+    primary: Color(0xFF2980B9),
+    background: Color(0xFFF0F9FF),
+    footer: Color(0xFF0C4A6E),
+    accent: Color(0xFF0284C7),
+  );
+
+  static const sinb = ToolPalette(
+    primary: Color(0xFF2ECC71),
+    background: Color(0xFFF0FDF4),
+    footer: Color(0xFF14532D),
+    accent: Color(0xFF15803D),
+  );
+
+  static const geovisor = ToolPalette(
+    primary: Color(0xFF8E44AD),
+    background: Color(0xFFFAF5FF),
+    footer: Color(0xFF8E44AD),
+    accent: Color(0xFFA855F7),
+  );
+
+  static const documentacion = ToolPalette(
+    primary: Color(0xFF16A085),
+    background: Color(0xFFF0FDFA),
+    footer: Color(0xFF16A085),
+    accent: Color(0xFF0D9488),
+  );
+}
+
+class PaletteScope extends InheritedWidget {
+  final ToolPalette palette;
+
+  const PaletteScope({
+    super.key,
+    required this.palette,
+    required super.child,
+  });
+
+  static ToolPalette of(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<PaletteScope>()?.palette ??
+        Palettes.rea;
+  }
+
+  @override
+  bool updateShouldNotify(PaletteScope oldWidget) {
+    return oldWidget.palette != palette;
+  }
+}
+
 class AppTheme {
-  static ThemeData get lightTheme {
+  static ThemeData buildTheme(ToolPalette palette) {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.primary,
+        seedColor: palette.primary,
         brightness: Brightness.light,
-        surface: AppColors.background,
+        surface: palette.background,
       ),
-      scaffoldBackgroundColor: AppColors.background,
+      scaffoldBackgroundColor: palette.background,
       textTheme: GoogleFonts.robotoTextTheme(),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.primary,
+      appBarTheme: AppBarTheme(
+        backgroundColor: palette.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
-        titleTextStyle: TextStyle(
+        titleTextStyle: const TextStyle(
           color: Colors.white,
           fontSize: 20,
           fontWeight: FontWeight.w600,
@@ -74,7 +160,7 @@ class AppTheme {
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AppColors.primary,
+          backgroundColor: palette.primary,
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           shape: RoundedRectangleBorder(
@@ -88,12 +174,12 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          foregroundColor: AppColors.primary,
+          foregroundColor: palette.primary,
           padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
-          side: const BorderSide(color: AppColors.primary),
+          side: BorderSide(color: palette.primary),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
@@ -109,15 +195,17 @@ class AppTheme {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.primary, width: 2),
+          borderSide: BorderSide(color: palette.primary, width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
-      floatingActionButtonTheme: const FloatingActionButtonThemeData(
-        backgroundColor: AppColors.primary,
+      floatingActionButtonTheme: FloatingActionButtonThemeData(
+        backgroundColor: palette.primary,
         foregroundColor: Colors.white,
-        shape: CircleBorder(),
+        shape: const CircleBorder(),
       ),
     );
   }
+
+  static ThemeData get lightTheme => buildTheme(Palettes.rea);
 }

@@ -5,7 +5,7 @@ import '../providers/auth_provider.dart';
 import '../providers/reporte_provider.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
-import 'home_screen.dart';
+import '../config/role_router.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -22,6 +22,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _celularController = TextEditingController();
   final _carnetController = TextEditingController();
   final _comunidadController = TextEditingController();
+  final _correoController = TextEditingController();
+  final _cargoController = TextEditingController();
 
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
@@ -46,6 +48,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
     _celularController.dispose();
     _carnetController.dispose();
     _comunidadController.dispose();
+    _correoController.dispose();
+    _cargoController.dispose();
     super.dispose();
   }
 
@@ -82,6 +86,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
       celular: _celularController.text.trim(),
       carnet: _carnetController.text.trim(),
       comunidad: _comunidadController.text.trim(),
+      correo: _correoController.text.trim(),
+      cargo: _cargoController.text.trim(),
       idDepartamento: _selectedDepartamento,
       departamentoNombre: depNombre,
       idProvincia: _selectedProvincia,
@@ -99,7 +105,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           ),
         );
         Navigator.of(context).pushAndRemoveUntil(
-          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          MaterialPageRoute(builder: (_) => homeForRole(authProvider)),
           (route) => false,
         );
       } else {
@@ -115,15 +121,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Registro'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
+    const palette = Palettes.sinager;
+    return PaletteScope(
+      palette: palette,
+      child: Theme(
+        data: AppTheme.buildTheme(palette),
+        child: Scaffold(
+          backgroundColor: palette.background,
+          appBar: AppBar(
+            title: const Text('Registro'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
       body: SafeArea(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -241,6 +252,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   hint: 'Ej. 76000000',
                   controller: _celularController,
                   keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  label: 'Correo electrónico',
+                  hint: 'Ej. usuario@correo.com',
+                  controller: _correoController,
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+                CustomTextField(
+                  label: 'Cargo',
+                  hint: 'Ej. Responsable Local',
+                  controller: _cargoController,
+                  textCapitalization: TextCapitalization.words,
                 ),
                 const SizedBox(height: 16),
                 Consumer<ReporteProvider>(
@@ -414,10 +439,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text(
+                  child: Text(
                     '¿Ya tiene cuenta? Inicie sesión',
                     style: TextStyle(
-                      color: AppColors.primary,
+                      color: palette.primary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -426,6 +451,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
             ),
           ),
         ),
+      ),
+      ),
       ),
     );
   }

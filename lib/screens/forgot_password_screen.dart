@@ -128,28 +128,33 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        title: const Text('Recuperar contraseña'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-      ),
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Icon(
-                  Icons.lock_reset,
-                  size: 64,
-                  color: AppColors.primary,
-                ),
+    const palette = Palettes.sinager;
+    return PaletteScope(
+      palette: palette,
+      child: Theme(
+        data: AppTheme.buildTheme(palette),
+        child: Scaffold(
+          backgroundColor: palette.background,
+          appBar: AppBar(
+            title: const Text('Recuperar contraseña'),
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+          body: SafeArea(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Icon(
+                      Icons.lock_reset,
+                      size: 64,
+                      color: palette.primary,
+                    ),
                 const SizedBox(height: 16),
                 const Text(
                   'Recuperar contraseña',
@@ -423,10 +428,10 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 const SizedBox(height: 16),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text(
+                  child: Text(
                     'Volver al inicio de sesión',
                     style: TextStyle(
-                      color: AppColors.primary,
+                      color: palette.primary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -435,6 +440,8 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             ),
           ),
         ),
+      ),
+      ),
       ),
     );
   }

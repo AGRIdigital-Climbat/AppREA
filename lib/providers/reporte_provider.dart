@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
@@ -7,6 +8,7 @@ import '../models/reporte_offline.dart';
 import '../models/departamento.dart';
 import '../models/provincia.dart';
 import '../models/municipio.dart';
+import '../models/municipio_geojson.dart';
 import '../services/database_helper.dart';
 import '../services/api_service.dart';
 import '../services/sync_manager.dart';
@@ -27,6 +29,7 @@ class ReporteProvider extends ChangeNotifier {
   List<Estado> _estados = [];
   List<Categoria> _categorias = [];
   List<TipoEvento> _tiposEvento = [];
+  MunicipioGeojson? _municipioGeojson;
   int _pendingCount = 0;
   bool _isLoading = false;
   bool _isLoadingProvincias = false;
@@ -39,6 +42,7 @@ class ReporteProvider extends ChangeNotifier {
   List<Estado> get estados => _estados;
   List<Categoria> get categorias => _categorias;
   List<TipoEvento> get tiposEvento => _tiposEvento;
+  MunicipioGeojson? get municipioGeojson => _municipioGeojson;
   int get pendingCount => _pendingCount;
   bool get isLoading => _isLoading;
   bool get isLoadingProvincias => _isLoadingProvincias;
@@ -74,10 +78,16 @@ class ReporteProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    final userId = AuthService.instance.userId;
-    if (userId != null) {
-      _reportes = await _db.getReportes(userId);
-      _pendingCount = _reportes.where((r) => r.necesitaSync).length;
+    try {
+      final userId = AuthService.instance.userId;
+      if (userId != null) {
+        _reportes = await _db.getReportes(userId);
+        _pendingCount = _reportes.where((r) => r.necesitaSync).length;
+      }
+    } catch (e) {
+      debugPrint('[loadReportes] Error: $e');
+      _reportes = [];
+      _pendingCount = 0;
     }
 
     _isLoading = false;
@@ -124,14 +134,40 @@ class ReporteProvider extends ChangeNotifier {
   }
 
   Future<void> loadCatalogsLocal() async {
-    final estadosData = await _db.getEstadosLocal();
-    _estados = estadosData.map((e) => Estado.fromJson(e)).toList();
+    try {
+      final estadosData = await _db.getEstadosLocal();
+      _estados = estadosData.map((e) => Estado.fromJson(e)).toList();
+    } catch (_) {
+      _estados = [];
+    }
 
-    final categoriasData = await _db.getCategoriasLocal();
-    _categorias = categoriasData.map((c) => Categoria.fromJson(c)).toList();
+    try {
+      final categoriasData = await _db.getCategoriasLocal();
+      _categorias = categoriasData.map((c) => Categoria.fromJson(c)).toList();
+    } catch (_) {
+      _categorias = [];
+    }
 
-    final tiposData = await _db.getTiposEventoLocal();
-    _tiposEvento = tiposData.map((t) => TipoEvento.fromJson(t)).toList();
+    try {
+      final tiposData = await _db.getTiposEventoLocal();
+      _tiposEvento = tiposData.map((t) => TipoEvento.fromJson(t)).toList();
+    } catch (_) {
+      _tiposEvento = [];
+    }
+
+    try {
+      final idMunicipio = AuthService.instance.currentToken?.idMunicipio;
+      if (idMunicipio != null) {
+        final geojsonRow = await _db.getMunicipioGeojsonLocal(idMunicipio);
+        if (geojsonRow != null && geojsonRow['geojson'] != null) {
+          _municipioGeojson = MunicipioGeojson.fromJson(
+            jsonDecode(geojsonRow['geojson'] as String) as Map<String, dynamic>,
+          );
+        }
+      }
+    } catch (_) {
+      _municipioGeojson = null;
+    }
 
     notifyListeners();
   }
@@ -165,8 +201,51 @@ class ReporteProvider extends ChangeNotifier {
       tiposCount = tipos.length;
     } catch (_) {}
 
+    await _downloadAndCacheMunicipioGeojson();
+
     notifyListeners();
     return {'estados': estadosCount, 'categorias': categoriasCount, 'tipos': tiposCount};
+  }
+
+  Future<void> _downloadAndCacheMunicipioGeojson() async {
+    try {
+      final token = AuthService.instance.currentToken;
+      if (token == null || token.idMunicipio == null) return;
+
+      List<Municipio> municipios;
+      try {
+        municipios = await _api.getMunicipios(
+          idProvincia: token.idProvincia,
+          idDepartamento: token.idDepartamento,
+        );
+      } catch (_) {
+        municipios = await _api.getMunicipios();
+      }
+
+      Municipio? match;
+      for (final m in municipios) {
+        if (m.id == token.idMunicipio) {
+          match = m;
+          break;
+        }
+      }
+      if (match == null) return;
+
+      final feature = await _api.getMunicipioGeojson(match.codigoIne);
+      final geojson = MunicipioGeojson.fromJson(feature);
+
+      await _db.saveMunicipioGeojson(
+        municipioId: token.idMunicipio!,
+        codigoIne: match.codigoIne,
+        nombre: geojson.nombre,
+        geojson: jsonEncode(feature),
+      );
+
+      _municipioGeojson = geojson;
+      notifyListeners();
+    } catch (_) {
+      // Silencioso: no rompe el flujo de catálogos
+    }
   }
 
   String getEstadoNombre(int id) {
@@ -351,12 +430,11 @@ class ReporteProvider extends ChangeNotifier {
   }
 
   Future<int> refreshFromServer() async {
-    final result = await _syncManager.pullServerUpdates();
+    final result = await syncAllFromServer();
     await fetchAndCacheCatalogs();
-    await loadReportes();
     await loadCatalogsLocal();
     descargarImagenesPendientes();
-    return result;
+    return result['reportes'] ?? 0;
   }
 
   Future<Map<String, int>> syncAllFromServer() async {
@@ -421,9 +499,11 @@ class ReporteProvider extends ChangeNotifier {
         }
       }
 
-      await loadReportes();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[syncAllFromServer] ERROR: $e');
+    }
 
+    await loadReportes();
     return {'reportes': reportesCount, 'imagenes': imagenesCount};
   }
 
@@ -431,5 +511,23 @@ class ReporteProvider extends ChangeNotifier {
   void dispose() {
     _pendingSubscription?.cancel();
     super.dispose();
+  }
+
+  void clearData() {
+    _pendingSubscription?.cancel();
+    _pendingSubscription = null;
+    _reportes = [];
+    _departamentos = [];
+    _provincias = [];
+    _municipios = [];
+    _estados = [];
+    _categorias = [];
+    _tiposEvento = [];
+    _municipioGeojson = null;
+    _pendingCount = 0;
+    _isLoading = false;
+    _isLoadingProvincias = false;
+    _isLoadingMunicipios = false;
+    notifyListeners();
   }
 }

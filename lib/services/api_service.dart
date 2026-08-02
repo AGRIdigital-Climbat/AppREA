@@ -98,6 +98,8 @@ class ApiService {
     String? celular,
     String? carnet,
     String? comunidad,
+    String? correo,
+    String? cargo,
     int? idDepartamento,
     int? idProvincia,
     int? idMunicipio,
@@ -112,9 +114,11 @@ class ApiService {
         'usuario': usuario,
         'contrasena': contrasena,
         'nombre': nombre,
-        'celular': celular,
-        'carnet': carnet,
-        'comunidad': comunidad,
+        'celular': celular ?? '',
+        'carnet': carnet ?? '',
+        'comunidad': comunidad ?? '',
+        'correo': correo ?? '',
+        'cargo': cargo ?? '',
         'id_departamento': idDepartamento,
         'id_provincia': idProvincia,
         'id_municipio': idMunicipio,
@@ -216,6 +220,14 @@ class ApiService {
     return (body['data'] as List)
         .map((json) => Municipio.fromJson(json))
         .toList();
+  }
+
+  Future<Map<String, dynamic>> getMunicipioGeojson(String codigoIne) async {
+    final response = await http.get(
+      Uri.parse('${ApiConfig.sharedEndpoint}/municipios/$codigoIne/geojson'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 15));
+    return _handleResponse(response);
   }
 
   Future<List<Reporte>> getReportes({
@@ -461,6 +473,8 @@ class ApiService {
     String? nombre,
     String? celular,
     String? comunidad,
+    String? correo,
+    String? cargo,
     int? idDepartamento,
     int? idProvincia,
     int? idMunicipio,
@@ -469,6 +483,8 @@ class ApiService {
     if (nombre != null) data['nombre'] = nombre;
     if (celular != null) data['celular'] = celular;
     if (comunidad != null) data['comunidad'] = comunidad;
+    if (correo != null && correo.isNotEmpty) data['correo'] = correo;
+    if (cargo != null && cargo.isNotEmpty) data['cargo'] = cargo;
     if (idDepartamento != null) data['id_departamento'] = idDepartamento;
     if (idProvincia != null) data['id_provincia'] = idProvincia;
     if (idMunicipio != null) data['id_municipio'] = idMunicipio;
