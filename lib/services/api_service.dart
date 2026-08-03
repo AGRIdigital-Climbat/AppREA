@@ -365,6 +365,15 @@ class ApiService {
     return Reporte.fromJson(body['data']);
   }
 
+  Future<void> cambiarEstadoReporte(int id, int idEstado) async {
+    final response = await http.put(
+      Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id/estado'),
+      headers: _headers,
+      body: jsonEncode({'id_estado': idEstado}),
+    ).timeout(const Duration(seconds: 15));
+    await _handleResponse(response);
+  }
+
   String _getImageContentType(String filePath) {
     final ext = filePath.split('.').last.toLowerCase();
     switch (ext) {

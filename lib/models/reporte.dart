@@ -1,6 +1,7 @@
 import 'departamento.dart';
 import 'provincia.dart';
 import 'municipio.dart';
+import 'usuario.dart';
 
 class Reporte {
   final int? idReporte;
@@ -24,6 +25,7 @@ class Reporte {
   final TipoEvento? tipoEvento;
   final Estado? estado;
   final List<Categoria>? categorias;
+  final Usuario? usuario;
 
   Reporte({
     this.idReporte,
@@ -47,6 +49,7 @@ class Reporte {
     this.tipoEvento,
     this.estado,
     this.categorias,
+    this.usuario,
   });
 
   factory Reporte.fromJson(Map<String, dynamic> json) {
@@ -83,6 +86,9 @@ class Reporte {
           ? (json['categorias'] as List)
               .map((c) => Categoria.fromJson(c))
               .toList()
+          : null,
+      usuario: json['usuario'] != null
+          ? Usuario.fromJson(json['usuario'])
           : null,
     );
   }

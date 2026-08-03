@@ -132,6 +132,7 @@ class PerfilTabState extends State<PerfilTab> {
     });
 
     final userId = AuthService.instance.userId;
+    var serverOk = true;
     if (userId != null) {
       try {
         await ApiService.instance.updateUsuario(
@@ -145,14 +146,21 @@ class PerfilTabState extends State<PerfilTab> {
           idProvincia: _selectedProvincia,
           idMunicipio: _selectedMunicipio,
         );
-      } catch (_) {}
+      } catch (_) {
+        serverOk = false;
+      }
     }
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Perfil actualizado exitosamente'),
-          backgroundColor: AppColors.completed,
+        SnackBar(
+          content: Text(
+            serverOk
+                ? 'Perfil actualizado exitosamente'
+                : 'Cambios guardados localmente, no se pudo sincronizar con el servidor',
+          ),
+          backgroundColor:
+              serverOk ? AppColors.completed : AppColors.error,
         ),
       );
       _loadProfile();
@@ -480,7 +488,9 @@ class PerfilTabState extends State<PerfilTab> {
                 'UBICACION GEOGRAFICA',
                 [
                   DropdownButtonFormField<int>(
-                    initialValue: _selectedDepartamento,
+                    initialValue: rp.departamentos.any((d) => d.id == _selectedDepartamento)
+                        ? _selectedDepartamento
+                        : null,
                     decoration: _fieldDecoration('Departamento', rp.isLoading
                         ? const SizedBox(
                             width: 20,
@@ -507,7 +517,9 @@ class PerfilTabState extends State<PerfilTab> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
-                    initialValue: _selectedProvincia,
+                    initialValue: rp.provincias.any((p) => p.id == _selectedProvincia)
+                        ? _selectedProvincia
+                        : null,
                     decoration: _fieldDecoration('Provincia', rp.isLoadingProvincias
                         ? const SizedBox(
                             width: 20,
@@ -533,7 +545,9 @@ class PerfilTabState extends State<PerfilTab> {
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<int>(
-                    initialValue: _selectedMunicipio,
+                    initialValue: rp.municipios.any((m) => m.id == _selectedMunicipio)
+                        ? _selectedMunicipio
+                        : null,
                     decoration: _fieldDecoration('Municipio', rp.isLoadingMunicipios
                         ? const SizedBox(
                             width: 20,
@@ -551,9 +565,6 @@ class PerfilTabState extends State<PerfilTab> {
                             setState(() {
                               _selectedMunicipio = value;
                             });
-                            if (value != null) {
-                              rp.loadMunicipios(value, _selectedDepartamento!);
-                            }
                           },
                   ),
                 ],

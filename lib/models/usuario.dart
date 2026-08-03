@@ -90,7 +90,7 @@ class Rol {
     required this.idRol,
     required this.nombre,
     this.descripcion,
-    required this.jerarquia,
+    this.jerarquia = 0,
   });
 
   factory Rol.fromJson(Map<String, dynamic> json) {
@@ -98,7 +98,7 @@ class Rol {
       idRol: json['id_rol'],
       nombre: json['nombre'],
       descripcion: json['descripcion'],
-      jerarquia: json['jerarquia'],
+      jerarquia: json['jerarquia'] ?? 0,
     );
   }
 

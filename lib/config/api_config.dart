@@ -1,5 +1,5 @@
 class ApiConfig {
-  static const String baseUrl = 'https://participation-suggestion-opponents-quoted.trycloudflare.com/api/v1';
+  static const String baseUrl = 'https://api.climbat.net/api/v1';
   
   static const String authEndpoint = '$baseUrl/auth';
   static const String sharedEndpoint = '$baseUrl/shared';

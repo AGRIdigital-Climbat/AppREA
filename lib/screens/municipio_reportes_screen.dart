@@ -4,11 +4,11 @@ import 'package:flutter_map_marker_cluster/flutter_map_marker_cluster.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:provider/provider.dart';
 import '../config/theme.dart';
-import '../config/api_config.dart';
 import '../models/reporte.dart';
 import '../providers/reporte_provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import 'reporte_detail_screen.dart';
 
 class MunicipioReportesTab extends StatefulWidget {
   const MunicipioReportesTab({super.key});
@@ -417,7 +417,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(12),
-          onTap: () => _showReportBottomSheet(r),
+          onTap: () => _openReporte(r),
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -503,6 +503,25 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
                     ],
                   ],
                 ),
+                if (r.usuario?.nombre != null) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.person_outline,
+                          size: 14, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          'Reportado por: ${r.usuario!.nombre}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
           ),
@@ -871,7 +890,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
       width: 30,
       height: 30,
       child: GestureDetector(
-        onTap: () => _showReportBottomSheet(r),
+        onTap: () => _openReporte(r),
         child: Container(
           decoration: BoxDecoration(
             color: _getEstadoColor(r.idEstado),
@@ -895,189 +914,11 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
     );
   }
 
-  void _showReportBottomSheet(Reporte r) {
-    final estadoColor = _getEstadoColor(r.idEstado);
-    final tipoNombre = r.tipoEvento?.nombre ?? 'Sin tipo';
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return DraggableScrollableSheet(
-          initialChildSize: 0.5,
-          minChildSize: 0.3,
-          maxChildSize: 0.85,
-          expand: false,
-          builder: (context, scrollController) {
-            return SingleChildScrollView(
-              controller: scrollController,
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: AppColors.divider,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Icon(
-                          _getEventIcon(r.tipoEvento?.nombre),
-                          size: 24,
-                          color: AppColors.primaryLight,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            tipoNombre,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                          decoration: BoxDecoration(
-                        color: estadoColor.withValues(alpha: 0.05),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(_getEstadoIcon(r.idEstado), size: 14, color: estadoColor),
-                              const SizedBox(width: 4),
-                              Text(
-                                r.estado?.nombre ?? 'Enviado',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: estadoColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
-                    _buildDetailRow(Icons.calendar_today, 'Fecha', r.fechaEvento),
-                    if (r.horaEvento != null)
-                      _buildDetailRow(Icons.access_time, 'Hora', r.horaEvento!),
-                    _buildDetailRow(Icons.location_on, 'Comunidad', r.comunidad),
-                    if (r.descripcion != null && r.descripcion!.isNotEmpty)
-                      _buildDetailRow(Icons.description, 'Descripción', r.descripcion!),
-                    if (r.coordenadaLat != null && r.coordenadaLon != null)
-                      _buildDetailRow(
-                        Icons.map,
-                        'Coordenadas',
-                        '${r.coordenadaLat!.toStringAsFixed(6)}, ${r.coordenadaLon!.toStringAsFixed(6)}',
-                      ),
-                    if (r.fechaReporte != null)
-                      _buildDetailRow(
-                        Icons.schedule,
-                        'Reportado',
-                        _formatFechaReporte(r.fechaReporte!),
-                      ),
-                    if (r.fotografia != null) ...[
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Fotografía',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(12),
-                        child: Image.network(
-                          '${ApiConfig.baseUrl}/upload/descargar/${Uri.encodeComponent(r.fotografia!)}',
-                          headers: {
-                            'Authorization': 'Bearer ${AuthService.instance.currentToken?.accessToken ?? ''}',
-                          },
-                          width: double.infinity,
-                          height: 200,
-                          cacheWidth: 800,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, url, error) => Container(
-                            width: double.infinity,
-                            height: 200,
-                            color: AppColors.background,
-                            child: const Center(
-                              child: Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppColors.textSecondary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.textPrimary,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
+  void _openReporte(Reporte r) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReporteDetailScreen.server(reporte: r),
       ),
     );
-  }
-
-  String _formatFechaReporte(String fecha) {
-    try {
-      final dt = DateTime.parse(fecha);
-      return '${dt.day}/${dt.month}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
-    } catch (_) {
-      return fecha;
-    }
   }
 }
