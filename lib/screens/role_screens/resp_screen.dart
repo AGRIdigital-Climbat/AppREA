@@ -161,6 +161,7 @@ class _RespScreenState extends State<RespScreen> with SingleTickerProviderStateM
         },
         selectedItemColor: AppColors.primary,
         unselectedItemColor: AppColors.textSecondary,
+        backgroundColor: AppColors.surface,
         type: BottomNavigationBarType.fixed,
         items: bottomNavItems,
       ),

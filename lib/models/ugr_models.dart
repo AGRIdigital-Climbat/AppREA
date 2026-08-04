@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
+import 'edan.dart';
 import 'reporte.dart';
 
 enum UgrReporteEstado { pendiente, confirmado, rechazado }
@@ -236,6 +237,155 @@ class UgrEdan {
     this.estado = UgrEdanEstado.borrador,
   });
 
+  factory UgrEdan.fromEdan(
+    Edan e, {
+    required String municipioNombre,
+    String? usuarioNombre,
+  }) {
+    final fecha = DateTime.tryParse(e.fechaLlenado) ??
+        DateTime.tryParse(e.fechaEvento) ??
+        DateTime.now();
+    final estado = switch (e.estado) {
+      'enviado' => UgrEdanEstado.enviado,
+      'observado' => UgrEdanEstado.observado,
+      'aprobado' => UgrEdanEstado.aprobado,
+      'en_revision' || 'enRevision' => UgrEdanEstado.enRevision,
+      _ => UgrEdanEstado.borrador,
+    };
+
+    final secciones = [
+      UgrSeccion(
+        nombre: '01 · Datos generales',
+        descripcion: 'Alcalde, ubicación, fechas y localidades',
+        icon: Icons.description_outlined,
+        completada: e.nombreAlcalde.trim().isNotEmpty &&
+            e.fonoAlcalde.trim().isNotEmpty &&
+            e.fechaLlenado.isNotEmpty &&
+            e.fechaEvento.isNotEmpty &&
+            e.idDepartamento != null &&
+            e.idProvincia != null &&
+            e.idMunicipio != null,
+      ),
+      UgrSeccion(
+        nombre: '02 · Población afectada y damnificada',
+        descripcion: 'Totales de población y familias',
+        icon: Icons.groups_outlined,
+        completada: e.totalPoblacionAfectada > 0 ||
+            e.totalFamiliasAfectadas > 0 ||
+            e.totalFamiliasDamnificadas > 0,
+      ),
+      UgrSeccion(
+        nombre: '03 · Municipio afectado',
+        descripcion: 'Tipo de evento, impacto y primera respuesta',
+        icon: Icons.warning_amber_rounded,
+        completada: e.idTipoEvento != null,
+      ),
+      UgrSeccion(
+        nombre: '04 · Salud',
+        descripcion: 'Daños en servicios de salud y necesidades',
+        icon: Icons.local_hospital_outlined,
+        completada: e.localidades.any((l) =>
+            l.impSalud &&
+            l.establecimientosSalud
+                .any((s) => s.nombreEstablecimiento.trim().isNotEmpty)),
+      ),
+      UgrSeccion(
+        nombre: '05 · Infraestructura',
+        descripcion: 'Daños viales y en infraestructura pública',
+        icon: Icons.route_outlined,
+        completada: e.localidades.any((l) =>
+            l.impInfraestructura &&
+            (l.danosViales.any((d) => d.viaPuente.trim().isNotEmpty) ||
+                l.danosInfraPublica
+                    .any((d) => d.tipoEstructura.trim().isNotEmpty))),
+      ),
+      UgrSeccion(
+        nombre: '06 · Servicios básicos',
+        descripcion: 'Agua, luz, alcantarillado y comunicaciones',
+        icon: Icons.water_drop_outlined,
+        completada: e.localidades.any((l) =>
+            l.impServicios && l.serviciosBasicos.algunaSeleccionada),
+      ),
+      UgrSeccion(
+        nombre: '07 · Educación',
+        descripcion: 'Unidades educativas y afectación',
+        icon: Icons.school_outlined,
+        completada: e.localidades.any((l) =>
+            l.impEducacion &&
+            l.unidadesEducativas
+                .any((u) => u.nombreEstablecimiento.trim().isNotEmpty)),
+      ),
+      UgrSeccion(
+        nombre: '08 · Vivienda',
+        descripcion: 'Daños parciales y totales por localidad',
+        icon: Icons.home_outlined,
+        completada: e.localidades.any((l) =>
+            l.impVivienda &&
+            l.danosVivienda.any((v) => v.comunidad.trim().isNotEmpty)),
+      ),
+      UgrSeccion(
+        nombre: '09 · Agropecuario',
+        descripcion: 'Agricultura, pecuario e infraestructura productiva',
+        icon: Icons.grain,
+        completada: e.localidades.any((l) =>
+            l.impAgropecuario &&
+            (l.danosAgricultura
+                    .any((a) => a.tipoCultivo.trim().isNotEmpty) ||
+                l.danosPecuarios.any((p) => p.especie.trim().isNotEmpty) ||
+                l.infraProductiva.any((i) => i.tipo.trim().isNotEmpty))),
+      ),
+      UgrSeccion(
+        nombre: '10 · Protección',
+        descripcion: 'Población vulnerable y afectación por sexo',
+        icon: Icons.volunteer_activism_outlined,
+        completada: e.localidades.any((l) =>
+            l.impProteccion &&
+            (l.proteccion.vulnerables.algunoPositivo ||
+                l.proteccion.mujeres > 0 ||
+                l.proteccion.hombres > 0)),
+      ),
+      UgrSeccion(
+        nombre: '11 · Necesidades humanitarias',
+        descripcion: 'Alimentos, refugio, higiene y otros',
+        icon: Icons.inventory_2_outlined,
+        completada: e.necesidadHumanitaria.algunaSeleccionada,
+      ),
+      UgrSeccion(
+        nombre: '13 · Responsable del formulario',
+        descripcion: 'Nombre, cargo y contacto del responsable',
+        icon: Icons.badge_outlined,
+        completada: e.responsable.nombre.trim().isNotEmpty &&
+            e.responsable.cargo.trim().isNotEmpty,
+      ),
+    ];
+    final historial = [
+      UgrHistorialEvento(
+        titulo: 'EDAN registrado como borrador',
+        fecha: _fmtFecha(fecha),
+        usuario: usuarioNombre ?? 'UGR',
+        icon: Icons.edit_note,
+        color: estado.color,
+      ),
+    ];
+    return UgrEdan(
+      codigo: e.codigoEdan,
+      tipoEvento: e.tipoEventoNombre ?? 'Evento',
+      comunidad: _primerLocalidad(e.localidades),
+      municipio: municipioNombre,
+      fechaCreacion: fecha,
+      secciones: secciones,
+      historial: historial,
+      estado: estado,
+    );
+  }
+
+  static String _primerLocalidad(List<EdanLocalidad> localidades) {
+    for (final l in localidades) {
+      if (l.nombre.trim().isNotEmpty) return l.nombre;
+    }
+    return '';
+  }
+
   int get seccionesCompletadas => secciones.where((s) => s.completada).length;
 
   int get seccionesTotal => secciones.length;
@@ -281,4 +431,8 @@ String _tiempoRelativo(DateTime fecha) {
     return 'Hace ${diff.inHours} hora${diff.inHours == 1 ? '' : 's'}';
   }
   return 'Hace ${diff.inDays} día${diff.inDays == 1 ? '' : 's'}';
+}
+
+String _fmtFecha(DateTime d) {
+  return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 }

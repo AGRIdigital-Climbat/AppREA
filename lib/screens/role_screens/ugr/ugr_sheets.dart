@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../config/theme.dart';
 import '../../../models/ugr_models.dart';
-import '../../../mocks/ugr_mock_data.dart';
 import '../../../screens/reporte_detail_screen.dart';
 import 'ugr_edan_detalle.dart';
 import 'ugr_evento.dart';
@@ -22,24 +21,6 @@ void showUgrGlobalSearch(BuildContext context) {
   );
 }
 
-void showUgrNuevoEdan(
-  BuildContext context, {
-  required ValueChanged<UgrEdan> onGuardar,
-}) {
-  showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
-    backgroundColor: PaletteScope.of(context).background,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-    ),
-    builder: (ctx) => ugrSheetWrap(
-      _UgrNuevoEdanSheet(onGuardar: onGuardar),
-    ),
-  );
-}
-
 class _UgrGlobalSearchSheet extends StatefulWidget {
   const _UgrGlobalSearchSheet();
 
@@ -49,8 +30,8 @@ class _UgrGlobalSearchSheet extends StatefulWidget {
 
 class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
   final _controller = TextEditingController();
-  late final List<UgrReporte> _reportes = mockReportes();
-  late final List<UgrEdan> _edanes = mockEdanes();
+  late final List<UgrReporte> _reportes = [];
+  late final List<UgrEdan> _edanes = [];
   String _query = '';
 
   @override
@@ -228,122 +209,5 @@ class _ResultHeader extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-class _UgrNuevoEdanSheet extends StatefulWidget {
-  final ValueChanged<UgrEdan> onGuardar;
-
-  const _UgrNuevoEdanSheet({required this.onGuardar});
-
-  @override
-  State<_UgrNuevoEdanSheet> createState() => _UgrNuevoEdanSheetState();
-}
-
-class _UgrNuevoEdanSheetState extends State<_UgrNuevoEdanSheet> {
-  final _comunidadController = TextEditingController();
-  final _municipioController = TextEditingController();
-  String? _tipoEvento;
-
-  @override
-  void dispose() {
-    _comunidadController.dispose();
-    _municipioController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = PaletteScope.of(context).primary;
-    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + viewInsets),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Nuevo EDAN',
-            style: TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textPrimary,
-            ),
-          ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: _comunidadController,
-            decoration: const InputDecoration(labelText: 'Comunidad'),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _municipioController,
-            decoration: const InputDecoration(labelText: 'Municipio'),
-          ),
-          const SizedBox(height: 12),
-          DropdownButtonFormField<String>(
-            initialValue: _tipoEvento,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Tipo de evento'),
-            items: mockTiposEvento()
-                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                .toList(),
-            onChanged: (value) => setState(() => _tipoEvento = value),
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('Cancelar'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _guardar,
-                  style: ElevatedButton.styleFrom(backgroundColor: primary),
-                  child: const Text('Crear'),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _guardar() {
-    final comunidad = _comunidadController.text.trim();
-    final municipio = _municipioController.text.trim();
-    final tipoEvento = _tipoEvento;
-    if (comunidad.isEmpty || municipio.isEmpty || tipoEvento == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Complete comunidad, municipio y tipo de evento.'),
-          backgroundColor: AppColors.rechazado,
-        ),
-      );
-      return;
-    }
-
-    final codigo =
-        'EDAN-2026-${(DateTime.now().millisecondsSinceEpoch % 1000).toString().padLeft(3, '0')}';
-
-    final edan = UgrEdan(
-      codigo: codigo,
-      tipoEvento: tipoEvento,
-      comunidad: comunidad,
-      municipio: municipio,
-      fechaCreacion: DateTime.now(),
-      estado: UgrEdanEstado.borrador,
-      secciones: mockSeccionesEdan(),
-      historial: mockHistorialEdan(UgrEdanEstado.borrador),
-    );
-
-    widget.onGuardar(edan);
-    Navigator.of(context).pop();
   }
 }

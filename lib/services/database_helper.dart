@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import '../models/edan.dart';
 import '../models/reporte_offline.dart';
 
 class DatabaseHelper {
@@ -20,7 +21,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -118,6 +119,31 @@ class DatabaseHelper {
         fecha_actualizacion TEXT
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE edans_offline (
+        id_local INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_server INTEGER,
+        id_edan INTEGER,
+        usuario_id INTEGER NOT NULL,
+        codigo_edan TEXT,
+        municipio_id INTEGER,
+        municipio_nombre TEXT,
+        fecha_evento TEXT,
+        fecha_llenado TEXT,
+        id_estado INTEGER DEFAULT 1,
+        estado_edan TEXT DEFAULT 'borrador',
+        datos_json TEXT NOT NULL,
+        sincronizado INTEGER DEFAULT 0,
+        pendiente_eliminacion INTEGER DEFAULT 0,
+        pendiente_actualizacion INTEGER DEFAULT 0,
+        es_borrador INTEGER DEFAULT 0,
+        fecha_creacion TEXT NOT NULL,
+        fecha_modificacion TEXT,
+        intentos_sync INTEGER DEFAULT 0,
+        ultimo_error TEXT
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -142,6 +168,32 @@ class DatabaseHelper {
     }
     if (oldVersion < 7) {
       await db.execute('ALTER TABLE reportes_offline ADD COLUMN imagen_descargada INTEGER DEFAULT 0');
+    }
+    if (oldVersion < 8) {
+      await db.execute('''
+        CREATE TABLE edans_offline (
+          id_local INTEGER PRIMARY KEY AUTOINCREMENT,
+          id_server INTEGER,
+          id_edan INTEGER,
+          usuario_id INTEGER NOT NULL,
+          codigo_edan TEXT,
+          municipio_id INTEGER,
+          municipio_nombre TEXT,
+          fecha_evento TEXT,
+          fecha_llenado TEXT,
+          id_estado INTEGER DEFAULT 1,
+          estado_edan TEXT DEFAULT 'borrador',
+          datos_json TEXT NOT NULL,
+          sincronizado INTEGER DEFAULT 0,
+          pendiente_eliminacion INTEGER DEFAULT 0,
+          pendiente_actualizacion INTEGER DEFAULT 0,
+          es_borrador INTEGER DEFAULT 0,
+          fecha_creacion TEXT NOT NULL,
+          fecha_modificacion TEXT,
+          intentos_sync INTEGER DEFAULT 0,
+          ultimo_error TEXT
+        )
+      ''');
     }
   }
 
@@ -561,6 +613,160 @@ class DatabaseHelper {
     );
   }
 
+  Edan _edanFromRow(Map<String, dynamic> row) {
+    final datos = jsonDecode(row['datos_json'] as String);
+    final edan = Edan.fromJson(Map<String, dynamic>.from(datos as Map));
+    edan.idLocal = row['id_local'] as int;
+    edan.idServer = row['id_server'] as int?;
+    edan.idEdan = row['id_edan'] as int?;
+    return edan;
+  }
+
+  Future<int> insertEdan(
+    Edan edan, {
+    required int usuarioId,
+    String? municipioNombre,
+  }) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    final row = {
+      'id_server': edan.idServer,
+      'id_edan': edan.idEdan,
+      'usuario_id': usuarioId,
+      'codigo_edan': edan.codigoEdan,
+      'municipio_id': edan.idMunicipio,
+      'municipio_nombre': municipioNombre,
+      'fecha_evento': edan.fechaEvento,
+      'fecha_llenado': edan.fechaLlenado,
+      'id_estado': edan.idEstado,
+      'estado_edan': edan.estado,
+      'datos_json': jsonEncode(edan.toJson()),
+      'sincronizado': 0,
+      'pendiente_eliminacion': 0,
+      'pendiente_actualizacion': 0,
+      'es_borrador': edan.estado == 'borrador' ? 1 : 0,
+      'fecha_creacion': now,
+      'fecha_modificacion': now,
+      'intentos_sync': 0,
+    };
+    final idLocal = await db.insert('edans_offline', row);
+    edan.idLocal = idLocal;
+    return idLocal;
+  }
+
+  Future<List<Edan>> getEdans(int usuarioId) async {
+    final db = await database;
+    final maps = await db.query(
+      'edans_offline',
+      where: 'usuario_id = ?',
+      whereArgs: [usuarioId],
+      orderBy: 'fecha_creacion DESC',
+    );
+    return maps.map((map) => _edanFromRow(map)).toList();
+  }
+
+  Future<List<Edan>> getUnsyncedEdans() async {
+    final db = await database;
+    final maps = await db.query(
+      'edans_offline',
+      where: 'sincronizado = 0 AND pendiente_eliminacion = 0',
+      orderBy: 'fecha_creacion ASC',
+    );
+    return maps.map((map) => _edanFromRow(map)).toList();
+  }
+
+  Future<int> updateEdan(Edan edan) async {
+    if (edan.idLocal == null) return 0;
+    final db = await database;
+    return await db.update(
+      'edans_offline',
+      {
+        'id_server': edan.idServer,
+        'id_edan': edan.idEdan,
+        'codigo_edan': edan.codigoEdan,
+        'municipio_id': edan.idMunicipio,
+        'fecha_evento': edan.fechaEvento,
+        'fecha_llenado': edan.fechaLlenado,
+        'id_estado': edan.idEstado,
+        'estado_edan': edan.estado,
+        'datos_json': jsonEncode(edan.toJson()),
+        'sincronizado': 0,
+        'pendiente_actualizacion': 1,
+        'es_borrador': edan.estado == 'borrador' ? 1 : 0,
+        'fecha_modificacion': DateTime.now().toIso8601String(),
+      },
+      where: 'id_local = ?',
+      whereArgs: [edan.idLocal],
+    );
+  }
+
+  Future<int> deleteEdan(int idLocal) async {
+    final db = await database;
+    return await db.delete(
+      'edans_offline',
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<int> markEdanAsSynced(int idLocal, int idServer) async {
+    final db = await database;
+    return await db.update(
+      'edans_offline',
+      {
+        'id_server': idServer,
+        'id_edan': idServer,
+        'sincronizado': 1,
+        'pendiente_eliminacion': 0,
+        'pendiente_actualizacion': 0,
+        'intentos_sync': 0,
+        'ultimo_error': null,
+        'fecha_modificacion': DateTime.now().toIso8601String(),
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<int> markEdanAsPendingDeletion(int idLocal) async {
+    final db = await database;
+    return await db.update(
+      'edans_offline',
+      {
+        'pendiente_eliminacion': 1,
+        'sincronizado': 0,
+        'fecha_modificacion': DateTime.now().toIso8601String(),
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<int> updateEdanSyncAttempts(int idLocal, int intentos, String error) async {
+    final db = await database;
+    return await db.update(
+      'edans_offline',
+      {
+        'intentos_sync': intentos,
+        'ultimo_error': error,
+        'fecha_modificacion': DateTime.now().toIso8601String(),
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<int> countEdansDelAnio(int usuarioId, int year) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) AS total FROM edans_offline '
+      'WHERE usuario_id = ? AND fecha_llenado LIKE ?',
+      [usuarioId, '$year-%'],
+    );
+    if (result.isEmpty) return 0;
+    return (result.first['total'] as num?)?.toInt() ?? 0;
+  }
+
   Future<void> clearAll() async {
     final db = await database;
     await db.delete('reportes_offline');
@@ -570,6 +776,7 @@ class DatabaseHelper {
     await db.delete('catalogo_categorias');
     await db.delete('catalogo_tipos_evento');
     await db.delete('municipio_geojson');
+    await db.delete('edans_offline');
     _database = null;
   }
 }

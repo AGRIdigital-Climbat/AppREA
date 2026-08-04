@@ -10,7 +10,6 @@ import '../services/permission_service.dart';
 import '../services/location_service.dart';
 import '../services/image_service.dart';
 import '../providers/reporte_provider.dart';
-import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
 import 'reporte_preview_screen.dart';
 
@@ -45,14 +44,13 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
   double? _precision;
   bool _obteniendoCoords = false;
   bool _coordsManual = false;
+  bool _coordsError = false;
   final _latController = TextEditingController();
   final _lonController = TextEditingController();
   final List<String> _imagenes = [];
   final List<int> _categoriasSeleccionadas = [];
-  final bool _isSubmitting = false;
 
   final ImagePicker _picker = ImagePicker();
-
   @override
   void initState() {
     super.initState();
@@ -185,6 +183,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
             _longitud = pos.longitude;
             _precision = pos.accuracy;
             _obteniendoCoords = false;
+            _coordsError = false;
           });
           return;
         }
@@ -200,6 +199,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
         _latitud = bestLat;
         _longitud = bestLon;
         _precision = bestAcc;
+        _coordsError = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -328,6 +328,16 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
       );
       return;
     }
+    if (_latitud == null || _longitud == null) {
+      setState(() => _coordsError = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Registre las coordenadas del evento'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
 
     Navigator.of(context).push(
       MaterialPageRoute(
@@ -355,12 +365,119 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
     );
   }
 
+  Widget _buildActionsBar() {
+    final primary = PaletteScope.of(context).primary;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(top: BorderSide(color: AppColors.divider)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton.icon(
+              onPressed: _guardarBorrador,
+              icon: const Icon(Icons.save_outlined, size: 18),
+              label: const Text('Borrador'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: primary,
+                side: BorderSide(color: primary, width: 1.5),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                minimumSize: const Size(0, 48),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: ElevatedButton.icon(
+              onPressed: _goToPreview,
+              icon: const Icon(Icons.preview, size: 18),
+              label: const Text('V. previa'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                minimumSize: const Size(0, 48),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _guardarBorrador() async {
+    final userId = AuthService.instance.userId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Debe iniciar sesión para guardar el borrador'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+      return;
+    }
+    final reporteProvider = context.read<ReporteProvider>();
+    final reporte = ReporteOffline(
+      usuarioId: userId,
+      departamentoId: _selectedDepartamento ?? 0,
+      provinciaId: _selectedProvincia ?? 0,
+      municipioId: _selectedMunicipio ?? 0,
+      comunidad: _comunidadController.text.trim(),
+      departamentoNombre: _departamentoController.text.isNotEmpty
+          ? _departamentoController.text
+          : null,
+      provinciaNombre: _provinciaController.text.isNotEmpty
+          ? _provinciaController.text
+          : null,
+      municipioNombre: _municipioController.text.isNotEmpty
+          ? _municipioController.text
+          : null,
+      fechaEvento:
+          '${_fechaEvento.year}-${_fechaEvento.month.toString().padLeft(2, '0')}-${_fechaEvento.day.toString().padLeft(2, '0')}',
+      horaEvento: _horaController.text.isNotEmpty ? _horaController.text : null,
+      tipoEventoId: _selectedTipoEvento ?? 1,
+      coordenadaLat: _latitud,
+      coordenadaLon: _longitud,
+      descripcion: _descripcionController.text.trim().isEmpty
+          ? null
+          : _descripcionController.text.trim(),
+      categorias: _categoriasSeleccionadas.isNotEmpty
+          ? List.of(_categoriasSeleccionadas)
+          : null,
+      imagenes: _imagenes.isNotEmpty ? List.of(_imagenes) : null,
+      esBorrador: true,
+      fechaCreacion: DateTime.now(),
+    );
+    await reporteProvider.guardarBorrador(reporte);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content:
+            Text('Borrador guardado. Puede editarlo o enviarlo cuando quiera'),
+        backgroundColor: Colors.orange,
+      ),
+    );
+    Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
-        title: Text(widget.reporte != null ? 'Editar Reporte' : 'Nuevo Reporte'),
+        title: Text(
+          widget.reporte != null ? 'Editar Reporte' : 'Nuevo Reporte',
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: PaletteScope.of(context).primary,
+        foregroundColor: Colors.white,
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.of(context).pop(),
@@ -389,7 +506,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
               _buildUbicacionSection(),
               const SizedBox(height: 24),
               _buildSectionTitle('Coordenadas GPS'),
-              _buildSectionHint('Registre la coordenada o tome la ubicacion donde ocurrio el evento.'),
+              _buildSectionHint('Registre la coordenada o tome la ubicacion donde ocurrio el evento. (obligatorio)'),
               const SizedBox(height: 8),
               _buildCoordinatesSection(),
               const SizedBox(height: 24),
@@ -404,18 +521,12 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
               _buildCategoriesSection(),
               const SizedBox(height: 24),
               _buildVerifyBanner(),
-              const SizedBox(height: 16),
-              CustomButton(
-                text: 'Revisar y Enviar',
-                onPressed: _goToPreview,
-                isLoading: _isSubmitting,
-                icon: Icons.preview,
-              ),
               const SizedBox(height: 24),
             ],
           ),
         ),
       ),
+      bottomNavigationBar: _buildActionsBar(),
     );
   }
 
@@ -450,9 +561,27 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
           builder: (context, rp, child) {
             return DropdownButtonFormField<int>(
               initialValue: _selectedTipoEvento,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Tipo de Evento *',
-                border: OutlineInputBorder(),
+                filled: true,
+                fillColor: AppColors.surface,
+                contentPadding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: AppColors.divider),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide(
+                    color: PaletteScope.of(context).primary,
+                    width: 2,
+                  ),
+                ),
               ),
               items: rp.tiposEvento.isEmpty
                   ? const [
@@ -512,10 +641,27 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
                 Expanded(
                   child: DropdownButtonFormField<int?>(
                     initialValue: _horaNumero,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       hintText: 'Hr',
-                      border: OutlineInputBorder(),
-                      contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+                      filled: true,
+                      fillColor: AppColors.surface,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: AppColors.divider),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: PaletteScope.of(context).primary,
+                          width: 2,
+                        ),
+                      ),
                     ),
                     isExpanded: true,
                     items: [
@@ -658,6 +804,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
 
   Widget _buildCoordinatesSection() {
     final hasCoords = _latitud != null && _longitud != null;
+    final coordsInvalid = _coordsError && !hasCoords;
 
     Color precColor() {
       if (_precision == null) return AppColors.textSecondary;
@@ -675,7 +822,10 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(
+          color: coordsInvalid ? AppColors.error : AppColors.divider,
+          width: coordsInvalid ? 1.5 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -685,6 +835,29 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
           _coordDisplayRow(hasCoords, precColor(), precText()),
           const SizedBox(height: 14),
           if (_coordsManual) _manualInputs() else _gpsButton(hasCoords),
+          if (coordsInvalid) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                const Icon(
+                  Icons.error_outline,
+                  size: 16,
+                  color: AppColors.error,
+                ),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    'Las coordenadas son obligatorias',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -847,6 +1020,7 @@ class _ReporteFormScreenState extends State<ReporteFormScreen> {
         _latitud = lat;
         _longitud = lon;
         _precision = null;
+        _coordsError = false;
       });
     }
   }

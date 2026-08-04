@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../config/theme.dart';
 import '../../../models/ugr_models.dart';
-import '../../../mocks/ugr_mock_data.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
+import '../../../services/database_helper.dart';
 
 class UgrDashboardTab extends StatefulWidget {
   const UgrDashboardTab({super.key});
@@ -16,7 +16,7 @@ class UgrDashboardTab extends StatefulWidget {
 
 class _UgrDashboardTabState extends State<UgrDashboardTab> {
   List<UgrReporte> _reportes = [];
-  final List<UgrEdan> _edanes = mockEdanes();
+  final List<UgrEdan> _edanes = [];
   List<UgrActividad> _actividad = [];
 
   UgrIndicadores get _indicadores => UgrIndicadores(
@@ -31,6 +31,25 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
   void initState() {
     super.initState();
     _cargarReportes();
+    _cargarEdanes();
+  }
+
+  Future<void> _cargarEdanes() async {
+    final userId = AuthService.instance.userId;
+    if (userId == null) return;
+    try {
+      final edanes = await DatabaseHelper.instance.getEdans(userId);
+      if (!mounted) return;
+      setState(() {
+        _edanes
+          ..clear()
+          ..addAll(edanes.map((e) => UgrEdan.fromEdan(
+                e,
+                municipioNombre: e.municipioNombre ?? '',
+                usuarioNombre: AuthService.instance.userName,
+              )));
+      });
+    } catch (_) {}
   }
 
   Future<void> _cargarReportes() async {
@@ -84,7 +103,10 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
     return RefreshIndicator(
-      onRefresh: _cargarReportes,
+      onRefresh: () async {
+        await _cargarReportes();
+        await _cargarEdanes();
+      },
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),

@@ -469,6 +469,72 @@ class ApiService {
         .toList();
   }
 
+  Future<List<Usuario>> getUsuarios({bool soloActivos = true}) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse(ApiConfig.usuariosEndpoint),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    final data = body['data'];
+    final list = data is List
+        ? data
+        : data is Map
+            ? (data['items'] ?? data['results'] ?? <dynamic>[])
+            : <dynamic>[];
+    final usuarios = (list as List)
+        .map((json) => Usuario.fromJson(json as Map<String, dynamic>))
+        .toList();
+    if (soloActivos) {
+      usuarios.removeWhere((u) => u.activo == false);
+    }
+    return usuarios;
+  }
+
+  Future<Usuario> createUsuario({
+    required String usuario,
+    required String contrasena,
+    required String nombre,
+    String? celular,
+    String? carnet,
+    String? comunidad,
+    String? correo,
+    String? cargo,
+    int? idDepartamento,
+    int? idProvincia,
+    int? idMunicipio,
+    int idRol = 7,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse(ApiConfig.usuariosEndpoint),
+        headers: _headers,
+        body: jsonEncode({
+          'usuario': usuario,
+          'contrasena': contrasena,
+          'nombre': nombre,
+          'celular': celular ?? '',
+          'carnet': carnet ?? '',
+          'comunidad': comunidad ?? '',
+          'correo': correo ?? '',
+          'cargo': cargo ?? '',
+          'id_departamento': idDepartamento,
+          'id_provincia': idProvincia,
+          'id_municipio': idMunicipio,
+          'id_rol': idRol,
+          'activo': true,
+        }),
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    final data = body['data'];
+    if (data is Map<String, dynamic>) {
+      return Usuario.fromJson(data);
+    }
+    throw Exception('No se pudo crear el usuario');
+  }
+
   Future<Usuario> getUsuario(int id) async {
     final response = await http.get(
       Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),

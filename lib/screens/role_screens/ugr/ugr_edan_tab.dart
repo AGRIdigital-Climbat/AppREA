@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../config/theme.dart';
 import '../../../models/ugr_models.dart';
-import '../../../mocks/ugr_mock_data.dart';
+import '../../../services/auth_service.dart';
+import '../../../services/database_helper.dart';
 import 'ugr_edan_detalle.dart';
 import 'ugr_evento.dart';
 import 'ugr_route.dart';
@@ -14,9 +15,42 @@ class UgrEdanTab extends StatefulWidget {
 }
 
 class UgrEdanTabState extends State<UgrEdanTab> {
-  late final List<UgrEdan> _edanes = mockEdanes();
+  List<UgrEdan> _edanes = [];
+  bool _cargando = true;
   UgrEdanEstado? _filtro;
   String _query = '';
+
+  int get edanesCount => _edanes.length;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargarEdanes();
+  }
+
+  Future<void> _cargarEdanes() async {
+    final userId = AuthService.instance.userId;
+    if (userId == null) {
+      if (mounted) setState(() => _cargando = false);
+      return;
+    }
+    try {
+      final edanes = await DatabaseHelper.instance.getEdans(userId);
+      if (!mounted) return;
+      setState(() {
+        _edanes = edanes
+            .map((e) => UgrEdan.fromEdan(
+                  e,
+                  municipioNombre: e.municipioNombre ?? '',
+                  usuarioNombre: AuthService.instance.userName,
+                ))
+            .toList();
+        _cargando = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
 
   void addEdan(UgrEdan edan) {
     setState(() => _edanes.insert(0, edan));
@@ -127,6 +161,9 @@ class UgrEdanTabState extends State<UgrEdanTab> {
   }
 
   Widget _buildList(Color primary) {
+    if (_cargando) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
     final list = _filtered;
     if (list.isEmpty) {
       return Center(

@@ -1,12 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
+import '../../models/edan.dart';
+import '../../models/ugr_models.dart';
 import '../../providers/connectivity_provider.dart';
+import '../../providers/reporte_provider.dart';
+import '../../services/auth_service.dart';
+import '../../services/database_helper.dart';
 import '../../widgets/perfil_tab.dart';
 import '../municipio_reportes_screen.dart';
 import 'ugr/ugr_dashboard_tab.dart';
+import 'ugr/ugr_edan_form_screen.dart';
 import 'ugr/ugr_edan_tab.dart';
 import 'ugr/ugr_reportes_tab.dart';
+import 'ugr/ugr_route.dart';
 import 'ugr/ugr_sheets.dart';
 
 class UgrScreen extends StatefulWidget {
@@ -151,18 +158,86 @@ class _UgrScreenState extends State<UgrScreen> {
         return null;
       case 2:
         return FloatingActionButton(
-          onPressed: () => showUgrNuevoEdan(
-            context,
-            onGuardar: (edan) {
-              _edanTabKey.currentState?.addEdan(edan);
-            },
-          ),
+          onPressed: () async {
+            final siguienteNumero = await _calcularSiguienteNumero();
+            if (!mounted) return;
+            final edan = await Navigator.of(context).push<Edan>(
+              ugrRoute(UgrEdanFormScreen(
+                siguienteNumero: siguienteNumero,
+              )),
+            );
+            if (edan == null || !mounted) return;
+            _prepararEdan(edan);
+            await _persistirEdan(edan);
+            if (!mounted) return;
+            final ugr = _mapToUgrEdan(edan);
+            _edanTabKey.currentState?.addEdan(ugr);
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('EDAN guardado correctamente.'),
+                backgroundColor: AppColors.completed,
+              ),
+            );
+          },
           tooltip: 'Nuevo EDAN',
           child: const Icon(Icons.add),
         );
       default:
         return null;
     }
+  }
+
+  Future<int> _calcularSiguienteNumero() async {
+    final userId = AuthService.instance.userId;
+    if (userId != null) {
+      try {
+        final count = await DatabaseHelper.instance
+            .countEdansDelAnio(userId, DateTime.now().year);
+        return count + 1;
+      } catch (_) {}
+    }
+    return (_edanTabKey.currentState?.edanesCount ?? 0) + 1;
+  }
+
+  void _prepararEdan(Edan edan) {
+    final rp = context.read<ReporteProvider>();
+    if (edan.idDepartamento != null) {
+      final d = rp.departamentos.where((x) => x.id == edan.idDepartamento);
+      if (d.isNotEmpty) edan.departamentoNombre = d.first.nombre;
+    }
+    if (edan.idProvincia != null) {
+      final p = rp.provincias.where((x) => x.id == edan.idProvincia);
+      if (p.isNotEmpty) edan.provinciaNombre = p.first.nombre;
+    }
+    if (edan.idMunicipio != null) {
+      final m = rp.municipios.where((x) => x.id == edan.idMunicipio);
+      if (m.isNotEmpty) edan.municipioNombre = m.first.nombre;
+    }
+  }
+
+  Future<void> _persistirEdan(Edan edan) async {
+    final userId = AuthService.instance.userId;
+    if (userId == null) return;
+    try {
+      await DatabaseHelper.instance.insertEdan(
+        edan,
+        usuarioId: userId,
+        municipioNombre: edan.municipioNombre,
+      );
+    } catch (e) {
+      debugPrint('[UgrScreen] Error al guardar EDAN: $e');
+    }
+  }
+
+  UgrEdan _mapToUgrEdan(Edan edan) {
+    final profile = AuthService.instance.getSavedProfile();
+    return UgrEdan.fromEdan(
+      edan,
+      municipioNombre: edan.municipioNombre ?? 'Municipio',
+      usuarioNombre: (profile['nombre'] as String?)?.isNotEmpty == true
+          ? profile['nombre'] as String
+          : null,
+    );
   }
 
   String _getTabTitle() {
