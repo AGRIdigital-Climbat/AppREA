@@ -6,6 +6,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
+import 'ugr_edan_list_screen.dart';
 
 class UgrDashboardTab extends StatefulWidget {
   const UgrDashboardTab({super.key});
@@ -242,6 +243,26 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
             const SizedBox(width: 8),
             Expanded(child: cards[4]),
           ],
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const UgrEdanListScreen()),
+            ),
+            icon: const Icon(Icons.folder_outlined),
+            label: const Text('Ver mis EDAN'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primary,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
         ),
       ],
     );

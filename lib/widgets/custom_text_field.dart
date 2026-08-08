@@ -5,6 +5,7 @@ import '../config/theme.dart';
 class CustomTextField extends StatelessWidget {
   final String label;
   final String? hint;
+  final String? initial;
   final TextEditingController? controller;
   final TextInputType? keyboardType;
   final TextCapitalization textCapitalization;
@@ -23,6 +24,7 @@ class CustomTextField extends StatelessWidget {
     super.key,
     required this.label,
     this.hint,
+    this.initial,
     this.controller,
     this.keyboardType,
     this.textCapitalization = TextCapitalization.none,
@@ -57,6 +59,7 @@ class CustomTextField extends StatelessWidget {
         ],
         TextFormField(
           controller: controller,
+          initialValue: controller == null ? initial : null,
           keyboardType: keyboardType,
           textCapitalization: textCapitalization,
           obscureText: obscureText,

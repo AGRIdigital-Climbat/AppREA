@@ -469,12 +469,16 @@ class ApiService {
         .toList();
   }
 
-  Future<List<Usuario>> getUsuarios({bool soloActivos = true}) async {
+  Future<List<Usuario>> getUsuarios({bool soloActivos = true, int? idMunicipio, int? idRol}) async {
+    final queryParams = <String>[];
+    if (idMunicipio != null) queryParams.add('id_municipio=$idMunicipio');
+    if (idRol != null) queryParams.add('id_rol=$idRol');
+    queryParams.add('skip=0');
+    queryParams.add('limit=50');
+    
+    final uri = Uri.parse('${ApiConfig.usuariosEndpoint}?${queryParams.join('&')}');
     final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse(ApiConfig.usuariosEndpoint),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 10))
+      http.get(uri, headers: _headers).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
     final data = body['data'];
@@ -504,7 +508,7 @@ class ApiService {
     int? idDepartamento,
     int? idProvincia,
     int? idMunicipio,
-    int idRol = 7,
+    int idRol = 8,
   }) async {
     final response = await _requestWithRetry(() =>
       http.post(

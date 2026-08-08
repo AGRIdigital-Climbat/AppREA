@@ -3,12 +3,14 @@ class EdanGrupoEtario {
   int fallecidos;
   int heridos;
   int desaparecidos;
+  String observaciones;
 
   EdanGrupoEtario({
     this.rango = '',
     this.fallecidos = 0,
     this.heridos = 0,
     this.desaparecidos = 0,
+    this.observaciones = '',
   });
 
   factory EdanGrupoEtario.fromJson(Map<String, dynamic> json) {
@@ -17,6 +19,7 @@ class EdanGrupoEtario {
       fallecidos: _toInt(json['fallecidos']),
       heridos: _toInt(json['heridos']),
       desaparecidos: _toInt(json['desaparecidos']),
+      observaciones: json['observaciones'] ?? '',
     );
   }
 
@@ -25,6 +28,7 @@ class EdanGrupoEtario {
         'fallecidos': fallecidos,
         'heridos': heridos,
         'desaparecidos': desaparecidos,
+        'observaciones': observaciones,
       };
 
   bool get tieneDatos => fallecidos > 0 || heridos > 0 || desaparecidos > 0;
@@ -164,13 +168,13 @@ class EdanEstablecimientoSalud {
 
 class EdanNecesidadSalud {
   bool botiquines;
-  int atencionInmediata;
+  int numeroPersonas;
   String otrasNecesidades;
   String observaciones;
 
   EdanNecesidadSalud({
     this.botiquines = false,
-    this.atencionInmediata = 0,
+    this.numeroPersonas = 0,
     this.otrasNecesidades = '',
     this.observaciones = '',
   });
@@ -178,7 +182,10 @@ class EdanNecesidadSalud {
   factory EdanNecesidadSalud.fromJson(Map<String, dynamic> json) {
     return EdanNecesidadSalud(
       botiquines: _toBool(json['botiquines']),
-      atencionInmediata: _toInt(json['atencion_inmediata'] ?? json['atencionInmediata']),
+      numeroPersonas: _toInt(json['numero_personas'] ??
+          json['numeroPersonas'] ??
+          json['atencion_inmediata'] ??
+          json['atencionInmediata']),
       otrasNecesidades: json['otras_necesidades'] ?? json['otrasNecesidades'] ?? '',
       observaciones: json['observaciones'] ?? '',
     );
@@ -186,7 +193,7 @@ class EdanNecesidadSalud {
 
   Map<String, dynamic> toJson() => {
         'botiquines': botiquines,
-        'atencion_inmediata': atencionInmediata,
+        'numero_personas': numeroPersonas,
         'otras_necesidades': otrasNecesidades,
         'observaciones': observaciones,
       };
@@ -197,6 +204,7 @@ class EdanDanoVial {
   String tramo;
   bool danoParcial;
   bool danoTotal;
+  double kmDanio;
   String necesidadesInmediatas;
   String observaciones;
 
@@ -205,6 +213,7 @@ class EdanDanoVial {
     this.tramo = '',
     this.danoParcial = false,
     this.danoTotal = false,
+    this.kmDanio = 0,
     this.necesidadesInmediatas = '',
     this.observaciones = '',
   });
@@ -215,6 +224,7 @@ class EdanDanoVial {
       tramo: json['tramo'] ?? '',
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
       danoTotal: _toBool(json['dano_total'] ?? json['danoTotal']),
+      kmDanio: _toDouble(json['km_danio'] ?? json['kmDanio']),
       necesidadesInmediatas: json['necesidades_inmediatas'] ??
           json['necesidadesInmediatas'] ??
           '',
@@ -227,6 +237,7 @@ class EdanDanoVial {
         'tramo': tramo,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
+        'km_danio': kmDanio,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
       };
@@ -266,36 +277,27 @@ class EdanDanoInfraPublica {
       };
 }
 
-class EdanDanoServicioBasico {
-  bool luzElectrica;
-  bool aguaPotable;
-  bool alcantarillado;
-  bool gasDomiciliario;
-  bool telecomunicaciones;
+class EdanServicioBasicoDetalle {
+  String tipo;
+  bool afectado;
   bool danoParcial;
   bool danoTotal;
   String necesidadesInmediatas;
   String observaciones;
 
-  EdanDanoServicioBasico({
-    this.luzElectrica = false,
-    this.aguaPotable = false,
-    this.alcantarillado = false,
-    this.gasDomiciliario = false,
-    this.telecomunicaciones = false,
+  EdanServicioBasicoDetalle({
+    required this.tipo,
+    this.afectado = false,
     this.danoParcial = false,
     this.danoTotal = false,
     this.necesidadesInmediatas = '',
     this.observaciones = '',
   });
 
-  factory EdanDanoServicioBasico.fromJson(Map<String, dynamic> json) {
-    return EdanDanoServicioBasico(
-      luzElectrica: _toBool(json['luz_electrica'] ?? json['luzElectrica']),
-      aguaPotable: _toBool(json['agua_potable'] ?? json['aguaPotable']),
-      alcantarillado: _toBool(json['alcantarillado']),
-      gasDomiciliario: _toBool(json['gas_domiciliario'] ?? json['gasDomiciliario']),
-      telecomunicaciones: _toBool(json['telecomunicaciones']),
+  factory EdanServicioBasicoDetalle.fromJson(Map<String, dynamic> json) {
+    return EdanServicioBasicoDetalle(
+      tipo: json['tipo'] ?? '',
+      afectado: _toBool(json['afectado'] ?? json['impactado']),
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
       danoTotal: _toBool(json['dano_total'] ?? json['danoTotal']),
       necesidadesInmediatas: json['necesidades_inmediatas'] ??
@@ -306,23 +308,103 @@ class EdanDanoServicioBasico {
   }
 
   Map<String, dynamic> toJson() => {
-        'luz_electrica': luzElectrica,
-        'agua_potable': aguaPotable,
-        'alcantarillado': alcantarillado,
-        'gas_domiciliario': gasDomiciliario,
-        'telecomunicaciones': telecomunicaciones,
+        'tipo': tipo,
+        'afectado': afectado,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
       };
 
+  String get etiqueta {
+    switch (tipo) {
+      case 'energia_electrica':
+        return 'Energía eléctrica';
+      case 'agua_potable':
+        return 'Agua potable';
+      case 'alcantarillado':
+        return 'Alcantarillado';
+      case 'gas_domiciliario':
+        return 'Gas domiciliario';
+      case 'telecomunicaciones':
+        return 'Telecomunicaciones';
+      default:
+        return tipo;
+    }
+  }
+
+  bool get tieneDatos =>
+      danoParcial ||
+      danoTotal ||
+      necesidadesInmediatas.trim().isNotEmpty ||
+      observaciones.trim().isNotEmpty;
+}
+
+class EdanDanoServicioBasico {
+  List<EdanServicioBasicoDetalle> servicios;
+
+  EdanDanoServicioBasico({List<EdanServicioBasicoDetalle>? servicios})
+      : servicios = servicios ?? _serviciosPorDefecto();
+
+  static List<EdanServicioBasicoDetalle> _serviciosPorDefecto() => [
+        EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
+        EdanServicioBasicoDetalle(tipo: 'agua_potable'),
+        EdanServicioBasicoDetalle(tipo: 'alcantarillado'),
+        EdanServicioBasicoDetalle(tipo: 'gas_domiciliario'),
+        EdanServicioBasicoDetalle(tipo: 'telecomunicaciones'),
+      ];
+
+  factory EdanDanoServicioBasico.fromJson(dynamic json) {
+    if (json is List) {
+      final porTipo = {
+        for (final e in json.whereType<Map>())
+          (e['tipo'] ?? '').toString(): EdanServicioBasicoDetalle.fromJson(
+              Map<String, dynamic>.from(e)),
+      };
+      final resultado = EdanDanoServicioBasico();
+      for (var i = 0; i < resultado.servicios.length; i++) {
+        final porDefecto = resultado.servicios[i];
+        resultado.servicios[i] = porTipo[porDefecto.tipo] ?? porDefecto;
+      }
+      return resultado;
+    }
+    final data =
+        json is Map ? Map<String, dynamic>.from(json) : <String, dynamic>{};
+    final resultado = EdanDanoServicioBasico();
+    final legado = {
+      'energia_electrica': 'luz_electrica',
+      'agua_potable': 'agua_potable',
+      'alcantarillado': 'alcantarillado',
+      'gas_domiciliario': 'gas_domiciliario',
+      'telecomunicaciones': 'telecomunicaciones',
+    };
+    for (final s in resultado.servicios) {
+      final key = legado[s.tipo] ?? s.tipo;
+      s.afectado = _toBool(data[key]);
+    }
+    final parcial = _toBool(data['dano_parcial'] ?? data['danoParcial']);
+    final total = _toBool(data['dano_total'] ?? data['danoTotal']);
+    final nec = (data['necesidades_inmediatas'] ??
+            data['necesidadesInmediatas'] ??
+            '')
+        .toString();
+    final obs = (data['observaciones'] ?? '').toString();
+    for (final s in resultado.servicios) {
+      if (s.afectado) {
+        s.danoParcial = parcial;
+        s.danoTotal = total;
+        s.necesidadesInmediatas = nec;
+        s.observaciones = obs;
+      }
+    }
+    return resultado;
+  }
+
+  List<Map<String, dynamic>> toJson() =>
+      servicios.map((e) => e.toJson()).toList();
+
   bool get algunaSeleccionada =>
-      luzElectrica ||
-      aguaPotable ||
-      alcantarillado ||
-      gasDomiciliario ||
-      telecomunicaciones;
+      servicios.any((s) => s.afectado || s.tieneDatos);
 }
 
 class EdanDanoUnidadEducativa {
@@ -330,18 +412,26 @@ class EdanDanoUnidadEducativa {
   String comunidad;
   bool danoParcial;
   bool danoTotal;
-  bool suspensionClases;
-  bool perdidaMaterial;
-  bool funcionaAlbergue;
+  bool? suspensionClases;
+  bool? perdidaMaterial;
+  bool? funcionaAlbergue;
+  int estudiantes;
+  int profesores;
+  int administrativos;
+  String observaciones;
 
   EdanDanoUnidadEducativa({
     this.nombreEstablecimiento = '',
     this.comunidad = '',
     this.danoParcial = false,
     this.danoTotal = false,
-    this.suspensionClases = false,
-    this.perdidaMaterial = false,
-    this.funcionaAlbergue = false,
+    this.suspensionClases,
+    this.perdidaMaterial,
+    this.funcionaAlbergue,
+    this.estudiantes = 0,
+    this.profesores = 0,
+    this.administrativos = 0,
+    this.observaciones = '',
   });
 
   factory EdanDanoUnidadEducativa.fromJson(Map<String, dynamic> json) {
@@ -352,9 +442,19 @@ class EdanDanoUnidadEducativa {
       comunidad: json['comunidad'] ?? '',
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
       danoTotal: _toBool(json['dano_total'] ?? json['danoTotal']),
-      suspensionClases: _toBool(json['suspension_clases'] ?? json['suspensionClases']),
-      perdidaMaterial: _toBool(json['perdida_material'] ?? json['perdidaMaterial']),
-      funcionaAlbergue: _toBool(json['funciona_albergue'] ?? json['funcionaAlbergue']),
+      suspensionClases: json['suspension_clases'] ?? json['suspensionClases'] == null
+          ? null
+          : _toBool(json['suspension_clases'] ?? json['suspensionClases']),
+      perdidaMaterial: json['perdida_material'] ?? json['perdidaMaterial'] == null
+          ? null
+          : _toBool(json['perdida_material'] ?? json['perdidaMaterial']),
+      funcionaAlbergue: json['funciona_albergue'] ?? json['funcionaAlbergue'] == null
+          ? null
+          : _toBool(json['funciona_albergue'] ?? json['funcionaAlbergue']),
+      estudiantes: _toInt(json['estudiantes']),
+      profesores: _toInt(json['profesores']),
+      administrativos: _toInt(json['administrativos']),
+      observaciones: json['observaciones'] ?? '',
     );
   }
 
@@ -366,41 +466,13 @@ class EdanDanoUnidadEducativa {
         'suspension_clases': suspensionClases,
         'perdida_material': perdidaMaterial,
         'funciona_albergue': funcionaAlbergue,
-      };
-}
-
-class EdanAfectacionEducativa {
-  int estudiantes;
-  int profesores;
-  int administrativos;
-  int totalAfectados;
-  String observaciones;
-
-  EdanAfectacionEducativa({
-    this.estudiantes = 0,
-    this.profesores = 0,
-    this.administrativos = 0,
-    this.totalAfectados = 0,
-    this.observaciones = '',
-  });
-
-  factory EdanAfectacionEducativa.fromJson(Map<String, dynamic> json) {
-    return EdanAfectacionEducativa(
-      estudiantes: _toInt(json['estudiantes']),
-      profesores: _toInt(json['profesores']),
-      administrativos: _toInt(json['administrativos']),
-      totalAfectados: _toInt(json['total_afectados'] ?? json['totalAfectados']),
-      observaciones: json['observaciones'] ?? '',
-    );
-  }
-
-  Map<String, dynamic> toJson() => {
         'estudiantes': estudiantes,
         'profesores': profesores,
         'administrativos': administrativos,
-        'total_afectados': totalAfectados,
         'observaciones': observaciones,
       };
+
+  int get totalAfectados => estudiantes + profesores + administrativos;
 }
 
 class EdanDanoVivienda {
@@ -513,20 +585,21 @@ class EdanDanoPecuario {
 
 class EdanInfraProductiva {
   String tipo;
-  bool danoParcial;
-  bool danoTotal;
+  int danoParcial;
+  int danoTotal;
 
   EdanInfraProductiva({
     this.tipo = '',
-    this.danoParcial = false,
-    this.danoTotal = false,
+    this.danoParcial = 0,
+    this.danoTotal = 0,
   });
 
   factory EdanInfraProductiva.fromJson(Map<String, dynamic> json) {
+    int count(dynamic v) => v is bool ? (v ? 1 : 0) : _toInt(v);
     return EdanInfraProductiva(
       tipo: json['tipo'] ?? '',
-      danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
-      danoTotal: _toBool(json['dano_total'] ?? json['danoTotal']),
+      danoParcial: count(json['dano_parcial'] ?? json['danoParcial']),
+      danoTotal: count(json['dano_total'] ?? json['danoTotal']),
     );
   }
 
@@ -537,77 +610,130 @@ class EdanInfraProductiva {
       };
 }
 
-class EdanVulnerables {
-  int ninos;
-  int adolescentes;
-  int mujeresLactantes;
-  int mujeresEmbarazadas;
-  int adultosMayores;
-  int personasDiscapacidad;
-  int personasEnfermedad;
+class EdanGrupoVulnerable {
+  int mujeres;
+  int hombres;
+  bool? apoyoPsicologico;
+  bool? reposicionDocumentos;
+  String observaciones;
 
-  EdanVulnerables({
-    this.ninos = 0,
-    this.adolescentes = 0,
-    this.mujeresLactantes = 0,
-    this.mujeresEmbarazadas = 0,
-    this.adultosMayores = 0,
-    this.personasDiscapacidad = 0,
-    this.personasEnfermedad = 0,
+  EdanGrupoVulnerable({
+    this.mujeres = 0,
+    this.hombres = 0,
+    this.apoyoPsicologico,
+    this.reposicionDocumentos,
+    this.observaciones = '',
   });
 
-  factory EdanVulnerables.fromJson(Map<String, dynamic> json) {
-    return EdanVulnerables(
-      ninos: _toInt(json['ninos'] ?? json['ninas']),
-      adolescentes: _toInt(json['adolescentes']),
-      mujeresLactantes: _toInt(json['mujeres_lactantes'] ?? json['mujeresLactantes']),
-      mujeresEmbarazadas: _toInt(json['mujeres_embarazadas'] ?? json['mujeresEmbarazadas']),
-      adultosMayores: _toInt(json['adultos_mayores'] ?? json['adultosMayores']),
-      personasDiscapacidad: _toInt(json['personas_discapacidad'] ?? json['personasDiscapacidad']),
-      personasEnfermedad: _toInt(json['personas_enfermedad'] ?? json['personasEnfermedad']),
+  int get total => mujeres + hombres;
+
+  bool get tieneDatos =>
+      mujeres > 0 ||
+      hombres > 0 ||
+      (apoyoPsicologico == true) ||
+      (reposicionDocumentos == true) ||
+      observaciones.trim().isNotEmpty;
+
+  factory EdanGrupoVulnerable.fromJson(Map<String, dynamic> json) {
+    return EdanGrupoVulnerable(
+      mujeres: _toInt(json['mujeres']),
+      hombres: _toInt(json['hombres']),
+      apoyoPsicologico: json['apoyo_psicologico'] ?? json['apoyoPsicologico'] == null
+          ? null
+          : _toBool(json['apoyo_psicologico'] ?? json['apoyoPsicologico']),
+      reposicionDocumentos: json['reposicion_documentos'] ?? json['reposicionDocumentos'] == null
+          ? null
+          : _toBool(json['reposicion_documentos'] ?? json['reposicionDocumentos']),
+      observaciones: json['observaciones'] ?? '',
     );
   }
 
   Map<String, dynamic> toJson() => {
-        'ninos': ninos,
-        'adolescentes': adolescentes,
-        'mujeres_lactantes': mujeresLactantes,
-        'mujeres_embarazadas': mujeresEmbarazadas,
-        'adultos_mayores': adultosMayores,
-        'personas_discapacidad': personasDiscapacidad,
-        'personas_enfermedad': personasEnfermedad,
+        'mujeres': mujeres,
+        'hombres': hombres,
+        'apoyo_psicologico': apoyoPsicologico,
+        'reposicion_documentos': reposicionDocumentos,
+        'observaciones': observaciones,
+      };
+}
+
+class EdanVulnerables {
+  EdanGrupoVulnerable ninos;
+  EdanGrupoVulnerable adolescentes;
+  EdanGrupoVulnerable mujeresLactantes;
+  EdanGrupoVulnerable mujeresEmbarazadas;
+  EdanGrupoVulnerable adultosMayores;
+  EdanGrupoVulnerable personasDiscapacidad;
+  EdanGrupoVulnerable personasEnfermedad;
+
+  EdanVulnerables({
+    EdanGrupoVulnerable? ninos,
+    EdanGrupoVulnerable? adolescentes,
+    EdanGrupoVulnerable? mujeresLactantes,
+    EdanGrupoVulnerable? mujeresEmbarazadas,
+    EdanGrupoVulnerable? adultosMayores,
+    EdanGrupoVulnerable? personasDiscapacidad,
+    EdanGrupoVulnerable? personasEnfermedad,
+  })  : ninos = ninos ?? EdanGrupoVulnerable(),
+        adolescentes = adolescentes ?? EdanGrupoVulnerable(),
+        mujeresLactantes = mujeresLactantes ?? EdanGrupoVulnerable(),
+        mujeresEmbarazadas = mujeresEmbarazadas ?? EdanGrupoVulnerable(),
+        adultosMayores = adultosMayores ?? EdanGrupoVulnerable(),
+        personasDiscapacidad = personasDiscapacidad ?? EdanGrupoVulnerable(),
+        personasEnfermedad = personasEnfermedad ?? EdanGrupoVulnerable();
+
+  factory EdanVulnerables.fromJson(Map<String, dynamic> json) {
+    EdanGrupoVulnerable fila(dynamic v) => v is Map
+        ? EdanGrupoVulnerable.fromJson(Map<String, dynamic>.from(v))
+        : EdanGrupoVulnerable(hombres: _toInt(v));
+    return EdanVulnerables(
+      ninos: fila(json['ninos'] ?? json['ninas']),
+      adolescentes: fila(json['adolescentes']),
+      mujeresLactantes: fila(json['mujeres_lactantes'] ?? json['mujeresLactantes']),
+      mujeresEmbarazadas: fila(json['mujeres_embarazadas'] ?? json['mujeresEmbarazadas']),
+      adultosMayores: fila(json['adultos_mayores'] ?? json['adultosMayores']),
+      personasDiscapacidad: fila(json['personas_discapacidad'] ?? json['personasDiscapacidad']),
+      personasEnfermedad: fila(json['personas_enfermedad'] ?? json['personasEnfermedad']),
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'ninos': ninos.toJson(),
+        'adolescentes': adolescentes.toJson(),
+        'mujeres_lactantes': mujeresLactantes.toJson(),
+        'mujeres_embarazadas': mujeresEmbarazadas.toJson(),
+        'adultos_mayores': adultosMayores.toJson(),
+        'personas_discapacidad': personasDiscapacidad.toJson(),
+        'personas_enfermedad': personasEnfermedad.toJson(),
       };
 
-  bool get algunoPositivo =>
-      ninos > 0 ||
-      adolescentes > 0 ||
-      mujeresLactantes > 0 ||
-      mujeresEmbarazadas > 0 ||
-      adultosMayores > 0 ||
-      personasDiscapacidad > 0 ||
-      personasEnfermedad > 0;
+  List<EdanGrupoVulnerable> get grupos => [
+        ninos,
+        adolescentes,
+        mujeresLactantes,
+        mujeresEmbarazadas,
+        adultosMayores,
+        personasDiscapacidad,
+        personasEnfermedad,
+      ];
+
+  bool get algunoPositivo => grupos.any((g) => g.tieneDatos);
+
+  int get totalMujeres =>
+      grupos.fold<int>(0, (acc, g) => acc + g.mujeres);
+
+  int get totalHombres =>
+      grupos.fold<int>(0, (acc, g) => acc + g.hombres);
+
+  int get totalGeneral =>
+      grupos.fold<int>(0, (acc, g) => acc + g.total);
 }
 
 class EdanProteccion {
   EdanVulnerables vulnerables;
-  int mujeres;
-  int hombres;
-  int total;
-  String necesidades;
-  String apoyoPsicosocial;
-  bool reposicionDocumentos;
-  String observaciones;
 
-  EdanProteccion({
-    EdanVulnerables? vulnerables,
-    this.mujeres = 0,
-    this.hombres = 0,
-    this.total = 0,
-    this.necesidades = '',
-    this.apoyoPsicosocial = '',
-    this.reposicionDocumentos = false,
-    this.observaciones = '',
-  }) : vulnerables = vulnerables ?? EdanVulnerables();
+  EdanProteccion({EdanVulnerables? vulnerables})
+      : vulnerables = vulnerables ?? EdanVulnerables();
 
   factory EdanProteccion.fromJson(Map<String, dynamic> json) {
     return EdanProteccion(
@@ -615,25 +741,11 @@ class EdanProteccion {
           ? EdanVulnerables.fromJson(
               Map<String, dynamic>.from(json['vulnerables'] as Map))
           : null,
-      mujeres: _toInt(json['mujeres']),
-      hombres: _toInt(json['hombres']),
-      total: _toInt(json['total']),
-      necesidades: json['necesidades'] ?? '',
-      apoyoPsicosocial: json['apoyo_psicosocial'] ?? json['apoyoPsicosocial'] ?? '',
-      reposicionDocumentos: _toBool(json['reposicion_documentos'] ?? json['reposicionDocumentos']),
-      observaciones: json['observaciones'] ?? '',
     );
   }
 
   Map<String, dynamic> toJson() => {
         'vulnerables': vulnerables.toJson(),
-        'mujeres': mujeres,
-        'hombres': hombres,
-        'total': total,
-        'necesidades': necesidades,
-        'apoyo_psicosocial': apoyoPsicosocial,
-        'reposicion_documentos': reposicionDocumentos,
-        'observaciones': observaciones,
       };
 }
 
@@ -647,7 +759,15 @@ class EdanNecesidadHumanitaria {
   bool herramientas;
   bool almacenamientoAgua;
   bool banos;
-  String observaciones;
+  String obsAlimentos;
+  String obsRefugioVivienda;
+  String obsRopaCama;
+  String obsArticulosHigiene;
+  String obsArticulosCocina;
+  String obsPrendasVestir;
+  String obsHerramientas;
+  String obsAlmacenamientoAgua;
+  String obsBanos;
 
   EdanNecesidadHumanitaria({
     this.alimentos = false,
@@ -659,7 +779,15 @@ class EdanNecesidadHumanitaria {
     this.herramientas = false,
     this.almacenamientoAgua = false,
     this.banos = false,
-    this.observaciones = '',
+    this.obsAlimentos = '',
+    this.obsRefugioVivienda = '',
+    this.obsRopaCama = '',
+    this.obsArticulosHigiene = '',
+    this.obsArticulosCocina = '',
+    this.obsPrendasVestir = '',
+    this.obsHerramientas = '',
+    this.obsAlmacenamientoAgua = '',
+    this.obsBanos = '',
   });
 
   factory EdanNecesidadHumanitaria.fromJson(Map<String, dynamic> json) {
@@ -673,7 +801,15 @@ class EdanNecesidadHumanitaria {
       herramientas: _toBool(json['herramientas']),
       almacenamientoAgua: _toBool(json['almacenamiento_agua'] ?? json['almacenamientoAgua']),
       banos: _toBool(json['banos']),
-      observaciones: json['observaciones'] ?? '',
+      obsAlimentos: json['obs_alimentos'] ?? json['obsAlimentos'] ?? '',
+      obsRefugioVivienda: json['obs_refugio_vivienda'] ?? json['obsRefugioVivienda'] ?? '',
+      obsRopaCama: json['obs_ropa_cama'] ?? json['obsRopaCama'] ?? '',
+      obsArticulosHigiene: json['obs_articulos_higiene'] ?? json['obsArticulosHigiene'] ?? '',
+      obsArticulosCocina: json['obs_articulos_cocina'] ?? json['obsArticulosCocina'] ?? '',
+      obsPrendasVestir: json['obs_prendas_vestir'] ?? json['obsPrendasVestir'] ?? '',
+      obsHerramientas: json['obs_herramientas'] ?? '',
+      obsAlmacenamientoAgua: json['obs_almacenamiento_agua'] ?? json['obsAlmacenamientoAgua'] ?? '',
+      obsBanos: json['obs_banos'] ?? '',
     );
   }
 
@@ -687,7 +823,15 @@ class EdanNecesidadHumanitaria {
         'herramientas': herramientas,
         'almacenamiento_agua': almacenamientoAgua,
         'banos': banos,
-        'observaciones': observaciones,
+        'obs_alimentos': obsAlimentos,
+        'obs_refugio_vivienda': obsRefugioVivienda,
+        'obs_ropa_cama': obsRopaCama,
+        'obs_articulos_higiene': obsArticulosHigiene,
+        'obs_articulos_cocina': obsArticulosCocina,
+        'obs_prendas_vestir': obsPrendasVestir,
+        'obs_herramientas': obsHerramientas,
+        'obs_almacenamiento_agua': obsAlmacenamientoAgua,
+        'obs_banos': obsBanos,
       };
 
   bool get algunaSeleccionada =>
@@ -714,6 +858,7 @@ class EdanLocalidad {
   bool impVivienda;
   bool impAgropecuario;
   bool impProteccion;
+  bool impNecesidades;
 
   EdanImpactoPoblacion impactoPoblacion;
   EdanNecesidadPrimeraRespuesta necesidadPrimeraRespuesta;
@@ -723,12 +868,20 @@ class EdanLocalidad {
   List<EdanDanoInfraPublica> danosInfraPublica;
   EdanDanoServicioBasico serviciosBasicos;
   List<EdanDanoUnidadEducativa> unidadesEducativas;
-  EdanAfectacionEducativa afectacionEducativa;
   List<EdanDanoVivienda> danosVivienda;
   List<EdanDanoAgricultura> danosAgricultura;
   List<EdanDanoPecuario> danosPecuarios;
   List<EdanInfraProductiva> infraProductiva;
   EdanProteccion proteccion;
+  EdanNecesidadHumanitaria necesidadHumanitaria;
+
+  String get etiquetaLugar {
+    final t = tipoLocalidad.trim();
+    final n = nombre.trim();
+    if (n.isEmpty) return t;
+    if (t.isEmpty) return n;
+    return '$t $n';
+  }
 
   EdanLocalidad({
     this.tipoLocalidad = '',
@@ -741,6 +894,7 @@ class EdanLocalidad {
     this.impVivienda = false,
     this.impAgropecuario = false,
     this.impProteccion = false,
+    this.impNecesidades = false,
     EdanImpactoPoblacion? impactoPoblacion,
     EdanNecesidadPrimeraRespuesta? necesidadPrimeraRespuesta,
     List<EdanEstablecimientoSalud>? establecimientosSalud,
@@ -749,12 +903,12 @@ class EdanLocalidad {
     List<EdanDanoInfraPublica>? danosInfraPublica,
     EdanDanoServicioBasico? serviciosBasicos,
     List<EdanDanoUnidadEducativa>? unidadesEducativas,
-    EdanAfectacionEducativa? afectacionEducativa,
     List<EdanDanoVivienda>? danosVivienda,
     List<EdanDanoAgricultura>? danosAgricultura,
     List<EdanDanoPecuario>? danosPecuarios,
     List<EdanInfraProductiva>? infraProductiva,
     EdanProteccion? proteccion,
+    EdanNecesidadHumanitaria? necesidadHumanitaria,
   })  : impactoPoblacion = impactoPoblacion ?? EdanImpactoPoblacion(),
         necesidadPrimeraRespuesta =
             necesidadPrimeraRespuesta ?? EdanNecesidadPrimeraRespuesta(),
@@ -764,12 +918,12 @@ class EdanLocalidad {
         danosInfraPublica = danosInfraPublica ?? [],
         serviciosBasicos = serviciosBasicos ?? EdanDanoServicioBasico(),
         unidadesEducativas = unidadesEducativas ?? [],
-        afectacionEducativa = afectacionEducativa ?? EdanAfectacionEducativa(),
         danosVivienda = danosVivienda ?? [],
         danosAgricultura = danosAgricultura ?? [],
         danosPecuarios = danosPecuarios ?? [],
         infraProductiva = infraProductiva ?? [],
-        proteccion = proteccion ?? EdanProteccion();
+        proteccion = proteccion ?? EdanProteccion(),
+        necesidadHumanitaria = necesidadHumanitaria ?? EdanNecesidadHumanitaria();
 
   factory EdanLocalidad.fromJson(Map<String, dynamic> json) {
     List<T> parseList<T>(dynamic value, T Function(Map<String, dynamic>) parser) {
@@ -794,6 +948,7 @@ class EdanLocalidad {
       impVivienda: _toBool(json['imp_vivienda'] ?? json['impVivienda']),
       impAgropecuario: _toBool(json['imp_agropecuario'] ?? json['impAgropecuario']),
       impProteccion: _toBool(json['imp_proteccion'] ?? json['impProteccion']),
+      impNecesidades: _toBool(json['imp_necesidades'] ?? json['impNecesidades']),
       impactoPoblacion: json['impacto_poblacion'] is Map
           ? EdanImpactoPoblacion.fromJson(
               Map<String, dynamic>.from(json['impacto_poblacion'] as Map))
@@ -811,16 +966,13 @@ class EdanLocalidad {
       danosViales: parseList(json['danos_viales'], EdanDanoVial.fromJson),
       danosInfraPublica:
           parseList(json['danos_infra_publica'], EdanDanoInfraPublica.fromJson),
-      serviciosBasicos: json['servicios_basicos'] is Map
-          ? EdanDanoServicioBasico.fromJson(
-              Map<String, dynamic>.from(json['servicios_basicos'] as Map))
-          : null,
+      serviciosBasicos:
+          (json['servicios_basicos'] is Map ||
+                  json['servicios_basicos'] is List)
+              ? EdanDanoServicioBasico.fromJson(json['servicios_basicos'])
+              : null,
       unidadesEducativas:
           parseList(json['unidades_educativas'], EdanDanoUnidadEducativa.fromJson),
-      afectacionEducativa: json['afectacion_educativa'] is Map
-          ? EdanAfectacionEducativa.fromJson(
-              Map<String, dynamic>.from(json['afectacion_educativa'] as Map))
-          : null,
       danosVivienda: parseList(json['danos_vivienda'], EdanDanoVivienda.fromJson),
       danosAgricultura:
           parseList(json['danos_agricultura'], EdanDanoAgricultura.fromJson),
@@ -830,6 +982,10 @@ class EdanLocalidad {
       proteccion: json['proteccion'] is Map
           ? EdanProteccion.fromJson(
               Map<String, dynamic>.from(json['proteccion'] as Map))
+          : null,
+      necesidadHumanitaria: json['necesidad_humanitaria'] is Map
+          ? EdanNecesidadHumanitaria.fromJson(
+              Map<String, dynamic>.from(json['necesidad_humanitaria'] as Map))
           : null,
     );
   }
@@ -845,6 +1001,7 @@ class EdanLocalidad {
         'imp_vivienda': impVivienda,
         'imp_agropecuario': impAgropecuario,
         'imp_proteccion': impProteccion,
+        'imp_necesidades': impNecesidades,
         'impacto_poblacion': impactoPoblacion.toJson(),
         'necesidad_primera_respuesta': necesidadPrimeraRespuesta.toJson(),
         'establecimientos_salud':
@@ -854,12 +1011,12 @@ class EdanLocalidad {
         'danos_infra_publica': danosInfraPublica.map((e) => e.toJson()).toList(),
         'servicios_basicos': serviciosBasicos.toJson(),
         'unidades_educativas': unidadesEducativas.map((e) => e.toJson()).toList(),
-        'afectacion_educativa': afectacionEducativa.toJson(),
         'danos_vivienda': danosVivienda.map((e) => e.toJson()).toList(),
         'danos_agricultura': danosAgricultura.map((e) => e.toJson()).toList(),
         'danos_pecuarios': danosPecuarios.map((e) => e.toJson()).toList(),
         'infra_productiva': infraProductiva.map((e) => e.toJson()).toList(),
         'proteccion': proteccion.toJson(),
+        'necesidad_humanitaria': necesidadHumanitaria.toJson(),
       };
 
   bool get tieneImpactos =>
@@ -930,8 +1087,135 @@ class Edan {
   EdanResponsable responsable;
   int idEstado;
   String estado;
+  bool sincronizado;
+  bool pendienteEliminacion;
+  bool pendienteActualizacion;
+  bool esBorrador;
 
   int get localidadesAfectadas => localidades.length;
+
+  Map<String, List<String>> get incompletosPorSeccion {
+    final result = <String, List<String>>{};
+    String etiqueta(EdanLocalidad l, int i) =>
+        l.etiquetaLugar.isEmpty ? 'Lugar ${i + 1}' : l.etiquetaLugar;
+
+    void marcar(String seccion, List<String> detalle) {
+      if (detalle.isNotEmpty) result[seccion] = detalle;
+    }
+
+    final generales01 = <String>[
+      if (idDepartamento == null ||
+          idProvincia == null ||
+          idMunicipio == null)
+        'Ubicación (departamento, provincia, municipio)',
+      if (nombreAlcalde.trim().isEmpty) 'Alcalde responsable',
+      if (fonoAlcalde.trim().isEmpty) 'Teléfono del alcalde',
+      if (fechaLlenado.trim().isEmpty) 'Fecha de llenado',
+      if (fechaEvento.trim().isEmpty) 'Fecha del evento',
+      if (tipoEventoNombre == null || tipoEventoNombre!.trim().isEmpty)
+        'Tipo de evento no seleccionado',
+    ];
+    final lugares01 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.tipoLocalidad.trim().isEmpty ||
+            entry.value.nombre.trim().isEmpty)
+          etiqueta(entry.value, entry.key),
+    ];
+    marcar('01', [...generales01, ...lugares01]);
+
+    final lugares03 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impPoblacion &&
+            !entry.value.impactoPoblacion.tieneDatosGlobales)
+          '${etiqueta(entry.value, entry.key)} (impacto en población)',
+    ];
+    marcar('03', lugares03);
+
+    final lugares04 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impSalud &&
+            !entry.value.establecimientosSalud
+                .any((s) => s.nombreEstablecimiento.trim().isNotEmpty))
+          '${etiqueta(entry.value, entry.key)} (salud)',
+    ];
+    marcar('04', lugares04);
+
+    final lugares05 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impInfraestructura &&
+            !(entry.value.danosViales
+                    .any((d) => d.viaPuente.trim().isNotEmpty) ||
+                entry.value.danosInfraPublica
+                    .any((d) => d.tipoEstructura.trim().isNotEmpty)))
+          '${etiqueta(entry.value, entry.key)} (infraestructuras)',
+    ];
+    marcar('05', lugares05);
+
+    final lugares06 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impServicios &&
+            !entry.value.serviciosBasicos.algunaSeleccionada)
+          '${etiqueta(entry.value, entry.key)} (servicios básicos)',
+    ];
+    marcar('06', lugares06);
+
+    final lugares07 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impEducacion &&
+            !entry.value.unidadesEducativas.any((u) =>
+                u.nombreEstablecimiento.trim().isNotEmpty ||
+                u.estudiantes > 0 ||
+                u.profesores > 0 ||
+                u.administrativos > 0))
+          '${etiqueta(entry.value, entry.key)} (educación)',
+    ];
+    marcar('07', lugares07);
+
+    final lugares08 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impVivienda &&
+            !entry.value.danosVivienda
+                .any((v) => v.danoParcial > 0 || v.danoTotal > 0))
+          '${etiqueta(entry.value, entry.key)} (vivienda)',
+    ];
+    marcar('08', lugares08);
+
+    final lugares09 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impAgropecuario &&
+            !(entry.value.danosAgricultura
+                    .any((a) => a.tipoCultivo.trim().isNotEmpty) ||
+                entry.value.danosPecuarios
+                    .any((p) => p.especie.trim().isNotEmpty) ||
+                entry.value.infraProductiva.any((i) => i.tipo.trim().isNotEmpty)))
+          '${etiqueta(entry.value, entry.key)} (agropecuario)',
+    ];
+    marcar('09', lugares09);
+
+    final lugares10 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impProteccion &&
+            !entry.value.proteccion.vulnerables.algunoPositivo)
+          '${etiqueta(entry.value, entry.key)} (protección)',
+    ];
+    marcar('10', lugares10);
+
+    final lugares11 = <String>[
+      for (final entry in localidades.asMap().entries)
+        if (entry.value.impNecesidades &&
+            !entry.value.necesidadHumanitaria.algunaSeleccionada)
+          '${etiqueta(entry.value, entry.key)} (necesidades humanitarias)',
+    ];
+    marcar('11', lugares11);
+
+    final responsables13 = <String>[
+      if (responsable.nombre.trim().isEmpty) 'Nombre del responsable',
+      if (responsable.cargo.trim().isEmpty) 'Cargo del responsable',
+    ];
+    marcar('13', responsables13);
+
+    return result;
+  }
 
   Edan({
     this.idLocal,
@@ -960,6 +1244,10 @@ class Edan {
     EdanResponsable? responsable,
     this.idEstado = 1,
     this.estado = 'borrador',
+    this.sincronizado = false,
+    this.pendienteEliminacion = false,
+    this.pendienteActualizacion = false,
+    this.esBorrador = false,
   })  : localidades = localidades ?? [],
         necesidadHumanitaria = necesidadHumanitaria ?? EdanNecesidadHumanitaria(),
         responsable = responsable ?? EdanResponsable();
@@ -1008,6 +1296,10 @@ class Edan {
           : EdanResponsable(),
       idEstado: _toInt(json['id_estado']) == 0 ? 1 : _toInt(json['id_estado']),
       estado: json['estado'] ?? 'borrador',
+      sincronizado: _toBool(json['sincronizado']),
+      pendienteEliminacion: _toBool(json['pendiente_eliminacion'] ?? json['pendienteEliminacion']),
+      pendienteActualizacion: _toBool(json['pendiente_actualizacion'] ?? json['pendienteActualizacion']),
+      esBorrador: _toBool(json['es_borrador'] ?? json['esBorrador']),
     );
   }
 
@@ -1034,7 +1326,6 @@ class Edan {
             (json['danos_infra_publica'] is List) ||
             (json['servicios_basicos'] is Map) ||
             (json['unidades_educativas'] is List) ||
-            (json['afectacion_educativa'] is Map) ||
             (json['danos_vivienda'] is List) ||
             (json['danos_agricultura'] is List) ||
             (json['danos_pecuarios'] is List) ||
@@ -1084,9 +1375,10 @@ class Edan {
           .toList();
       if (localidad.danosInfraPublica.isNotEmpty) localidad.impInfraestructura = true;
     }
-    if (json['servicios_basicos'] is Map) {
-      localidad.serviciosBasicos = EdanDanoServicioBasico.fromJson(
-          Map<String, dynamic>.from(json['servicios_basicos'] as Map));
+    if (json['servicios_basicos'] is Map ||
+        json['servicios_basicos'] is List) {
+      localidad.serviciosBasicos =
+          EdanDanoServicioBasico.fromJson(json['servicios_basicos']);
       if (localidad.serviciosBasicos.algunaSeleccionada) localidad.impServicios = true;
     }
     if (json['unidades_educativas'] is List) {
@@ -1096,10 +1388,6 @@ class Edan {
               Map<String, dynamic>.from(m)))
           .toList();
       if (localidad.unidadesEducativas.isNotEmpty) localidad.impEducacion = true;
-    }
-    if (json['afectacion_educativa'] is Map) {
-      localidad.afectacionEducativa = EdanAfectacionEducativa.fromJson(
-          Map<String, dynamic>.from(json['afectacion_educativa'] as Map));
     }
     if (json['danos_vivienda'] is List) {
       localidad.danosVivienda = (json['danos_vivienda'] as List)
@@ -1135,9 +1423,7 @@ class Edan {
     if (json['proteccion'] is Map) {
       localidad.proteccion = EdanProteccion.fromJson(
           Map<String, dynamic>.from(json['proteccion'] as Map));
-      if (localidad.proteccion.vulnerables.algunoPositivo ||
-          localidad.proteccion.mujeres > 0 ||
-          localidad.proteccion.hombres > 0) {
+      if (localidad.proteccion.vulnerables.algunoPositivo) {
         localidad.impProteccion = true;
       }
     }
@@ -1172,6 +1458,10 @@ class Edan {
         'responsable': responsable.toJson(),
         'id_estado': idEstado,
         'estado': estado,
+        'sincronizado': sincronizado,
+        'pendiente_eliminacion': pendienteEliminacion,
+        'pendiente_actualizacion': pendienteActualizacion,
+        'es_borrador': esBorrador,
       };
 
 }
@@ -1188,4 +1478,10 @@ bool _toBool(dynamic value) {
   if (value is bool) return value;
   if (value is num) return value != 0;
   return value.toString().toLowerCase() == 'true';
+}
+
+double _toDouble(dynamic value) {
+  if (value == null) return 0;
+  if (value is num) return value.toDouble();
+  return double.tryParse(value.toString().replaceAll(',', '.')) ?? 0;
 }

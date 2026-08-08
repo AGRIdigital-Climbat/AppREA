@@ -7,7 +7,9 @@ import '../../../models/usuario.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
+import '../../../services/database_helper.dart';
 import '../../../widgets/custom_text_field.dart';
+import 'crear_usuario_screen.dart';
 import 'ugr_edan_preview_screen.dart';
 
 const List<String> _tiposEvento = [
@@ -23,10 +25,26 @@ const List<String> _tiposEvento = [
 
 const List<String> _nivelesAtencion = ['1er Nivel', '2do Nivel', '3er Nivel'];
 
+const Map<String, String> _titulosSeccion = {
+  '01': 'Datos generales',
+  '02': 'Información total población afectada y damnificada',
+  '03': 'Impacto en la población',
+  '04': 'Impacto en la salud',
+  '05': 'Impacto en infraestructuras',
+  '06': 'Impacto en servicios básicos',
+  '07': 'Impacto en educación',
+  '08': 'Impacto en viviendas',
+  '09': 'Impacto agropecuario',
+  '10': 'Impacto en protección',
+  '11': 'Necesidades humanitarias',
+  '13': 'Responsable del Formulario',
+};
+
 class UgrEdanFormScreen extends StatefulWidget {
   final int? siguienteNumero;
+  final Edan? edanAEditar;
 
-  const UgrEdanFormScreen({super.key, this.siguienteNumero});
+  const UgrEdanFormScreen({super.key, this.siguienteNumero, this.edanAEditar});
 
   @override
   State<UgrEdanFormScreen> createState() => _UgrEdanFormScreenState();
@@ -35,6 +53,25 @@ class UgrEdanFormScreen extends StatefulWidget {
 class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   final _edan = Edan.empty();
   final Set<String> _expandidas = {'01'};
+
+  // Indicador de sección actual al desplazar
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _indicadorKey = GlobalKey();
+  final Map<String, GlobalKey> _sectionKeys = {
+    '01': GlobalKey(),
+    '02': GlobalKey(),
+    '03': GlobalKey(),
+    '04': GlobalKey(),
+    '05': GlobalKey(),
+    '06': GlobalKey(),
+    '07': GlobalKey(),
+    '08': GlobalKey(),
+    '09': GlobalKey(),
+    '10': GlobalKey(),
+    '11': GlobalKey(),
+    '13': GlobalKey(),
+  };
+  String? _seccionActual;
 
   // 01 · Datos generales
   final _nombreAlcaldeController = TextEditingController();
@@ -58,15 +95,6 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   final _familiasAfectadasController = TextEditingController();
   final _familiasDamnificadasController = TextEditingController();
 
-  // 11 · Necesidades humanitarias
-  final _obsHumanitariaController = TextEditingController();
-
-  // 13 · Responsable
-  final _respNombreController = TextEditingController();
-  final _respCargoController = TextEditingController();
-  final _respFonoController = TextEditingController();
-  final _respCorreoController = TextEditingController();
-
   @override
   void initState() {
     super.initState();
@@ -75,6 +103,19 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     final now = TimeOfDay.now();
     _hora12 = ((now.hour % 12 == 0 ? 12 : now.hour % 12)).toString().padLeft(2, '0');
     _ampm = now.hour >= 12 ? 'PM' : 'AM';
+    _scrollController.addListener(_onScroll);
+
+    final token = AuthService.instance.currentToken;
+    if (token != null) {
+      _edan.responsable.nombre = token.nombre;
+      _edan.responsable.cargo = token.cargo ?? '';
+      _edan.responsable.fono = token.celular ?? '';
+      _edan.responsable.correo = token.correo ?? '';
+    }
+
+    if (widget.edanAEditar != null) {
+      _cargarEdan(widget.edanAEditar!);
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final token = AuthService.instance.currentToken;
@@ -82,10 +123,76 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         context.read<ReporteProvider>().loadMunicipios(token!.idProvincia!, token.idDepartamento!);
       }
       try {
-        final usuarios = await ApiService.instance.getUsuarios();
+        final idMunicipio = AuthService.instance.currentToken?.idMunicipio;
+        final usuarios = await ApiService.instance.getUsuarios(
+          idMunicipio: idMunicipio,
+          idRol: 8,
+        );
         if (mounted) setState(() => _usuarios = usuarios);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error cargando usuarios: $e');
+      }
     });
+  }
+
+  void _cargarEdan(Edan edan) {
+    _edan.idLocal = edan.idLocal;
+    _edan.idServer = edan.idServer;
+    _edan.idEdan = edan.idEdan;
+    _edan.codigoEdan = edan.codigoEdan;
+    _edan.idDepartamento = edan.idDepartamento;
+    _edan.idProvincia = edan.idProvincia;
+    _edan.idMunicipio = edan.idMunicipio;
+    _edan.departamentoNombre = edan.departamentoNombre;
+    _edan.provinciaNombre = edan.provinciaNombre;
+    _edan.municipioNombre = edan.municipioNombre;
+    _edan.nombreAlcalde = edan.nombreAlcalde;
+    _edan.fonoAlcalde = edan.fonoAlcalde;
+    _edan.fechaLlenado = edan.fechaLlenado;
+    _edan.fechaEvento = edan.fechaEvento;
+    _edan.idTipoEvento = edan.idTipoEvento;
+    _edan.tipoEventoNombre = edan.tipoEventoNombre;
+    _edan.totalPoblacionAfectada = edan.totalPoblacionAfectada;
+    _edan.totalFamiliasAfectadas = edan.totalFamiliasAfectadas;
+    _edan.totalFamiliasDamnificadas = edan.totalFamiliasDamnificadas;
+    _edan.localidades.clear();
+    _edan.localidades.addAll(edan.localidades);
+    _edan.necesidadHumanitaria = edan.necesidadHumanitaria;
+    _edan.responsable = edan.responsable;
+    _edan.idEstado = edan.idEstado;
+    _edan.estado = edan.estado;
+
+    _nombreAlcaldeController.text = edan.nombreAlcalde;
+    _fonoAlcaldeController.text = edan.fonoAlcalde;
+    if (edan.fechaLlenado.isNotEmpty) {
+      try {
+        _fechaLlenado = DateTime.parse(edan.fechaLlenado);
+        _fechaLlenadoController.text = _fmtFecha(_fechaLlenado);
+      } catch (_) {}
+    }
+    if (edan.fechaEvento.isNotEmpty) {
+      try {
+        _fechaEvento = DateTime.parse(edan.fechaEvento);
+        _fechaEventoController.text = _fmtFecha(_fechaEvento);
+      } catch (_) {}
+    }
+    if (edan.horaEvento.isNotEmpty) {
+      final partes = edan.horaEvento.split(':');
+      if (partes.isNotEmpty) {
+        var hora = int.tryParse(partes.first) ?? 12;
+        _ampm = hora >= 12 ? 'PM' : 'AM';
+        _hora12 = (hora % 12 == 0 ? 12 : hora % 12).toString();
+      }
+    }
+    _poblacionController.text = edan.totalPoblacionAfectada > 0
+        ? edan.totalPoblacionAfectada.toString()
+        : '';
+    _familiasAfectadasController.text = edan.totalFamiliasAfectadas > 0
+        ? edan.totalFamiliasAfectadas.toString()
+        : '';
+    _familiasDamnificadasController.text = edan.totalFamiliasDamnificadas > 0
+        ? edan.totalFamiliasDamnificadas.toString()
+        : '';
   }
 
   @override
@@ -97,11 +204,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     _poblacionController.dispose();
     _familiasAfectadasController.dispose();
     _familiasDamnificadasController.dispose();
-    _obsHumanitariaController.dispose();
-    _respNombreController.dispose();
-    _respCargoController.dispose();
-    _respFonoController.dispose();
-    _respCorreoController.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -123,11 +226,14 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       _edan.localidades.where((l) => l.impAgropecuario).toList();
   List<EdanLocalidad> get _locConProteccion =>
       _edan.localidades.where((l) => l.impProteccion).toList();
+  List<EdanLocalidad> get _locConNecesidades =>
+      _edan.localidades.where((l) => l.impNecesidades).toList();
 
   bool get _s01Completada =>
       _idDepartamento != null &&
       _idProvincia != null &&
       _idMunicipio != null &&
+      _idTipoEvento != null &&
       _edan.localidades.any((l) => l.nombre.trim().isNotEmpty) &&
       _idUsuarioAlcalde != null &&
       _fonoAlcaldeController.text.trim().isNotEmpty &&
@@ -140,15 +246,27 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       _intDe(_familiasDamnificadasController) > 0;
 
   bool get _s03Completada =>
-      _idTipoEvento != null &&
-      _locConPoblacion
-          .any((l) => l.impactoPoblacion.tieneDatosGlobales);
+      _locConPoblacion.any((l) => l.impactoPoblacion.tieneDatosGlobales);
 
   bool get _s04Completada =>
       _locConSalud.any((l) =>
           l.establecimientosSalud.any((s) => s.nombreEstablecimiento.trim().isNotEmpty) ||
           l.necesidadSalud.botiquines ||
-          l.necesidadSalud.atencionInmediata > 0);
+          l.necesidadSalud.numeroPersonas > 0);
+
+  bool get _aplicaNecesidadesSalud {
+    final t = _tipoEventoNombre
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u');
+    return t.contains('incendio') ||
+        t.contains('inundacion') ||
+        t.contains('sequia');
+  }
 
   bool get _s05Completada =>
       _locConInfraestructura.any((l) =>
@@ -159,9 +277,11 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       _locConServicios.any((l) => l.serviciosBasicos.algunaSeleccionada);
 
   bool get _s07Completada =>
-      _locConEducacion.any((l) =>
-          l.unidadesEducativas.any((u) => u.nombreEstablecimiento.trim().isNotEmpty) ||
-          l.afectacionEducativa.totalAfectados > 0);
+      _locConEducacion.any((l) => l.unidadesEducativas.any((u) =>
+          u.nombreEstablecimiento.trim().isNotEmpty ||
+          u.estudiantes > 0 ||
+          u.profesores > 0 ||
+          u.administrativos > 0));
 
   bool get _s08Completada =>
       _locConVivienda.any((l) => l.danosVivienda.any((v) => v.danoParcial > 0 || v.danoTotal > 0));
@@ -173,16 +293,14 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           l.infraProductiva.any((i) => i.tipo.trim().isNotEmpty));
 
   bool get _s10Completada =>
-      _locConProteccion.any((l) =>
-          l.proteccion.vulnerables.algunoPositivo ||
-          l.proteccion.mujeres > 0 ||
-          l.proteccion.hombres > 0);
+      _locConProteccion.any((l) => l.proteccion.vulnerables.algunoPositivo);
 
-  bool get _s11Completada => _edan.necesidadHumanitaria.algunaSeleccionada;
+  bool get _s11Completada =>
+      _locConNecesidades.any((l) => l.necesidadHumanitaria.algunaSeleccionada);
 
   bool get _s13Completada =>
-      _respNombreController.text.trim().isNotEmpty &&
-      _respCargoController.text.trim().isNotEmpty;
+      _edan.responsable.nombre.trim().isNotEmpty &&
+      _edan.responsable.cargo.trim().isNotEmpty;
 
   // ---------- Acciones ----------
 
@@ -224,29 +342,46 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     setState(() => _edan.localidades.removeAt(index));
   }
 
-  bool _validar() {
-    final faltantes = <String>[];
-    if (_idTipoEvento == null) faltantes.add('03');
-    if (_nombreAlcaldeController.text.trim().isEmpty) faltantes.add('01');
-    if (_fonoAlcaldeController.text.trim().isEmpty) faltantes.add('01');
-    if (_idDepartamento == null || _idProvincia == null || _idMunicipio == null) {
-      faltantes.add('01');
-    }
-    if (!_edan.localidades.any((l) => l.nombre.trim().isNotEmpty)) {
-      faltantes.add('01');
-    }
-    if (_respNombreController.text.trim().isEmpty) faltantes.add('13');
-    if (_respCargoController.text.trim().isEmpty) faltantes.add('13');
-    if (faltantes.isNotEmpty) {
-      setState(() => _expandidas.addAll(faltantes));
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Complete los campos obligatorios antes de revisar el EDAN.'),
+  Future<void> _confirmarAgregarSubitem({
+    required String etiquetaLugar,
+    required String item,
+    required String articuloUno,
+    required String articuloOtro,
+    required int cantidad,
+    required VoidCallback onAgregar,
+  }) async {
+    final articulo = cantidad == 0 ? articuloUno : articuloOtro;
+    final offset = _scrollController.hasClients ? _scrollController.offset : null;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Agregar elemento'),
+        content: Text(
+          '¿Está seguro de agregar $articulo $item en $etiquetaLugar?',
         ),
-      );
-      return false;
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Agregar'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      onAgregar();
+      if (offset != null) {
+        Future<void>.delayed(const Duration(milliseconds: 400), () {
+          if (mounted && _scrollController.hasClients) {
+            _scrollController.jumpTo(offset.clamp(
+                0.0, _scrollController.position.maxScrollExtent));
+          }
+        });
+      }
     }
-    return true;
   }
 
   Edan _construirEdan() {
@@ -267,13 +402,30 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     _edan.totalPoblacionAfectada = _intDe(_poblacionController);
     _edan.totalFamiliasAfectadas = _intDe(_familiasAfectadasController);
     _edan.totalFamiliasDamnificadas = _intDe(_familiasDamnificadasController);
-    _edan.necesidadHumanitaria.observaciones = _obsHumanitariaController.text.trim();
     return _edan;
   }
 
   Future<void> _revisar() async {
-    if (!_validar()) return;
     final edan = _construirEdan();
+    final incompletos = edan.incompletosPorSeccion;
+    if (incompletos.isNotEmpty && mounted) {
+      setState(() => _expandidas.addAll(incompletos.keys));
+      final detalle = incompletos.values
+          .expand((v) => v)
+          .take(3)
+          .join(', ');
+      final restante = incompletos.values
+          .expand((v) => v)
+          .length > 3;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Falta información en: $detalle${restante ? ', …' : ''}. '
+            'La vista previa lo marca en rojo.',
+          ),
+        ),
+      );
+    }
     final confirmado = await Navigator.of(context).push<Edan>(
       MaterialPageRoute(
         builder: (_) => UgrEdanPreviewScreen(edan: edan),
@@ -288,6 +440,34 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     setState(() {
       if (!_expandidas.add(num)) _expandidas.remove(num);
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _onScroll());
+  }
+
+  void _onScroll() {
+    final refCtx = _indicadorKey.currentContext;
+    if (refCtx == null) return;
+    final refBox = refCtx.findRenderObject();
+    if (refBox is! RenderBox) return;
+    final refTop = refBox.localToGlobal(Offset.zero).dy;
+    String? actual;
+    _sectionKeys.forEach((numero, key) {
+      final ctx = key.currentContext;
+      if (ctx == null) return;
+      final box = ctx.findRenderObject();
+      if (box is! RenderBox || !box.attached) return;
+      if (box.localToGlobal(Offset.zero).dy <= refTop) actual = numero;
+    });
+    if (actual != _seccionActual) {
+      setState(() => _seccionActual = actual);
+    }
+  }
+
+  String? get _tituloIndicador {
+    final n = _seccionActual;
+    if (n == null) return null;
+    final t = _titulosSeccion[n];
+    if (t == null) return null;
+    return '$n · $t';
   }
 
   @override
@@ -309,30 +489,47 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         ),
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildHeader(primary),
-              const SizedBox(height: 16),
-              _seccion01(),
-              _seccion02(),
-              _seccion03(),
-              _seccion04(),
-              _seccion05(),
-              _seccion06(),
-              _seccion07(),
-              _seccion08(),
-              _seccion09(),
-              _seccion10(),
-              _seccion11(),
-              _seccion13(),
-              const SizedBox(height: 8),
-              _buildDeclaracion(),
-              const SizedBox(height: 24),
-            ],
-          ),
+        child: Stack(
+          children: [
+            SingleChildScrollView(
+              controller: _scrollController,
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildHeader(primary),
+                  const SizedBox(height: 16),
+                  _seccion01(),
+                  _seccion02(),
+                  _seccion03(),
+                  _seccion04(),
+                  _seccion05(),
+                  _seccion06(),
+                  _seccion07(),
+                  _seccion08(),
+                  _seccion09(),
+                  _seccion10(),
+                  _seccion11(),
+                  _seccion13(),
+                  const SizedBox(height: 8),
+                  _buildDeclaracion(),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+            Positioned(
+              top: 10,
+              left: 16,
+              right: 16,
+              child: IgnorePointer(
+                child: _IndicadorSeccion(
+                  key: _indicadorKey,
+                  texto: _tituloIndicador,
+                  visible: _seccionActual != null,
+                ),
+              ),
+            ),
+          ],
         ),
       ),
       bottomNavigationBar: _buildActionsBar(),
@@ -390,10 +587,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   // ---------- 01 Datos generales ----------
 
   Widget _seccion01() {
+
     return _SeccionEdan(
+      key: _sectionKeys['01'],
       numero: '01',
-      titulo: 'Datos Generales',
-      descripcion: 'Ubicación, localidad, responsable y fechas',
+      titulo: 'Datos generales',
+      descripcion: 'Ubicación, lugar, responsable y fechas',
       completada: _s01Completada,
       expanded: _expandidas.contains('01'),
       onToggle: () => _toggle('01'),
@@ -401,7 +600,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         _subtitulo('Ubicación'),
         _buildUbicacion(),
         const SizedBox(height: 16),
-        _subtitulo('Localidades afectadas'),
+        _subtitulo('Lugares afectados'),
         if (_edan.localidades.isEmpty)
           Container(
             width: double.infinity,
@@ -412,7 +611,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               border: Border.all(color: AppColors.divider),
             ),
             child: const Text(
-              'Agregue al menos una localidad afectada.',
+              'Agregue al menos un lugar afectado.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
             ),
@@ -434,7 +633,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
             );
           }),
         _AgregarBoton(
-          label: 'Agregar localidad',
+          label: 'Agregar lugar',
           onPressed: _agregarLocalidad,
         ),
         const SizedBox(height: 16),
@@ -455,6 +654,8 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         ),
         const SizedBox(height: 16),
         _subtitulo('Fechas'),
+        _buildTipoEvento(),
+        const SizedBox(height: 12),
         Row(
           children: [
             Expanded(
@@ -524,20 +725,54 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       key: ValueKey('usuarioAlcalde-$_idUsuarioAlcalde'),
       label: 'Usuario alcalde *',
       value: _idUsuarioAlcalde,
-      items: _usuarios
-          .map((u) => DropdownMenuItem(
-                value: u.idUsuario,
-                child: Text(u.nombre, overflow: TextOverflow.ellipsis),
-              ))
-          .toList(),
+      items: [
+        const DropdownMenuItem(value: -1, child: Text('+ Agregar nuevo')),
+        ..._usuarios.map((u) => DropdownMenuItem(
+              value: u.idUsuario,
+              child: Text(u.nombre, overflow: TextOverflow.ellipsis),
+            )),
+      ],
       hint: _usuarios.isEmpty ? 'Cargando usuarios...' : 'Seleccione usuario',
-      onChanged: (v) {
-        setState(() => _idUsuarioAlcalde = v);
-        if (v != null) {
-          final user = _usuarios.where((u) => u.idUsuario == v).firstOrNull;
-          if (user != null) {
-            _nombreAlcaldeController.text = user.nombre;
-            _fonoAlcaldeController.text = user.celular ?? '';
+      onChanged: (v) async {
+        if (v == -1) {
+          final token = AuthService.instance.currentToken;
+          final nuevoId = await Navigator.push<int>(
+            context,
+            MaterialPageRoute(
+              builder: (_) => CrearUsuarioScreen(
+                idMunicipio: token?.idMunicipio,
+                idProvincia: token?.idProvincia,
+                idDepartamento: token?.idDepartamento,
+              ),
+            ),
+          );
+          if (nuevoId != null && mounted) {
+            try {
+              final usuarios = await ApiService.instance.getUsuarios(
+                idMunicipio: token?.idMunicipio,
+                idRol: 8,
+              );
+              setState(() {
+                _usuarios = usuarios;
+                _idUsuarioAlcalde = nuevoId;
+                final user = usuarios.where((u) => u.idUsuario == nuevoId).firstOrNull;
+                if (user != null) {
+                  _nombreAlcaldeController.text = user.nombre;
+                  _fonoAlcaldeController.text = user.celular ?? '';
+                }
+              });
+            } catch (e) {
+              debugPrint('Error recargando usuarios: $e');
+            }
+          }
+        } else {
+          setState(() => _idUsuarioAlcalde = v);
+          if (v != null) {
+            final user = _usuarios.where((u) => u.idUsuario == v).firstOrNull;
+            if (user != null) {
+              _nombreAlcaldeController.text = user.nombre;
+              _fonoAlcaldeController.text = user.celular ?? '';
+            }
           }
         }
       },
@@ -713,9 +948,11 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   // ---------- 02 Población ----------
 
   Widget _seccion02() {
+
     return _SeccionEdan(
+      key: _sectionKeys['02'],
       numero: '02',
-      titulo: 'Información de Población Afectada y Damnificada',
+      titulo: 'Información total población afectada y damnificada',
       descripcion: 'Totales estimados a la fecha del evento',
       completada: _s02Completada,
       expanded: _expandidas.contains('02'),
@@ -756,16 +993,14 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     final totalD = locs.fold<int>(0, (acc, l) => acc + l.impactoPoblacion.desaparecidos);
 
     return _SeccionEdan(
+      key: _sectionKeys['03'],
       numero: '03',
-      titulo: 'Información del Municipio Afectado',
+      titulo: 'Impacto en la población',
       descripcion: 'Impacto en la población y necesidades de primera respuesta',
       completada: _s03Completada,
       expanded: _expandidas.contains('03'),
       onToggle: () => _toggle('03'),
       children: [
-        _subtitulo('3.1 Tipo de evento'),
-        _buildTipoEvento(),
-        const SizedBox(height: 8),
         _subtitulo('3.2 Impacto en la población por grupo etario'),
         ...locs.asMap().entries.map((entry) {
           final i = entry.key;
@@ -773,7 +1008,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ValueKey('s03-imp-$i'),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
               ...l.impactoPoblacion.gruposEtarios.asMap().entries.map((ge) {
                 return _FilaGrupoEtarioAutonomo(
@@ -785,16 +1020,6 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                   },
                 );
               }),
-              const SizedBox(height: 4),
-              _CampoAutonomo(
-                label: 'Observaciones',
-                valor: l.impactoPoblacion.observaciones,
-                maxLines: 2,
-                onChanged: (v) {
-                  l.impactoPoblacion.observaciones = v;
-                  setState(() {});
-                },
-              ),
             ],
           );
         }),
@@ -811,24 +1036,26 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ValueKey('s03-resp-$i'),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
-              _checkInline(
-                value: l.necesidadPrimeraRespuesta.busqueda,
+              _SiNoAutonomo(
                 label: 'Búsqueda y rescate',
-                onChanged: (v) => setState(
+                valor: l.necesidadPrimeraRespuesta.busqueda,
+                onValor: (v) => setState(
                     () => l.necesidadPrimeraRespuesta.busqueda = v),
               ),
-              _checkInline(
-                value: l.necesidadPrimeraRespuesta.salvamento,
+              const SizedBox(height: 8),
+              _SiNoAutonomo(
                 label: 'Salvamento',
-                onChanged: (v) => setState(
+                valor: l.necesidadPrimeraRespuesta.salvamento,
+                onValor: (v) => setState(
                     () => l.necesidadPrimeraRespuesta.salvamento = v),
               ),
-              _checkInline(
-                value: l.necesidadPrimeraRespuesta.evacuacion,
+              const SizedBox(height: 8),
+              _SiNoAutonomo(
                 label: 'Evacuación',
-                onChanged: (v) => setState(
+                valor: l.necesidadPrimeraRespuesta.evacuacion,
+                onValor: (v) => setState(
                     () => l.necesidadPrimeraRespuesta.evacuacion = v),
               ),
               const SizedBox(height: 8),
@@ -865,8 +1092,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['04'],
       numero: '04',
-      titulo: 'Salud',
+      titulo: 'Impacto en la salud',
       descripcion: 'Daños en servicios de salud y necesidades',
       completada: _s04Completada,
       expanded: _expandidas.contains('04'),
@@ -879,7 +1107,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
               _subtitulo('4.1 Daños en servicios de salud ($totalEst)'),
               ...List.generate(l.establecimientosSalud.length, (j) {
@@ -890,6 +1118,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                   child: _FilaSaludRow(
                     titulo: 'Establecimiento ${j + 1}',
                     valor: valor,
+                    comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.establecimientosSalud.length > 1,
                     onEliminar: () => setState(
                         () => l.establecimientosSalud.removeAt(j)),
@@ -899,48 +1128,60 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar establecimiento',
-                onPressed: () => setState(
-                    () => l.establecimientosSalud.add(EdanEstablecimientoSalud())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'establecimiento',
+                  articuloUno: 'un',
+                  articuloOtro: 'otro',
+                  cantidad: l.establecimientosSalud.length,
+                  onAgregar: () => setState(
+                      () => l.establecimientosSalud.add(EdanEstablecimientoSalud()
+                        ..comunidad = l.etiquetaLugar)),
+                ),
               ),
-              const SizedBox(height: 12),
-              _subtitulo('4.2 Necesidades en salud'),
-              _checkInline(
-                value: l.necesidadSalud.botiquines,
-                label: 'Botiquines',
-                onChanged: (v) =>
-                    setState(() => l.necesidadSalud.botiquines = v),
-              ),
-              const SizedBox(height: 8),
-              _NumCampoAutonomo(
-                label: 'Atenciones inmediatas requeridas',
-                valor: l.necesidadSalud.atencionInmediata > 0
-                    ? '${l.necesidadSalud.atencionInmediata}'
-                    : '',
-                onChanged: (v) {
-                  l.necesidadSalud.atencionInmediata = int.tryParse(v.trim()) ?? 0;
-                  setState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Otras necesidades',
-                valor: l.necesidadSalud.otrasNecesidades,
-                maxLines: 2,
-                onChanged: (v) {
-                  l.necesidadSalud.otrasNecesidades = v;
-                  setState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Observaciones',
-                valor: l.necesidadSalud.observaciones,
-                maxLines: 2,
-                onChanged: (v) {
-                  l.necesidadSalud.observaciones = v;
-                  setState(() {});
-                },
-              ),
+              if (_aplicaNecesidadesSalud) ...[
+                const SizedBox(height: 12),
+                _subtitulo('4.2 Necesidades en salud'),
+                _GrupoDeCampos(
+                  titulo: 'Botiquín',
+                  subtitulo: 'número de personas que requieren atención inmediata',
+                  children: [
+                    _NumCampoAutonomo(
+                      label: 'Número de personas',
+                      valor: l.necesidadSalud.numeroPersonas > 0
+                          ? '${l.necesidadSalud.numeroPersonas}'
+                          : '',
+                      onChanged: (v) {
+                        l.necesidadSalud.numeroPersonas =
+                            int.tryParse(v.trim()) ?? 0;
+                        l.necesidadSalud.botiquines =
+                            l.necesidadSalud.numeroPersonas > 0;
+                        setState(() {});
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _CampoAutonomo(
+                  label: 'Otras necesidades',
+                  valor: l.necesidadSalud.otrasNecesidades,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    l.necesidadSalud.otrasNecesidades = v;
+                    setState(() {});
+                  },
+                ),
+                const SizedBox(height: 12),
+                _CampoAutonomo(
+                  label: 'Observaciones',
+                  valor: l.necesidadSalud.observaciones,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    l.necesidadSalud.observaciones = v;
+                    setState(() {});
+                  },
+                ),
+              ],
             ],
           );
         }),
@@ -949,10 +1190,11 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
             'Establecimientos',
             '${locs.fold<int>(0, (a, l) => a + l.establecimientosSalud.length)}'
           ),
-          (
-            'Atenciones inmediatas',
-            '${locs.fold<int>(0, (a, l) => a + l.necesidadSalud.atencionInmediata)}'
-          ),
+          if (_aplicaNecesidadesSalud)
+            (
+              'Número de personas',
+              '${locs.fold<int>(0, (a, l) => a + l.necesidadSalud.numeroPersonas)}'
+            ),
         ]),
       ],
     );
@@ -965,8 +1207,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['05'],
       numero: '05',
-      titulo: 'Impacto en Infraestructuras',
+      titulo: 'Impacto en infraestructuras',
       descripcion: 'Daños viales y en infraestructura pública',
       completada: _s05Completada,
       expanded: _expandidas.contains('05'),
@@ -978,7 +1221,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
               _subtitulo('5.1 Daños en infraestructura vial'),
               ...List.generate(l.danosViales.length, (j) {
@@ -998,8 +1241,15 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar vía / puente',
-                onPressed: () =>
-                    setState(() => l.danosViales.add(EdanDanoVial())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'vía / puente',
+                  articuloUno: 'una',
+                  articuloOtro: 'otra',
+                  cantidad: l.danosViales.length,
+                  onAgregar: () =>
+                      setState(() => l.danosViales.add(EdanDanoVial())),
+                ),
               ),
               const SizedBox(height: 12),
               _subtitulo('5.2 Daños en infraestructura pública'),
@@ -1011,6 +1261,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                   child: _FilaInfraRow(
                     titulo: 'Estructura ${j + 1}',
                     valor: valor,
+                    comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.danosInfraPublica.length > 1,
                     onEliminar: () =>
                         setState(() => l.danosInfraPublica.removeAt(j)),
@@ -1020,8 +1271,16 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar estructura',
-                onPressed: () => setState(
-                    () => l.danosInfraPublica.add(EdanDanoInfraPublica())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'estructura',
+                  articuloUno: 'una',
+                  articuloOtro: 'otra',
+                  cantidad: l.danosInfraPublica.length,
+                  onAgregar: () => setState(
+                      () => l.danosInfraPublica.add(EdanDanoInfraPublica()
+                        ..comunidad = l.etiquetaLugar)),
+                ),
               ),
             ],
           );
@@ -1047,8 +1306,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['06'],
       numero: '06',
-      titulo: 'Impacto en Servicios Básicos',
+      titulo: 'Impacto en servicios básicos',
       descripcion: 'Agua, luz, alcantarillado y comunicaciones',
       completada: _s06Completada,
       expanded: _expandidas.contains('06'),
@@ -1060,73 +1320,21 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
               _subtitulo('6.1 Servicios afectados'),
-              _checkInline(
-                value: l.serviciosBasicos.luzElectrica,
-                label: 'Energía eléctrica',
-                onChanged: (v) =>
-                    setState(() => l.serviciosBasicos.luzElectrica = v),
-              ),
-              _checkInline(
-                value: l.serviciosBasicos.aguaPotable,
-                label: 'Agua potable',
-                onChanged: (v) =>
-                    setState(() => l.serviciosBasicos.aguaPotable = v),
-              ),
-              _checkInline(
-                value: l.serviciosBasicos.alcantarillado,
-                label: 'Alcantarillado',
-                onChanged: (v) =>
-                    setState(() => l.serviciosBasicos.alcantarillado = v),
-              ),
-              _checkInline(
-                value: l.serviciosBasicos.gasDomiciliario,
-                label: 'Gas domiciliario',
-                onChanged: (v) =>
-                    setState(() => l.serviciosBasicos.gasDomiciliario = v),
-              ),
-              _checkInline(
-                value: l.serviciosBasicos.telecomunicaciones,
-                label: 'Telecomunicaciones',
-                onChanged: (v) => setState(
-                    () => l.serviciosBasicos.telecomunicaciones = v),
-              ),
-              const SizedBox(height: 12),
-              _subtitulo('6.2 Tipo de daño'),
-              _checkInline(
-                value: l.serviciosBasicos.danoParcial,
-                label: 'Daño parcial',
-                onChanged: (v) =>
-                    setState(() => l.serviciosBasicos.danoParcial = v),
-              ),
-              _checkInline(
-                value: l.serviciosBasicos.danoTotal,
-                label: 'Daño total',
-                onChanged: (v) =>
-                    setState(() => l.serviciosBasicos.danoTotal = v),
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Necesidades inmediatas',
-                valor: l.serviciosBasicos.necesidadesInmediatas,
-                maxLines: 2,
-                onChanged: (v) {
-                  l.serviciosBasicos.necesidadesInmediatas = v;
-                  setState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Observaciones',
-                valor: l.serviciosBasicos.observaciones,
-                maxLines: 2,
-                onChanged: (v) {
-                  l.serviciosBasicos.observaciones = v;
-                  setState(() {});
-                },
-              ),
+              ...List.generate(l.serviciosBasicos.servicios.length, (j) {
+                final s = l.serviciosBasicos.servicios[j];
+                return Padding(
+                  key: ObjectKey(s),
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _FilaServicioRow(
+                    titulo: s.etiqueta,
+                    valor: s,
+                    onChanged: () => setState(() {}),
+                  ),
+                );
+              }),
             ],
           );
         }),
@@ -1147,8 +1355,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['07'],
       numero: '07',
-      titulo: 'Impacto en Educación',
+      titulo: 'Impacto en educación',
       descripcion: 'Unidades educativas y afectación de personal',
       completada: _s07Completada,
       expanded: _expandidas.contains('07'),
@@ -1157,13 +1366,11 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         ...locs.asMap().entries.map((entry) {
           final i = entry.key;
           final l = entry.value;
-          final ae = l.afectacionEducativa;
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
-              _subtitulo('7.1 Daños en unidades educativas'),
               ...List.generate(l.unidadesEducativas.length, (j) {
                 final valor = l.unidadesEducativas[j];
                 return Padding(
@@ -1172,6 +1379,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                   child: _FilaEduRow(
                     titulo: 'Unidad educativa ${j + 1}',
                     valor: valor,
+                    comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.unidadesEducativas.length > 1,
                     onEliminar: () =>
                         setState(() => l.unidadesEducativas.removeAt(j)),
@@ -1181,80 +1389,16 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar unidad educativa',
-                onPressed: () => setState(
-                    () => l.unidadesEducativas.add(EdanDanoUnidadEducativa())),
-              ),
-              const SizedBox(height: 12),
-              _subtitulo('7.2 Afectación a alumnos, profesores y administrativos'),
-              Row(
-                children: [
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Estudiantes',
-                      valor: ae.estudiantes > 0 ? '${ae.estudiantes}' : '',
-                      onChanged: (v) {
-                        ae.estudiantes = int.tryParse(v.trim()) ?? 0;
-                        ae.totalAfectados = ae.estudiantes +
-                            ae.profesores +
-                            ae.administrativos;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Profesores',
-                      valor: ae.profesores > 0 ? '${ae.profesores}' : '',
-                      onChanged: (v) {
-                        ae.profesores = int.tryParse(v.trim()) ?? 0;
-                        ae.totalAfectados = ae.estudiantes +
-                            ae.profesores +
-                            ae.administrativos;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Administrativos',
-                      valor: ae.administrativos > 0 ? '${ae.administrativos}' : '',
-                      onChanged: (v) {
-                        ae.administrativos = int.tryParse(v.trim()) ?? 0;
-                        ae.totalAfectados = ae.estudiantes +
-                            ae.profesores +
-                            ae.administrativos;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Total afectados',
-                      valor: ae.totalAfectados > 0 ? '${ae.totalAfectados}' : '',
-                      onChanged: (v) {
-                        ae.totalAfectados = int.tryParse(v.trim()) ?? 0;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Observaciones',
-                valor: ae.observaciones,
-                maxLines: 2,
-                onChanged: (v) {
-                  ae.observaciones = v;
-                  setState(() {});
-                },
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'unidad educativa',
+                  articuloUno: 'una',
+                  articuloOtro: 'otra',
+                  cantidad: l.unidadesEducativas.length,
+                  onAgregar: () => setState(
+                      () => l.unidadesEducativas.add(EdanDanoUnidadEducativa()
+                        ..comunidad = l.etiquetaLugar)),
+                ),
               ),
             ],
           );
@@ -1266,15 +1410,19 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           ),
           (
             'Estudiantes',
-            '${locs.fold<int>(0, (a, l) => a + l.afectacionEducativa.estudiantes)}'
+            '${locs.fold<int>(0, (a, l) => a + l.unidadesEducativas.fold<int>(0, (x, u) => x + u.estudiantes))}'
           ),
           (
             'Profesores',
-            '${locs.fold<int>(0, (a, l) => a + l.afectacionEducativa.profesores)}'
+            '${locs.fold<int>(0, (a, l) => a + l.unidadesEducativas.fold<int>(0, (x, u) => x + u.profesores))}'
           ),
           (
             'Administrativos',
-            '${locs.fold<int>(0, (a, l) => a + l.afectacionEducativa.administrativos)}'
+            '${locs.fold<int>(0, (a, l) => a + l.unidadesEducativas.fold<int>(0, (x, u) => x + u.administrativos))}'
+          ),
+          (
+            'Total afectados',
+            '${locs.fold<int>(0, (a, l) => a + l.unidadesEducativas.fold<int>(0, (x, u) => x + u.totalAfectados))}'
           ),
         ]),
       ],
@@ -1288,8 +1436,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['08'],
       numero: '08',
-      titulo: 'Impacto en Vivienda',
+      titulo: 'Impacto en viviendas',
       descripcion: 'Daños parciales y totales por localidad',
       completada: _s08Completada,
       expanded: _expandidas.contains('08'),
@@ -1301,7 +1450,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
               ...List.generate(l.danosVivienda.length, (j) {
                 final valor = l.danosVivienda[j];
@@ -1311,6 +1460,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                   child: _FilaViviendaRow(
                     titulo: 'Vivienda ${j + 1}',
                     valor: valor,
+                    comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.danosVivienda.length > 1,
                     onEliminar: () =>
                         setState(() => l.danosVivienda.removeAt(j)),
@@ -1320,8 +1470,16 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar vivienda',
-                onPressed: () =>
-                    setState(() => l.danosVivienda.add(EdanDanoVivienda())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'vivienda',
+                  articuloUno: 'una',
+                  articuloOtro: 'otra',
+                  cantidad: l.danosVivienda.length,
+                  onAgregar: () => setState(
+                      () => l.danosVivienda.add(EdanDanoVivienda()
+                        ..comunidad = l.etiquetaLugar)),
+                ),
               ),
             ],
           );
@@ -1347,8 +1505,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['09'],
       numero: '09',
-      titulo: 'Impacto Agropecuario',
+      titulo: 'Impacto agropecuario',
       descripcion: 'Agricultura, pecuario e infraestructura productiva',
       completada: _s09Completada,
       expanded: _expandidas.contains('09'),
@@ -1360,7 +1519,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
               _subtitulo('9.1 Daños en agricultura'),
               ...List.generate(l.danosAgricultura.length, (j) {
@@ -1380,8 +1539,15 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar cultivo',
-                onPressed: () => setState(
-                    () => l.danosAgricultura.add(EdanDanoAgricultura())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'cultivo',
+                  articuloUno: 'un',
+                  articuloOtro: 'otro',
+                  cantidad: l.danosAgricultura.length,
+                  onAgregar: () => setState(
+                      () => l.danosAgricultura.add(EdanDanoAgricultura())),
+                ),
               ),
               const SizedBox(height: 12),
               _subtitulo('9.2 Daños pecuarios'),
@@ -1402,8 +1568,15 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar especie',
-                onPressed: () =>
-                    setState(() => l.danosPecuarios.add(EdanDanoPecuario())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'especie',
+                  articuloUno: 'una',
+                  articuloOtro: 'otra',
+                  cantidad: l.danosPecuarios.length,
+                  onAgregar: () =>
+                      setState(() => l.danosPecuarios.add(EdanDanoPecuario())),
+                ),
               ),
               const SizedBox(height: 12),
               _subtitulo('9.3 Daños en infraestructura productiva'),
@@ -1424,8 +1597,15 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               }),
               _AgregarBoton(
                 label: 'Agregar infraestructura',
-                onPressed: () => setState(
-                    () => l.infraProductiva.add(EdanInfraProductiva())),
+                onPressed: () => _confirmarAgregarSubitem(
+                  etiquetaLugar: l.etiquetaLugar,
+                  item: 'infraestructura',
+                  articuloUno: 'una',
+                  articuloOtro: 'otra',
+                  cantidad: l.infraProductiva.length,
+                  onAgregar: () => setState(
+                      () => l.infraProductiva.add(EdanInfraProductiva())),
+                ),
               ),
             ],
           );
@@ -1455,8 +1635,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     if (locs.isEmpty) return const SizedBox.shrink();
 
     return _SeccionEdan(
+      key: _sectionKeys['10'],
       numero: '10',
-      titulo: 'Impacto en Protección',
+      titulo: 'Impacto en protección',
       descripcion: 'Población vulnerable y afectación por sexo',
       completada: _s10Completada,
       expanded: _expandidas.contains('10'),
@@ -1465,187 +1646,68 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         ...locs.asMap().entries.map((entry) {
           final i = entry.key;
           final l = entry.value;
-          final p = l.proteccion;
-          final v = p.vulnerables;
+          final v = l.proteccion.vulnerables;
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
-            nombre: l.nombre,
+            nombre: l.etiquetaLugar,
             children: [
-              _subtitulo('10.1 Población en situación de mayor vulnerabilidad'),
-              _NumCampoAutonomo(
-                label: 'Niñas y niños',
-                valor: v.ninos > 0 ? '${v.ninos}' : '',
-                onChanged: (val) {
-                  v.ninos = int.tryParse(val.trim()) ?? 0;
-                  setState(() {});
-                },
+              _FilaProteccionRow(
+                titulo: 'Niñas y niños',
+                valor: v.ninos,
+                onChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 12),
-              _NumCampoAutonomo(
-                label: 'Adolescentes',
-                valor: v.adolescentes > 0 ? '${v.adolescentes}' : '',
-                onChanged: (val) {
-                  v.adolescentes = int.tryParse(val.trim()) ?? 0;
-                  setState(() {});
-                },
+              const SizedBox(height: 10),
+              _FilaProteccionRow(
+                titulo: 'Adolescentes',
+                valor: v.adolescentes,
+                onChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Mujeres lactantes',
-                      valor: v.mujeresLactantes > 0
-                          ? '${v.mujeresLactantes}'
-                          : '',
-                      onChanged: (val) {
-                        v.mujeresLactantes = int.tryParse(val.trim()) ?? 0;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Embarazadas',
-                      valor: v.mujeresEmbarazadas > 0
-                          ? '${v.mujeresEmbarazadas}'
-                          : '',
-                      onChanged: (val) {
-                        v.mujeresEmbarazadas = int.tryParse(val.trim()) ?? 0;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              _FilaProteccionRow(
+                titulo: 'Mujeres lactantes',
+                valor: v.mujeresLactantes,
+                onChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Adultos mayores',
-                      valor: v.adultosMayores > 0 ? '${v.adultosMayores}' : '',
-                      onChanged: (val) {
-                        v.adultosMayores = int.tryParse(val.trim()) ?? 0;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Discapacidad',
-                      valor: v.personasDiscapacidad > 0
-                          ? '${v.personasDiscapacidad}'
-                          : '',
-                      onChanged: (val) {
-                        v.personasDiscapacidad = int.tryParse(val.trim()) ?? 0;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              _FilaProteccionRow(
+                titulo: 'Mujeres embarazadas',
+                valor: v.mujeresEmbarazadas,
+                onChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 12),
-              _NumCampoAutonomo(
-                label: 'Personas con enfermedad crónica',
-                valor: v.personasEnfermedad > 0 ? '${v.personasEnfermedad}' : '',
-                onChanged: (val) {
-                  v.personasEnfermedad = int.tryParse(val.trim()) ?? 0;
-                  setState(() {});
-                },
+              const SizedBox(height: 10),
+              _FilaProteccionRow(
+                titulo: 'Adultos mayores',
+                valor: v.adultosMayores,
+                onChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 12),
-              _subtitulo('10.2 Afectación por sexo'),
-              Row(
-                children: [
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Mujeres',
-                      valor: p.mujeres > 0 ? '${p.mujeres}' : '',
-                      onChanged: (val) {
-                        p.mujeres = int.tryParse(val.trim()) ?? 0;
-                        p.total = p.mujeres + p.hombres;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: _NumCampoAutonomo(
-                      label: 'Hombres',
-                      valor: p.hombres > 0 ? '${p.hombres}' : '',
-                      onChanged: (val) {
-                        p.hombres = int.tryParse(val.trim()) ?? 0;
-                        p.total = p.mujeres + p.hombres;
-                        setState(() {});
-                      },
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 10),
+              _FilaProteccionRow(
+                titulo: 'Personas con discapacidad',
+                valor: v.personasDiscapacidad,
+                onChanged: () => setState(() {}),
               ),
-              const SizedBox(height: 12),
-              _NumCampoAutonomo(
-                label: 'Total',
-                valor: p.total > 0 ? '${p.total}' : '',
-                readOnly: true,
-                onChanged: (_) {},
-              ),
-              const SizedBox(height: 12),
-              _subtitulo('10.3 Necesidades de protección'),
-              _CampoAutonomo(
-                label: 'Necesidades de protección',
-                valor: p.necesidades,
-                maxLines: 2,
-                onChanged: (val) {
-                  p.necesidades = val;
-                  setState(() {});
-                },
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Apoyo psicosocial',
-                valor: p.apoyoPsicosocial,
-                maxLines: 2,
-                onChanged: (val) {
-                  p.apoyoPsicosocial = val;
-                  setState(() {});
-                },
-              ),
-              const SizedBox(height: 8),
-              _checkInline(
-                value: p.reposicionDocumentos,
-                label: 'Reposición de documentos',
-                onChanged: (v) =>
-                    setState(() => p.reposicionDocumentos = v),
-              ),
-              const SizedBox(height: 12),
-              _CampoAutonomo(
-                label: 'Observaciones',
-                valor: p.observaciones,
-                maxLines: 2,
-                onChanged: (val) {
-                  p.observaciones = val;
-                  setState(() {});
-                },
+              const SizedBox(height: 10),
+              _FilaProteccionRow(
+                titulo: 'Personas con enfermedad crónica',
+                valor: v.personasEnfermedad,
+                onChanged: () => setState(() {}),
               ),
             ],
           );
         }),
         _CajaTotales(valores: [
           (
-            'Vulnerables',
-            '${locs.fold<int>(0, (a, l) => a + (l.proteccion.vulnerables.algunoPositivo ? 1 : 0))}'
-          ),
-          (
             'Mujeres',
-            '${locs.fold<int>(0, (a, l) => a + l.proteccion.mujeres)}'
+            '${locs.fold<int>(0, (a, l) => a + l.proteccion.vulnerables.totalMujeres)}'
           ),
           (
             'Hombres',
-            '${locs.fold<int>(0, (a, l) => a + l.proteccion.hombres)}'
+            '${locs.fold<int>(0, (a, l) => a + l.proteccion.vulnerables.totalHombres)}'
+          ),
+          (
+            'Total',
+            '${locs.fold<int>(0, (a, l) => a + l.proteccion.vulnerables.totalGeneral)}'
           ),
         ]),
       ],
@@ -1655,74 +1717,32 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   // ---------- 11 Necesidades humanitarias ----------
 
   Widget _seccion11() {
+    final locs = _locConNecesidades;
+    if (locs.isEmpty) return const SizedBox.shrink();
+
     return _SeccionEdan(
+      key: _sectionKeys['11'],
       numero: '11',
-      titulo: 'Necesidades Humanitarias',
-      descripcion: 'Alimentos, refugio, higiene y otros',
+      titulo: 'Necesidades humanitarias',
+      descripcion: 'Alimentos, refugio, higiene y otros por localidad',
       completada: _s11Completada,
       expanded: _expandidas.contains('11'),
       onToggle: () => _toggle('11'),
       children: [
-        _checkInline(
-          value: _edan.necesidadHumanitaria.alimentos,
-          label: 'Alimentos',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.alimentos = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.refugioVivienda,
-          label: 'Refugio / vivienda',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.refugioVivienda = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.ropaCama,
-          label: 'Ropa de cama',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.ropaCama = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.articulosHigiene,
-          label: 'Artículos de higiene',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.articulosHigiene = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.articulosCocina,
-          label: 'Artículos de cocina',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.articulosCocina = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.prendasVestir,
-          label: 'Prendas de vestir',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.prendasVestir = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.herramientas,
-          label: 'Herramientas',
-          onChanged: (v) =>
-              setState(() => _edan.necesidadHumanitaria.herramientas = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.almacenamientoAgua,
-          label: 'Almacenamiento de agua',
-          onChanged: (v) => setState(
-              () => _edan.necesidadHumanitaria.almacenamientoAgua = v),
-        ),
-        _checkInline(
-          value: _edan.necesidadHumanitaria.banos,
-          label: 'Baños',
-          onChanged: (v) => setState(() => _edan.necesidadHumanitaria.banos = v),
-        ),
-        const SizedBox(height: 12),
-        _campo(
-          label: 'Observaciones',
-          controller: _obsHumanitariaController,
-          maxLines: 2,
-          onChanged: (_) => setState(() {}),
-        ),
+        ...locs.asMap().entries.map((entry) {
+          final i = entry.key;
+          final l = entry.value;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: _BloqueLocalidadNecesidades(
+              key: ObjectKey(l),
+              index: i,
+              nombre: l.etiquetaLugar,
+              necesidad: l.necesidadHumanitaria,
+              onChanged: () => setState(() {}),
+            ),
+          );
+        }),
       ],
     );
   }
@@ -1730,34 +1750,26 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   // ---------- 13 Responsable ----------
 
   Widget _seccion13() {
+    final r = _edan.responsable;
     return _SeccionEdan(
+      key: _sectionKeys['13'],
       numero: '13',
       titulo: 'Responsable del Formulario',
-      descripcion: 'Nombre, cargo y contacto del responsable',
+      descripcion: 'Datos del usuario registrado',
       completada: _s13Completada,
       expanded: _expandidas.contains('13'),
       onToggle: () => _toggle('13'),
       children: [
         _campo(
-          label: 'Nombre del responsable *',
-          controller: _respNombreController,
-          hint: 'Ej: María López',
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) {
-            _edan.responsable.nombre = v;
-            setState(() {});
-          },
+          label: 'Nombre',
+          initial: r.nombre,
+          readOnly: true,
         ),
         const SizedBox(height: 12),
         _campo(
-          label: 'Cargo *',
-          controller: _respCargoController,
-          hint: 'Ej: Técnico UGR',
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) {
-            _edan.responsable.cargo = v;
-            setState(() {});
-          },
+          label: 'Cargo',
+          initial: r.cargo,
+          readOnly: true,
         ),
         const SizedBox(height: 12),
         Row(
@@ -1765,28 +1777,16 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
             Expanded(
               child: _campo(
                 label: 'Teléfono',
-                controller: _respFonoController,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(20),
-                ],
-                onChanged: (v) {
-                  _edan.responsable.fono = v;
-                  setState(() {});
-                },
+                initial: r.fono,
+                readOnly: true,
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _campo(
                 label: 'Correo',
-                controller: _respCorreoController,
-                keyboardType: TextInputType.emailAddress,
-                onChanged: (v) {
-                  _edan.responsable.correo = v;
-                  setState(() {});
-                },
+                initial: r.correo,
+                readOnly: true,
               ),
             ),
           ],
@@ -1873,12 +1873,47 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     );
   }
 
-  void _guardarBorrador() {
+  Future<void> _guardarBorrador() async {
     final edan = _construirEdan();
     edan
       ..estado = 'borrador'
       ..idEstado = 1;
-    Navigator.of(context).pop(edan);
+
+    final userId = AuthService.instance.userId;
+    if (userId == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error: usuario no autenticado'),
+          backgroundColor: AppColors.rechazado,
+        ),
+      );
+      return;
+    }
+
+    try {
+      if (edan.idLocal != null) {
+        await DatabaseHelper.instance.updateEdan(edan);
+      } else {
+        await DatabaseHelper.instance.insertEdan(edan, usuarioId: userId);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('EDAN guardado como borrador'),
+          backgroundColor: AppColors.aprobado,
+        ),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al guardar: $e'),
+          backgroundColor: AppColors.rechazado,
+        ),
+      );
+    }
   }
 
   // ---------- Helpers ----------
@@ -1916,6 +1951,58 @@ Widget _subtitulo(String text) {
       ),
     ),
   );
+}
+
+class _GrupoDeCampos extends StatelessWidget {
+  final String titulo;
+  final String? subtitulo;
+  final List<Widget> children;
+
+  const _GrupoDeCampos({
+    required this.titulo,
+    this.subtitulo,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            titulo,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          if (subtitulo != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 10),
+              child: Text(
+                subtitulo!,
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            )
+          else
+            const SizedBox(height: 10),
+          ...children,
+        ],
+      ),
+    );
+  }
 }
 
 Widget _buildDropdown<T>({
@@ -1979,6 +2066,7 @@ Widget _buildDropdown<T>({
 Widget _campo({
   required String label,
   TextEditingController? controller,
+  String? initial,
   String? hint,
   TextInputType? keyboardType,
   TextCapitalization textCapitalization = TextCapitalization.none,
@@ -1993,6 +2081,7 @@ Widget _campo({
     label: label,
     hint: hint,
     controller: controller,
+    initial: initial,
     keyboardType: keyboardType,
     textCapitalization: textCapitalization,
     readOnly: readOnly,
@@ -2018,6 +2107,26 @@ Widget _numCampo({
     keyboardType: TextInputType.number,
     readOnly: readOnly,
     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+    onChanged: onChanged,
+  );
+}
+
+Widget _numCampoDecimal({
+  required String label,
+  TextEditingController? controller,
+  String? hint,
+  bool readOnly = false,
+  ValueChanged<String>? onChanged,
+}) {
+  return CustomTextField(
+    label: label,
+    hint: hint,
+    controller: controller,
+    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+    readOnly: readOnly,
+    inputFormatters: [
+      FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*')),
+    ],
     onChanged: onChanged,
   );
 }
@@ -2048,6 +2157,76 @@ Widget _checkInline({
   );
 }
 
+Widget _siNoCheck({
+  required bool? seleccionado,
+  required ValueChanged<bool> onSeleccion,
+}) {
+  return Row(
+    children: [
+      Expanded(
+        child: _checkInline(
+          value: seleccionado == true,
+          label: 'Sí',
+          onChanged: (v) {
+            if (v) onSeleccion(true);
+          },
+        ),
+      ),
+      Expanded(
+        child: _checkInline(
+          value: seleccionado == false,
+          label: 'No',
+          onChanged: (v) {
+            if (v) onSeleccion(false);
+          },
+        ),
+      ),
+    ],
+  );
+}
+
+class _SiNoAutonomo extends StatefulWidget {
+  final String label;
+  final bool valor;
+  final ValueChanged<bool> onValor;
+
+  const _SiNoAutonomo({
+    required this.label,
+    required this.valor,
+    required this.onValor,
+  });
+
+  @override
+  State<_SiNoAutonomo> createState() => _SiNoAutonomoState();
+}
+
+class _SiNoAutonomoState extends State<_SiNoAutonomo> {
+  bool? _sel;
+
+  @override
+  void initState() {
+    super.initState();
+    _sel = widget.valor ? true : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _GrupoDeCampos(
+      titulo: widget.label,
+      children: [
+        _siNoCheck(
+          seleccionado: _sel,
+          onSeleccion: (v) {
+            _sel = v;
+            widget.onValor(v);
+            setState(() {});
+          },
+        ),
+      ],
+    );
+  }
+}
+
 class _AgregarBoton extends StatelessWidget {
   final String label;
   final VoidCallback onPressed;
@@ -2056,14 +2235,21 @@ class _AgregarBoton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: TextButton.icon(
+    final primary = PaletteScope.of(context).primary;
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
         onPressed: onPressed,
-        icon: const Icon(Icons.add_circle_outline, size: 18),
+        icon: const Icon(Icons.add_circle_outline, size: 20),
         label: Text(label),
-        style: TextButton.styleFrom(
-          foregroundColor: PaletteScope.of(context).primary,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: primary,
+          backgroundColor: primary.withValues(alpha: 0.06),
+          side: BorderSide(color: primary, width: 1.5),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 12),
         ),
       ),
     );
@@ -2080,6 +2266,7 @@ class _SeccionEdan extends StatelessWidget {
   final List<Widget> children;
 
   const _SeccionEdan({
+    super.key,
     required this.numero,
     required this.titulo,
     required this.descripcion,
@@ -2093,6 +2280,7 @@ class _SeccionEdan extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
     return Container(
+      width: double.infinity,
       margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -2100,7 +2288,7 @@ class _SeccionEdan extends StatelessWidget {
         border: Border.all(color: AppColors.divider),
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           InkWell(
             onTap: onToggle,
@@ -2129,13 +2317,26 @@ class _SeccionEdan extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      titulo,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textPrimary,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          titulo,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                        if (descripcion.isNotEmpty)
+                          Text(
+                            descripcion,
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -2152,11 +2353,67 @@ class _SeccionEdan extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: children,
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _IndicadorSeccion extends StatelessWidget {
+  final String? texto;
+  final bool visible;
+
+  const _IndicadorSeccion({
+    super.key,
+    required this.texto,
+    required this.visible,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = PaletteScope.of(context).primary;
+    return Center(
+      child: AnimatedOpacity(
+        duration: const Duration(milliseconds: 200),
+        opacity: visible ? 1 : 0,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            constraints: const BoxConstraints(maxWidth: 280),
+            decoration: BoxDecoration(
+              color: primary,
+              borderRadius: BorderRadius.circular(20),
+              boxShadow: const [
+                BoxShadow(
+                  color: Colors.black26,
+                  blurRadius: 8,
+                  offset: Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.track_changes, size: 14, color: Colors.white),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    texto ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
       ),
     );
   }
@@ -2265,11 +2522,10 @@ class _TarjetaLocalidad extends StatefulWidget {
 
 class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
   static const List<String> _tipos = [
-    'Localidad',
-    'Cantón',
-    'Zona',
     'Comunidad',
-    'Barrio',
+    'Ayllu',
+    'Capitania',
+    'Cabildo',
   ];
 
   late final TextEditingController _nombre;
@@ -2303,7 +2559,7 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
             children: [
               Expanded(
                 child: Text(
-                  'Localidad ${widget.index + 1}',
+                  'Lugar ${widget.index + 1}',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -2315,7 +2571,7 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
                 IconButton(
                   icon: const Icon(Icons.delete_outline, size: 18),
                   color: AppColors.rechazado,
-                  tooltip: 'Quitar localidad',
+                  tooltip: 'Quitar lugar',
                   onPressed: widget.onEliminar,
                 ),
             ],
@@ -2324,7 +2580,7 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
           _buildDropdown(
             context: context,
             key: ValueKey('tipoLocalidad-${widget.index}'),
-            label: 'Tipo de localidad',
+            label: 'Tipo de lugar',
             value: localidad.tipoLocalidad.isEmpty
                 ? null
                 : localidad.tipoLocalidad,
@@ -2339,9 +2595,9 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
           ),
           const SizedBox(height: 12),
           _campo(
-            label: 'Nombre de la localidad *',
+            label: 'Nombre del lugar *',
             controller: _nombre,
-            hint: 'Ej: Barrio Central, Zona Sur',
+            hint: 'Ej: Las Lomas, San Bernardo',
             textCapitalization: TextCapitalization.words,
             onChanged: (v) {
               localidad.nombre = v;
@@ -2390,6 +2646,10 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
             localidad.impProteccion = v;
             widget.onChanged();
           }),
+          _impactoCheck(localidad.impNecesidades, 'Necesidades humanitarias', (v) {
+            localidad.impNecesidades = v;
+            widget.onChanged();
+          }),
         ],
       ),
     );
@@ -2397,21 +2657,24 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
 
   Widget _impactoCheck(
       bool value, String label, ValueChanged<bool> onChanged) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 24,
-          height: 24,
-          child: Checkbox(value: value, onChanged: (v) => onChanged(v ?? false)),
-        ),
-        const SizedBox(width: 6),
-        Expanded(
-          child: Text(
-            label,
-            style: const TextStyle(fontSize: 13, color: AppColors.textPrimary),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 24,
+            height: 24,
+            child: Checkbox(value: value, onChanged: (v) => onChanged(v ?? false)),
           ),
-        ),
-      ],
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 14, color: AppColors.textPrimary),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -2449,7 +2712,7 @@ class _BloqueLocalidad extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  'Localidad ${index + 1}${nombre.trim().isNotEmpty ? ' · ${nombre.trim()}' : ''}',
+                  'Lugar ${index + 1}${nombre.trim().isNotEmpty ? ' · ${nombre.trim()}' : ''}',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -2588,14 +2851,12 @@ class _CampoAutonomoState extends State<_CampoAutonomo> {
 class _NumCampoAutonomo extends StatefulWidget {
   final String label;
   final String valor;
-  final bool readOnly;
   final ValueChanged<String> onChanged;
 
   const _NumCampoAutonomo({
     required this.label,
     required this.valor,
     required this.onChanged,
-    this.readOnly = false,
   });
 
   @override
@@ -2630,7 +2891,6 @@ class _NumCampoAutonomoState extends State<_NumCampoAutonomo> {
     return _numCampo(
       label: widget.label,
       controller: _controller,
-      readOnly: widget.readOnly,
       onChanged: (v) => widget.onChanged(v),
     );
   }
@@ -2693,18 +2953,26 @@ class _FilaGrupoEtarioAutonomo extends StatelessWidget {
                     },
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: _NumCampoAutonomo(
-                    label: 'Desaparecidos',
-                    valor: grupo.desaparecidos > 0 ? '${grupo.desaparecidos}' : '',
-                    onChanged: (v) {
-                      grupo.desaparecidos = int.tryParse(v.trim()) ?? 0;
-                      onChanged();
-                    },
-                  ),
-                ),
               ],
+            ),
+            const SizedBox(height: 10),
+            _NumCampoAutonomo(
+              label: 'Desaparecidos',
+              valor: grupo.desaparecidos > 0 ? '${grupo.desaparecidos}' : '',
+              onChanged: (v) {
+                grupo.desaparecidos = int.tryParse(v.trim()) ?? 0;
+                onChanged();
+              },
+            ),
+            const SizedBox(height: 10),
+            _CampoAutonomo(
+              label: 'Observaciones',
+              valor: grupo.observaciones,
+              maxLines: 2,
+              onChanged: (v) {
+                grupo.observaciones = v;
+                onChanged();
+              },
             ),
           ],
         ),
@@ -2713,9 +2981,229 @@ class _FilaGrupoEtarioAutonomo extends StatelessWidget {
   }
 }
 
+class _BloqueLocalidadNecesidades extends StatelessWidget {
+  final int index;
+  final String nombre;
+  final EdanNecesidadHumanitaria necesidad;
+  final VoidCallback onChanged;
+
+  const _BloqueLocalidadNecesidades({
+    super.key,
+    required this.index,
+    required this.nombre,
+    required this.necesidad,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = PaletteScope.of(context).primary;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.location_on_outlined, size: 18, color: primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Lugar ${index + 1}${nombre.trim().isNotEmpty ? ' · ${nombre.trim()}' : ''}',
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              _checkInline(
+                value: necesidad.alimentos,
+                label: 'Alimentos',
+                onChanged: (v) {
+                  necesidad.alimentos = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.alimentos)
+                _CampoAutonomo(
+                  label: 'Observaciones · Alimentos',
+                  valor: necesidad.obsAlimentos,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsAlimentos = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.refugioVivienda,
+                label: 'Refugio / vivienda',
+                onChanged: (v) {
+                  necesidad.refugioVivienda = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.refugioVivienda)
+                _CampoAutonomo(
+                  label: 'Observaciones · Refugio / vivienda',
+                  valor: necesidad.obsRefugioVivienda,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsRefugioVivienda = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.ropaCama,
+                label: 'Ropa de cama',
+                onChanged: (v) {
+                  necesidad.ropaCama = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.ropaCama)
+                _CampoAutonomo(
+                  label: 'Observaciones · Ropa de cama',
+                  valor: necesidad.obsRopaCama,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsRopaCama = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.articulosHigiene,
+                label: 'Artículos de higiene',
+                onChanged: (v) {
+                  necesidad.articulosHigiene = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.articulosHigiene)
+                _CampoAutonomo(
+                  label: 'Observaciones · Artículos de higiene',
+                  valor: necesidad.obsArticulosHigiene,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsArticulosHigiene = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.articulosCocina,
+                label: 'Artículos de cocina',
+                onChanged: (v) {
+                  necesidad.articulosCocina = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.articulosCocina)
+                _CampoAutonomo(
+                  label: 'Observaciones · Artículos de cocina',
+                  valor: necesidad.obsArticulosCocina,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsArticulosCocina = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.prendasVestir,
+                label: 'Prendas de vestir',
+                onChanged: (v) {
+                  necesidad.prendasVestir = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.prendasVestir)
+                _CampoAutonomo(
+                  label: 'Observaciones · Prendas de vestir',
+                  valor: necesidad.obsPrendasVestir,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsPrendasVestir = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.herramientas,
+                label: 'Herramientas',
+                onChanged: (v) {
+                  necesidad.herramientas = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.herramientas)
+                _CampoAutonomo(
+                  label: 'Observaciones · Herramientas',
+                  valor: necesidad.obsHerramientas,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsHerramientas = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.almacenamientoAgua,
+                label: 'Almacenamiento de agua',
+                onChanged: (v) {
+                  necesidad.almacenamientoAgua = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.almacenamientoAgua)
+                _CampoAutonomo(
+                  label: 'Observaciones · Almacenamiento de agua',
+                  valor: necesidad.obsAlmacenamientoAgua,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsAlmacenamientoAgua = v;
+                    onChanged();
+                  },
+                ),
+              _checkInline(
+                value: necesidad.banos,
+                label: 'Baños',
+                onChanged: (v) {
+                  necesidad.banos = v;
+                  onChanged();
+                },
+              ),
+              if (necesidad.banos)
+                _CampoAutonomo(
+                  label: 'Observaciones · Baños',
+                  valor: necesidad.obsBanos,
+                  maxLines: 2,
+                  onChanged: (v) {
+                    necesidad.obsBanos = v;
+                    onChanged();
+                  },
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _FilaSaludRow extends StatefulWidget {
   final String titulo;
   final EdanEstablecimientoSalud valor;
+  final String comunidadInicial;
   final bool puedeEliminar;
   final VoidCallback onEliminar;
   final VoidCallback onChanged;
@@ -2723,6 +3211,7 @@ class _FilaSaludRow extends StatefulWidget {
   const _FilaSaludRow({
     required this.titulo,
     required this.valor,
+    required this.comunidadInicial,
     required this.puedeEliminar,
     required this.onEliminar,
     required this.onChanged,
@@ -2734,7 +3223,10 @@ class _FilaSaludRow extends StatefulWidget {
 
 class _FilaSaludRowState extends State<_FilaSaludRow> {
   late final TextEditingController _nombre = TextEditingController(text: widget.valor.nombreEstablecimiento);
-  late final TextEditingController _comunidad = TextEditingController(text: widget.valor.comunidad);
+  late final TextEditingController _comunidad = TextEditingController(
+      text: widget.valor.comunidad.isNotEmpty
+          ? widget.valor.comunidad
+          : widget.comunidadInicial);
   late final TextEditingController _medicos = TextEditingController(text: widget.valor.medicosAfectados > 0 ? '${widget.valor.medicosAfectados}' : '');
   late final TextEditingController _enfermeras = TextEditingController(text: widget.valor.enfermerasAfectados > 0 ? '${widget.valor.enfermerasAfectados}' : '');
   late final TextEditingController _otros = TextEditingController(text: widget.valor.otrosAfectados > 0 ? '${widget.valor.otrosAfectados}' : '');
@@ -2757,6 +3249,26 @@ class _FilaSaludRowState extends State<_FilaSaludRow> {
       puedeEliminar: widget.puedeEliminar,
       onEliminar: widget.onEliminar,
       children: [
+        _campo(
+          label: 'Nombre del establecimiento',
+          controller: _nombre,
+          textCapitalization: TextCapitalization.words,
+          onChanged: (v) {
+            valor.nombreEstablecimiento = v;
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 12),
+        _campo(
+          label: 'Comunidad / localidad',
+          controller: _comunidad,
+          textCapitalization: TextCapitalization.words,
+          onChanged: (v) {
+            valor.comunidad = v;
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 12),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -2801,76 +3313,72 @@ class _FilaSaludRowState extends State<_FilaSaludRow> {
           ],
         ),
         const SizedBox(height: 12),
-        _campo(
-          label: 'Nombre del establecimiento',
-          controller: _nombre,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) {
-            valor.nombreEstablecimiento = v;
-            widget.onChanged();
-          },
-        ),
-        const SizedBox(height: 12),
-        _campo(
-          label: 'Comunidad / localidad',
-          controller: _comunidad,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) {
-            valor.comunidad = v;
-            widget.onChanged();
-          },
-        ),
-        const SizedBox(height: 8),
-        _checkInline(
-          value: valor.danoParcial,
-          label: 'Daño parcial',
-          onChanged: (v) {
-            valor.danoParcial = v;
-            widget.onChanged();
-          },
-        ),
-        _checkInline(
-          value: valor.danoTotal,
-          label: 'Daño total',
-          onChanged: (v) {
-            valor.danoTotal = v;
-            widget.onChanged();
-          },
-        ),
-        const SizedBox(height: 8),
-        Row(
+        _GrupoDeCampos(
+          titulo: 'Tipo de daño',
           children: [
-            Expanded(
-              child: _numCampo(
-                label: 'Médicos afectados',
-                controller: _medicos,
-                onChanged: (v) {
-                  valor.medicosAfectados = int.tryParse(v) ?? 0;
-                  widget.onChanged();
-                },
-              ),
+            _checkInline(
+              value: valor.danoParcial,
+              label: 'Daño parcial',
+              onChanged: (v) {
+                setState(() {
+                  valor.danoParcial = v;
+                  if (v) valor.danoTotal = false;
+                });
+                widget.onChanged();
+              },
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _numCampo(
-                label: 'Enfermeras',
-                controller: _enfermeras,
-                onChanged: (v) {
-                  valor.enfermerasAfectados = int.tryParse(v) ?? 0;
-                  widget.onChanged();
-                },
-              ),
+            _checkInline(
+              value: valor.danoTotal,
+              label: 'Daño total',
+              onChanged: (v) {
+                setState(() {
+                  valor.danoTotal = v;
+                  if (v) valor.danoParcial = false;
+                });
+                widget.onChanged();
+              },
             ),
           ],
         ),
         const SizedBox(height: 12),
-        _numCampo(
-          label: 'Otro personal afectado',
-          controller: _otros,
-          onChanged: (v) {
-            valor.otrosAfectados = int.tryParse(v) ?? 0;
-            widget.onChanged();
-          },
+        _GrupoDeCampos(
+          titulo: 'Personal de salud afectado',
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: _numCampo(
+                    label: 'Médicos afectados',
+                    controller: _medicos,
+                    onChanged: (v) {
+                      valor.medicosAfectados = int.tryParse(v) ?? 0;
+                      widget.onChanged();
+                    },
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _numCampo(
+                    label: 'Enfermeras',
+                    controller: _enfermeras,
+                    onChanged: (v) {
+                      valor.enfermerasAfectados = int.tryParse(v) ?? 0;
+                      widget.onChanged();
+                    },
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _numCampo(
+              label: 'Otro personal afectado',
+              controller: _otros,
+              onChanged: (v) {
+                valor.otrosAfectados = int.tryParse(v) ?? 0;
+                widget.onChanged();
+              },
+            ),
+          ],
         ),
       ],
     );
@@ -2899,6 +3407,8 @@ class _FilaVialRow extends StatefulWidget {
 class _FilaVialRowState extends State<_FilaVialRow> {
   late final TextEditingController _viaPuente = TextEditingController(text: widget.valor.viaPuente);
   late final TextEditingController _tramo = TextEditingController(text: widget.valor.tramo);
+  late final TextEditingController _km = TextEditingController(
+      text: widget.valor.kmDanio > 0 ? '${widget.valor.kmDanio}' : '');
   late final TextEditingController _necesidades = TextEditingController(text: widget.valor.necesidadesInmediatas);
   late final TextEditingController _obs = TextEditingController(text: widget.valor.observaciones);
 
@@ -2906,6 +3416,7 @@ class _FilaVialRowState extends State<_FilaVialRow> {
   void dispose() {
     _viaPuente.dispose();
     _tramo.dispose();
+    _km.dispose();
     _necesidades.dispose();
     _obs.dispose();
     super.dispose();
@@ -2942,7 +3453,10 @@ class _FilaVialRowState extends State<_FilaVialRow> {
           value: valor.danoParcial,
           label: 'Daño parcial',
           onChanged: (v) {
-            valor.danoParcial = v;
+            setState(() {
+              valor.danoParcial = v;
+              if (v) valor.danoTotal = false;
+            });
             widget.onChanged();
           },
         ),
@@ -2950,7 +3464,103 @@ class _FilaVialRowState extends State<_FilaVialRow> {
           value: valor.danoTotal,
           label: 'Daño total',
           onChanged: (v) {
-            valor.danoTotal = v;
+            setState(() {
+              valor.danoTotal = v;
+              if (v) valor.danoParcial = false;
+            });
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 8),
+        _numCampoDecimal(
+          label: 'Km dañados',
+          hint: '0.0',
+          controller: _km,
+          onChanged: (v) {
+            valor.kmDanio = double.tryParse(v) ?? 0;
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 8),
+        _campo(
+          label: 'Necesidades inmediatas',
+          controller: _necesidades,
+          maxLines: 2,
+          onChanged: (v) {
+            valor.necesidadesInmediatas = v;
+            widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 12),
+        _campo(
+          label: 'Observaciones',
+          controller: _obs,
+          maxLines: 2,
+          onChanged: (v) {
+            valor.observaciones = v;
+            widget.onChanged();
+          },
+        ),
+      ],
+    );
+  }
+}
+
+class _FilaServicioRow extends StatefulWidget {
+  final String titulo;
+  final EdanServicioBasicoDetalle valor;
+  final VoidCallback onChanged;
+
+  const _FilaServicioRow({
+    required this.titulo,
+    required this.valor,
+    required this.onChanged,
+  });
+
+  @override
+  State<_FilaServicioRow> createState() => _FilaServicioRowState();
+}
+
+class _FilaServicioRowState extends State<_FilaServicioRow> {
+  late final TextEditingController _necesidades =
+      TextEditingController(text: widget.valor.necesidadesInmediatas);
+  late final TextEditingController _obs =
+      TextEditingController(text: widget.valor.observaciones);
+
+  @override
+  void dispose() {
+    _necesidades.dispose();
+    _obs.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final valor = widget.valor;
+    return _RowCard(
+      titulo: widget.titulo,
+      puedeEliminar: false,
+      onEliminar: () {},
+      children: [
+        _checkInline(
+          value: valor.danoParcial,
+          label: 'Daño parcial',
+          onChanged: (v) {
+            setState(() {
+              valor.danoParcial = v;
+              if (v) valor.danoTotal = false;
+            });
+            widget.onChanged();
+          },
+        ),
+        _checkInline(
+          value: valor.danoTotal,
+          label: 'Daño total',
+          onChanged: (v) {
+            setState(() {
+              valor.danoTotal = v;
+              if (v) valor.danoParcial = false;
+            });
             widget.onChanged();
           },
         ),
@@ -2982,6 +3592,7 @@ class _FilaVialRowState extends State<_FilaVialRow> {
 class _FilaInfraRow extends StatefulWidget {
   final String titulo;
   final EdanDanoInfraPublica valor;
+  final String comunidadInicial;
   final bool puedeEliminar;
   final VoidCallback onEliminar;
   final VoidCallback onChanged;
@@ -2989,6 +3600,7 @@ class _FilaInfraRow extends StatefulWidget {
   const _FilaInfraRow({
     required this.titulo,
     required this.valor,
+    required this.comunidadInicial,
     required this.puedeEliminar,
     required this.onEliminar,
     required this.onChanged,
@@ -2999,7 +3611,10 @@ class _FilaInfraRow extends StatefulWidget {
 }
 
 class _FilaInfraRowState extends State<_FilaInfraRow> {
-  late final TextEditingController _comunidad = TextEditingController(text: widget.valor.comunidad);
+  late final TextEditingController _comunidad = TextEditingController(
+      text: widget.valor.comunidad.isNotEmpty
+          ? widget.valor.comunidad
+          : widget.comunidadInicial);
   late final TextEditingController _tipo = TextEditingController(text: widget.valor.tipoEstructura);
   late final TextEditingController _obs = TextEditingController(text: widget.valor.observaciones);
 
@@ -3044,7 +3659,10 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
           value: valor.danoParcial,
           label: 'Daño parcial',
           onChanged: (v) {
-            valor.danoParcial = v;
+            setState(() {
+              valor.danoParcial = v;
+              if (v) valor.danoTotal = false;
+            });
             widget.onChanged();
           },
         ),
@@ -3052,7 +3670,10 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
           value: valor.danoTotal,
           label: 'Daño total',
           onChanged: (v) {
-            valor.danoTotal = v;
+            setState(() {
+              valor.danoTotal = v;
+              if (v) valor.danoParcial = false;
+            });
             widget.onChanged();
           },
         ),
@@ -3074,6 +3695,7 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
 class _FilaEduRow extends StatefulWidget {
   final String titulo;
   final EdanDanoUnidadEducativa valor;
+  final String comunidadInicial;
   final bool puedeEliminar;
   final VoidCallback onEliminar;
   final VoidCallback onChanged;
@@ -3081,6 +3703,7 @@ class _FilaEduRow extends StatefulWidget {
   const _FilaEduRow({
     required this.titulo,
     required this.valor,
+    required this.comunidadInicial,
     required this.puedeEliminar,
     required this.onEliminar,
     required this.onChanged,
@@ -3092,13 +3715,52 @@ class _FilaEduRow extends StatefulWidget {
 
 class _FilaEduRowState extends State<_FilaEduRow> {
   late final TextEditingController _nombre = TextEditingController(text: widget.valor.nombreEstablecimiento);
-  late final TextEditingController _comunidad = TextEditingController(text: widget.valor.comunidad);
+  late final TextEditingController _comunidad = TextEditingController(
+      text: widget.valor.comunidad.isNotEmpty
+          ? widget.valor.comunidad
+          : widget.comunidadInicial);
+  late final TextEditingController _estudiantes = TextEditingController(
+      text: widget.valor.estudiantes > 0 ? '${widget.valor.estudiantes}' : '');
+  late final TextEditingController _profesores = TextEditingController(
+      text: widget.valor.profesores > 0 ? '${widget.valor.profesores}' : '');
+  late final TextEditingController _administrativos = TextEditingController(
+      text: widget.valor.administrativos > 0
+          ? '${widget.valor.administrativos}'
+          : '');
+  late final TextEditingController _total = TextEditingController(
+      text: widget.valor.totalAfectados > 0
+          ? '${widget.valor.totalAfectados}'
+          : '');
+  late final TextEditingController _obs =
+      TextEditingController(text: widget.valor.observaciones);
+  bool? _suspension;
+  bool? _perdida;
+  bool? _albergue;
+
+  @override
+  void initState() {
+    super.initState();
+    _suspension = widget.valor.suspensionClases;
+    _perdida = widget.valor.perdidaMaterial;
+    _albergue = widget.valor.funcionaAlbergue;
+  }
 
   @override
   void dispose() {
     _nombre.dispose();
     _comunidad.dispose();
+    _estudiantes.dispose();
+    _profesores.dispose();
+    _administrativos.dispose();
+    _total.dispose();
+    _obs.dispose();
     super.dispose();
+  }
+
+  void _actTotal() {
+    _total.text = widget.valor.totalAfectados > 0
+        ? '${widget.valor.totalAfectados}'
+        : '';
   }
 
   @override
@@ -3109,6 +3771,7 @@ class _FilaEduRowState extends State<_FilaEduRow> {
       puedeEliminar: widget.puedeEliminar,
       onEliminar: widget.onEliminar,
       children: [
+        _subtitulo('7.1 · Daños en unidades educativas'),
         _campo(
           label: 'Nombre de la unidad educativa',
           controller: _nombre,
@@ -3129,43 +3792,138 @@ class _FilaEduRowState extends State<_FilaEduRow> {
           },
         ),
         const SizedBox(height: 8),
-        _checkInline(
-          value: valor.danoParcial,
-          label: 'Daño parcial',
-          onChanged: (v) {
-            valor.danoParcial = v;
-            widget.onChanged();
-          },
+        _GrupoDeCampos(
+          titulo: 'Tipo de daño',
+          children: [
+            _checkInline(
+              value: valor.danoParcial,
+              label: 'Daño parcial',
+              onChanged: (v) {
+                setState(() {
+                  valor.danoParcial = v;
+                  if (v) valor.danoTotal = false;
+                });
+                widget.onChanged();
+              },
+            ),
+            _checkInline(
+              value: valor.danoTotal,
+              label: 'Daño total',
+              onChanged: (v) {
+                setState(() {
+                  valor.danoTotal = v;
+                  if (v) valor.danoParcial = false;
+                });
+                widget.onChanged();
+              },
+            ),
+          ],
         ),
-        _checkInline(
-          value: valor.danoTotal,
-          label: 'Daño total',
-          onChanged: (v) {
-            valor.danoTotal = v;
-            widget.onChanged();
-          },
+        const SizedBox(height: 8),
+        _GrupoDeCampos(
+          titulo: 'Suspensión de clases',
+          children: [
+            _siNoCheck(
+              seleccionado: _suspension,
+              onSeleccion: (v) {
+                _suspension = v;
+                valor.suspensionClases = v;
+                setState(() {});
+                widget.onChanged();
+              },
+            ),
+          ],
         ),
-        _checkInline(
-          value: valor.suspensionClases,
-          label: 'Suspensión de clases',
-          onChanged: (v) {
-            valor.suspensionClases = v;
-            widget.onChanged();
-          },
+        const SizedBox(height: 8),
+        _GrupoDeCampos(
+          titulo: 'Pérdida de material educativo',
+          children: [
+            _siNoCheck(
+              seleccionado: _perdida,
+              onSeleccion: (v) {
+                _perdida = v;
+                valor.perdidaMaterial = v;
+                setState(() {});
+                widget.onChanged();
+              },
+            ),
+          ],
         ),
-        _checkInline(
-          value: valor.perdidaMaterial,
-          label: 'Pérdida de material',
-          onChanged: (v) {
-            valor.perdidaMaterial = v;
-            widget.onChanged();
-          },
+        const SizedBox(height: 8),
+        _GrupoDeCampos(
+          titulo: 'Funciona como albergue',
+          children: [
+            _siNoCheck(
+              seleccionado: _albergue,
+              onSeleccion: (v) {
+                _albergue = v;
+                valor.funcionaAlbergue = v;
+                setState(() {});
+                widget.onChanged();
+              },
+            ),
+          ],
         ),
-        _checkInline(
-          value: valor.funcionaAlbergue,
-          label: 'Funciona como albergue',
+        const SizedBox(height: 12),
+        _subtitulo('7.2 · Afectación a alumnos, profesores y administrativos'),
+        Row(
+          children: [
+            Expanded(
+              child: _numCampo(
+                label: 'Estudiantes',
+                controller: _estudiantes,
+                onChanged: (v) {
+                  valor.estudiantes = int.tryParse(v) ?? 0;
+                  _actTotal();
+                  widget.onChanged();
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _numCampo(
+                label: 'Profesores',
+                controller: _profesores,
+                onChanged: (v) {
+                  valor.profesores = int.tryParse(v) ?? 0;
+                  _actTotal();
+                  widget.onChanged();
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _numCampo(
+                label: 'Administrativos',
+                controller: _administrativos,
+                onChanged: (v) {
+                  valor.administrativos = int.tryParse(v) ?? 0;
+                  _actTotal();
+                  widget.onChanged();
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _numCampo(
+                label: 'Total afectados',
+                controller: _total,
+                readOnly: true,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _campo(
+          label: 'Observaciones',
+          controller: _obs,
+          maxLines: 2,
           onChanged: (v) {
-            valor.funcionaAlbergue = v;
+            valor.observaciones = v;
             widget.onChanged();
           },
         ),
@@ -3177,6 +3935,7 @@ class _FilaEduRowState extends State<_FilaEduRow> {
 class _FilaViviendaRow extends StatefulWidget {
   final String titulo;
   final EdanDanoVivienda valor;
+  final String comunidadInicial;
   final bool puedeEliminar;
   final VoidCallback onEliminar;
   final VoidCallback onChanged;
@@ -3184,6 +3943,7 @@ class _FilaViviendaRow extends StatefulWidget {
   const _FilaViviendaRow({
     required this.titulo,
     required this.valor,
+    required this.comunidadInicial,
     required this.puedeEliminar,
     required this.onEliminar,
     required this.onChanged,
@@ -3194,17 +3954,31 @@ class _FilaViviendaRow extends StatefulWidget {
 }
 
 class _FilaViviendaRowState extends State<_FilaViviendaRow> {
-  late final TextEditingController _comunidad = TextEditingController(text: widget.valor.comunidad);
-  late final TextEditingController _parcial = TextEditingController(text: widget.valor.danoParcial > 0 ? '${widget.valor.danoParcial}' : '');
-  late final TextEditingController _total = TextEditingController(text: widget.valor.danoTotal > 0 ? '${widget.valor.danoTotal}' : '');
+  late final TextEditingController _comunidad = TextEditingController(
+      text: widget.valor.comunidad.isNotEmpty
+          ? widget.valor.comunidad
+          : widget.comunidadInicial);
+  bool? _tipo;
+  late final TextEditingController _nro = TextEditingController();
   late final TextEditingController _necesidades = TextEditingController(text: widget.valor.necesidadesInmediatas);
   late final TextEditingController _obs = TextEditingController(text: widget.valor.observaciones);
 
   @override
+  void initState() {
+    super.initState();
+    if (widget.valor.danoParcial > 0) {
+      _tipo = true;
+      _nro.text = '${widget.valor.danoParcial}';
+    } else if (widget.valor.danoTotal > 0) {
+      _tipo = false;
+      _nro.text = '${widget.valor.danoTotal}';
+    }
+  }
+
+  @override
   void dispose() {
     _comunidad.dispose();
-    _parcial.dispose();
-    _total.dispose();
+    _nro.dispose();
     _necesidades.dispose();
     _obs.dispose();
     super.dispose();
@@ -3228,30 +4002,50 @@ class _FilaViviendaRowState extends State<_FilaViviendaRow> {
           },
         ),
         const SizedBox(height: 12),
-        Row(
+        _GrupoDeCampos(
+          titulo: 'Tipo de daño',
           children: [
-            Expanded(
-              child: _numCampo(
-                label: 'Viviendas daño parcial',
-                controller: _parcial,
-                onChanged: (v) {
-                  valor.danoParcial = int.tryParse(v) ?? 0;
-                  widget.onChanged();
-                },
-              ),
+            _checkInline(
+              value: _tipo == true,
+              label: 'Daño parcial',
+              onChanged: (v) {
+                setState(() {
+                  _tipo = v ? true : null;
+                  valor.danoParcial = v ? (int.tryParse(_nro.text) ?? 0) : 0;
+                  if (v) valor.danoTotal = 0;
+                });
+                widget.onChanged();
+              },
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: _numCampo(
-                label: 'Viviendas daño total',
-                controller: _total,
-                onChanged: (v) {
-                  valor.danoTotal = int.tryParse(v) ?? 0;
-                  widget.onChanged();
-                },
-              ),
+            _checkInline(
+              value: _tipo == false,
+              label: 'Daño total',
+              onChanged: (v) {
+                setState(() {
+                  _tipo = v ? false : null;
+                  valor.danoTotal = v ? (int.tryParse(_nro.text) ?? 0) : 0;
+                  if (v) valor.danoParcial = 0;
+                });
+                widget.onChanged();
+              },
             ),
           ],
+        ),
+        const SizedBox(height: 8),
+        _numCampo(
+          label: 'Nº de viviendas',
+          controller: _nro,
+          onChanged: (v) {
+            final n = int.tryParse(v) ?? 0;
+            if (_tipo == true) {
+              valor.danoParcial = n;
+              valor.danoTotal = 0;
+            } else if (_tipo == false) {
+              valor.danoParcial = 0;
+              valor.danoTotal = n;
+            }
+            widget.onChanged();
+          },
         ),
         const SizedBox(height: 12),
         _campo(
@@ -3517,10 +4311,25 @@ class _FilaInfraProdRow extends StatefulWidget {
 
 class _FilaInfraProdRowState extends State<_FilaInfraProdRow> {
   late final TextEditingController _tipo = TextEditingController(text: widget.valor.tipo);
+  bool? _dano;
+  late final TextEditingController _nro = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.valor.danoParcial > 0) {
+      _dano = true;
+      _nro.text = '${widget.valor.danoParcial}';
+    } else if (widget.valor.danoTotal > 0) {
+      _dano = false;
+      _nro.text = '${widget.valor.danoTotal}';
+    }
+  }
 
   @override
   void dispose() {
     _tipo.dispose();
+    _nro.dispose();
     super.dispose();
   }
 
@@ -3543,19 +4352,182 @@ class _FilaInfraProdRowState extends State<_FilaInfraProdRow> {
           },
         ),
         const SizedBox(height: 8),
-        _checkInline(
-          value: valor.danoParcial,
-          label: 'Daño parcial',
+        _GrupoDeCampos(
+          titulo: 'Tipo de daño',
+          children: [
+            _checkInline(
+              value: _dano == true,
+              label: 'Daño parcial',
+              onChanged: (v) {
+                setState(() {
+                  _dano = v ? true : null;
+                  valor.danoParcial = v ? (int.tryParse(_nro.text) ?? 0) : 0;
+                  if (v) valor.danoTotal = 0;
+                });
+                widget.onChanged();
+              },
+            ),
+            _checkInline(
+              value: _dano == false,
+              label: 'Daño total',
+              onChanged: (v) {
+                setState(() {
+                  _dano = v ? false : null;
+                  valor.danoTotal = v ? (int.tryParse(_nro.text) ?? 0) : 0;
+                  if (v) valor.danoParcial = 0;
+                });
+                widget.onChanged();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _numCampo(
+          label: 'Nº de infraestructuras afectadas',
+          controller: _nro,
           onChanged: (v) {
-            valor.danoParcial = v;
+            final n = int.tryParse(v) ?? 0;
+            if (_dano == true) {
+              valor.danoParcial = n;
+              valor.danoTotal = 0;
+            } else if (_dano == false) {
+              valor.danoParcial = 0;
+              valor.danoTotal = n;
+            }
             widget.onChanged();
           },
         ),
-        _checkInline(
-          value: valor.danoTotal,
-          label: 'Daño total',
+      ],
+    );
+  }
+}
+
+class _FilaProteccionRow extends StatefulWidget {
+  final String titulo;
+  final EdanGrupoVulnerable valor;
+  final VoidCallback onChanged;
+
+  const _FilaProteccionRow({
+    required this.titulo,
+    required this.valor,
+    required this.onChanged,
+  });
+
+  @override
+  State<_FilaProteccionRow> createState() => _FilaProteccionRowState();
+}
+
+class _FilaProteccionRowState extends State<_FilaProteccionRow> {
+  late final TextEditingController _mujeres = TextEditingController(
+      text: widget.valor.mujeres > 0 ? '${widget.valor.mujeres}' : '');
+  late final TextEditingController _hombres = TextEditingController(
+      text: widget.valor.hombres > 0 ? '${widget.valor.hombres}' : '');
+  late final TextEditingController _total = TextEditingController(
+      text: widget.valor.total > 0 ? '${widget.valor.total}' : '');
+  late final TextEditingController _obs =
+      TextEditingController(text: widget.valor.observaciones);
+  bool? _apoyo;
+  bool? _repos;
+
+  @override
+  void initState() {
+    super.initState();
+    _apoyo = widget.valor.apoyoPsicologico;
+    _repos = widget.valor.reposicionDocumentos;
+  }
+
+  @override
+  void dispose() {
+    _mujeres.dispose();
+    _hombres.dispose();
+    _total.dispose();
+    _obs.dispose();
+    super.dispose();
+  }
+
+  void _actTotal() {
+    _total.text = widget.valor.total > 0 ? '${widget.valor.total}' : '';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final valor = widget.valor;
+    return _RowCard(
+      titulo: widget.titulo,
+      puedeEliminar: false,
+      onEliminar: () {},
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _numCampo(
+                label: 'Nº mujeres',
+                controller: _mujeres,
+                onChanged: (v) {
+                  valor.mujeres = int.tryParse(v) ?? 0;
+                  _actTotal();
+                  widget.onChanged();
+                },
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _numCampo(
+                label: 'Nº hombres',
+                controller: _hombres,
+                onChanged: (v) {
+                  valor.hombres = int.tryParse(v) ?? 0;
+                  _actTotal();
+                  widget.onChanged();
+                },
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _numCampo(
+          label: 'Total',
+          controller: _total,
+          readOnly: true,
+          onChanged: (_) {},
+        ),
+        const SizedBox(height: 12),
+        _GrupoDeCampos(
+          titulo: 'Apoyo psicológico',
+          children: [
+            _siNoCheck(
+              seleccionado: _apoyo,
+              onSeleccion: (v) {
+                _apoyo = v;
+                valor.apoyoPsicologico = v;
+                setState(() {});
+                widget.onChanged();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _GrupoDeCampos(
+          titulo: 'Reposición de documento de identidad',
+          children: [
+            _siNoCheck(
+              seleccionado: _repos,
+              onSeleccion: (v) {
+                _repos = v;
+                valor.reposicionDocumentos = v;
+                setState(() {});
+                widget.onChanged();
+              },
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        _campo(
+          label: 'Observaciones',
+          controller: _obs,
+          maxLines: 2,
           onChanged: (v) {
-            valor.danoTotal = v;
+            valor.observaciones = v;
             widget.onChanged();
           },
         ),

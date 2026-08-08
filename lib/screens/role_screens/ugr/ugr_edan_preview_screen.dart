@@ -17,6 +17,8 @@ class UgrEdanPreviewScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
+    final incompletos = edan.incompletosPorSeccion;
+    final incompletas = incompletos.keys.toSet();
     return Scaffold(
       backgroundColor: PaletteScope.of(context).background,
       appBar: AppBar(
@@ -37,18 +39,22 @@ class UgrEdanPreviewScreen extends StatelessWidget {
         children: [
           _buildDocHeader(primary),
           const SizedBox(height: 16),
-          _seccion01(),
-          _seccion02(),
-          _seccion03(),
-          _seccion04(),
-          _seccion05(),
-          _seccion06(),
-          _seccion07(),
-          _seccion08(),
-          _seccion09(),
-          _seccion10(),
-          _seccion11(),
-          _seccion13(),
+          if (incompletos.isNotEmpty) ...[
+            _buildBannerIncompleto(incompletos),
+            const SizedBox(height: 16),
+          ],
+          _seccion01(incompletas),
+          _seccion02(incompletas),
+          _seccion03(incompletas),
+          _seccion04(incompletas),
+          _seccion05(incompletas),
+          _seccion06(incompletas),
+          _seccion07(incompletas),
+          _seccion08(incompletas),
+          _seccion09(incompletas),
+          _seccion10(incompletas),
+          _seccion11(incompletas),
+          _seccion13(incompletas),
           const SizedBox(height: 12),
           _buildDeclaracion(),
           const SizedBox(height: 24),
@@ -79,10 +85,14 @@ class UgrEdanPreviewScreen extends StatelessWidget {
             const SizedBox(width: 12),
             Expanded(
               child: ElevatedButton(
-                onPressed: () => _confirmar(context),
+                onPressed: incompletos.isEmpty
+                    ? () => _confirmar(context)
+                    : null,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: primary,
                   foregroundColor: Colors.white,
+                  disabledBackgroundColor: AppColors.divider,
+                  disabledForegroundColor: AppColors.textSecondary,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -93,6 +103,41 @@ class UgrEdanPreviewScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildBannerIncompleto(Map<String, List<String>> incompletos) {
+    final detalle = incompletos.values
+        .expand((v) => v)
+        .take(3)
+        .join(', ');
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.rechazado.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.rechazado, width: 1.5),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.error_outline, size: 20, color: AppColors.rechazado),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'El EDAN tiene información incompleta. '
+              'Complete lo marcado en rojo para poder enviarlo.\n'
+              'Falta: $detalle…',
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: AppColors.rechazado,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -163,10 +208,11 @@ class UgrEdanPreviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _seccion01() {
+  Widget _seccion01(Set<String> incompletas) {
     return _DocSeccion(
       numero: '01',
-      titulo: 'Datos Generales',
+      titulo: 'Datos generales',
+      incompleta: incompletas.contains('01'),
       children: [
         _dg([
           _df('Alcalde', _v(edan.nombreAlcalde)),
@@ -176,18 +222,18 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           _df('Fecha llenado', _v(edan.fechaLlenado)),
           _df('Fecha evento', _v(edan.fechaEvento)),
           _df('Hora evento', _v(edan.horaEvento)),
-          _df('Localidades afectadas',
+          _df('Tipo de evento', _v(edan.tipoEventoNombre)),
+          _df('Lugares afectados',
               edan.localidadesAfectadas > 0 ? '${edan.localidadesAfectadas}' : '-'),
         ]),
-        _sh('Localidades (${edan.localidades.length})'),
+        _sh('Lugares (${edan.localidades.length})'),
         if (edan.localidades.isEmpty)
           _vacio()
         else
           ...edan.localidades.asMap().entries.map((entry) {
             final l = entry.value;
             return _tb([
-              _tbRow('Tipo', _v(l.tipoLocalidad)),
-              _tbRow('Nombre', _v(l.nombre)),
+              _tbRow('Lugar', _v(l.etiquetaLugar)),
               ..._impactosLocalidad(l).isNotEmpty
                   ? [
                       _tbRow('Impactos',
@@ -210,13 +256,15 @@ class UgrEdanPreviewScreen extends StatelessWidget {
       if (l.impVivienda) 'Vivienda',
       if (l.impAgropecuario) 'Agropecuario',
       if (l.impProteccion) 'Protección',
+      if (l.impNecesidades) 'Necesidades humanitarias',
     ];
   }
 
-  Widget _seccion02() {
+  Widget _seccion02(Set<String> incompletas) {
     return _DocSeccion(
       numero: '02',
-      titulo: 'Población Afectada y Damnificada',
+      titulo: 'Información total población afectada y damnificada',
+      incompleta: incompletas.contains('02'),
       children: [
         _dg([
           _df('Población afectada',
@@ -230,13 +278,13 @@ class UgrEdanPreviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _seccion03() {
+  Widget _seccion03(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impPoblacion).toList();
     return _DocSeccion(
       numero: '03',
-      titulo: 'Municipio Afectado',
+      titulo: 'Impacto en la población',
+      incompleta: incompletas.contains('03'),
       children: [
-        _df('Tipo de evento', _v(edan.tipoEventoNombre)),
         _sh('Impacto en la población'),
         if (locs.isEmpty)
           _vacio()
@@ -245,7 +293,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
             final i = entry.key;
             final l = entry.value;
             final ip = l.impactoPoblacion;
-            return _bloqueLocalidad(i, l.nombre, [
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
               _dg([
                 _df('Fallecidos', '${ip.fallecidos}'),
                 _df('Heridos', '${ip.heridos}'),
@@ -256,9 +304,9 @@ class UgrEdanPreviewScreen extends StatelessWidget {
                     _tbRow('Fallecidos', '${g.fallecidos}'),
                     _tbRow('Heridos', '${g.heridos}'),
                     _tbRow('Desaparecidos', '${g.desaparecidos}'),
+                    if (g.observaciones.trim().isNotEmpty)
+                      _tbRow('Observaciones', _v(g.observaciones)),
                   ])),
-              if (ip.observaciones.trim().isNotEmpty)
-                _df('Observaciones', ip.observaciones),
             ]);
           }),
         _sh('Necesidades primera respuesta'),
@@ -268,7 +316,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final nr = entry.value.necesidadPrimeraRespuesta;
-            return _bloqueLocalidad(i, entry.value.nombre, [
+            return _bloqueLocalidad(i, entry.value.etiquetaLugar, [
               _tags([
                 if (nr.busqueda) 'Búsqueda',
                 if (nr.salvamento) 'Salvamento',
@@ -282,11 +330,26 @@ class UgrEdanPreviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _seccion04() {
+  bool get _aplicaNecesidadesSalud {
+    final t = (edan.tipoEventoNombre ?? '')
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u');
+    return t.contains('incendio') ||
+        t.contains('inundacion') ||
+        t.contains('sequia');
+  }
+
+  Widget _seccion04(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impSalud).toList();
     return _DocSeccion(
       numero: '04',
-      titulo: 'Salud',
+      titulo: 'Impacto en la salud',
+      incompleta: incompletas.contains('04'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -295,7 +358,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
             final i = entry.key;
             final l = entry.value;
             final ns = l.necesidadSalud;
-            return _bloqueLocalidad(i, l.nombre, [
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
               _sh('Daños en servicios de salud (${l.establecimientosSalud.length})'),
               if (l.establecimientosSalud.isEmpty)
                 _vacio()
@@ -312,25 +375,29 @@ class UgrEdanPreviewScreen extends StatelessWidget {
                       _tbRow('Enfermeras', '${s.enfermerasAfectados}'),
                       _tbRow('Otros', '${s.otrosAfectados}'),
                     ])),
-              _sh('Necesidades en salud'),
-              _tags([if (ns.botiquines) 'Botiquines']),
-              if (ns.atencionInmediata > 0)
-                _df('Atención inmediata', '${ns.atencionInmediata}'),
-              if (ns.otrasNecesidades.trim().isNotEmpty)
-                _df('Otras necesidades', ns.otrasNecesidades),
-              if (ns.observaciones.trim().isNotEmpty)
-                _df('Observaciones', ns.observaciones),
+              if (_aplicaNecesidadesSalud) ...[
+                _sh('Necesidades en salud'),
+                _tags([if (ns.botiquines) 'Botiquín']),
+                if (ns.numeroPersonas > 0)
+                  _df('Número de personas (atención inmediata)',
+                      '${ns.numeroPersonas}'),
+                if (ns.otrasNecesidades.trim().isNotEmpty)
+                  _df('Otras necesidades', ns.otrasNecesidades),
+                if (ns.observaciones.trim().isNotEmpty)
+                  _df('Observaciones', ns.observaciones),
+              ],
             ]);
           }),
       ],
     );
   }
 
-  Widget _seccion05() {
+  Widget _seccion05(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impInfraestructura).toList();
     return _DocSeccion(
       numero: '05',
-      titulo: 'Infraestructura',
+      titulo: 'Impacto en infraestructuras',
+      incompleta: incompletas.contains('05'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -338,7 +405,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            return _bloqueLocalidad(i, l.nombre, [
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
               _sh('Vías y puentes (${l.danosViales.length})'),
               if (l.danosViales.isEmpty)
                 _vacio()
@@ -350,6 +417,9 @@ class UgrEdanPreviewScreen extends StatelessWidget {
                         if (d.danoParcial) 'Parcial',
                         if (d.danoTotal) 'Total',
                       ]),
+                      if (d.kmDanio > 0)
+                        _tbRow('Km dañados',
+                            '${d.kmDanio == d.kmDanio.roundToDouble() ? d.kmDanio.toInt() : d.kmDanio}'),
                     ])),
               _sh('Infraestructura pública (${l.danosInfraPublica.length})'),
               if (l.danosInfraPublica.isEmpty)
@@ -369,11 +439,12 @@ class UgrEdanPreviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _seccion06() {
+  Widget _seccion06(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impServicios).toList();
     return _DocSeccion(
       numero: '06',
-      titulo: 'Servicios Básicos',
+      titulo: 'Impacto en servicios básicos',
+      incompleta: incompletas.contains('06'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -381,34 +452,36 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            final sb = l.serviciosBasicos;
-            return _bloqueLocalidad(i, l.nombre, [
-              _tags([
-                if (sb.luzElectrica) 'Energía eléctrica',
-                if (sb.aguaPotable) 'Agua potable',
-                if (sb.alcantarillado) 'Alcantarillado',
-                if (sb.gasDomiciliario) 'Gas domiciliario',
-                if (sb.telecomunicaciones) 'Telecomunicaciones',
-              ]),
-              _tags([
-                if (sb.danoParcial) 'Daño parcial',
-                if (sb.danoTotal) 'Daño total',
-              ]),
-              if (sb.necesidadesInmediatas.trim().isNotEmpty)
-                _df('Necesidades inmediatas', sb.necesidadesInmediatas),
-              if (sb.observaciones.trim().isNotEmpty)
-                _df('Observaciones', sb.observaciones),
+            final afectados =
+                l.serviciosBasicos.servicios.where((s) => s.tieneDatos).toList();
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
+              if (afectados.isEmpty)
+                _vacio()
+              else
+                ...afectados.map((s) => _tb([
+                      _tbRow('Servicio', s.etiqueta),
+                      _tags([
+                        if (s.danoParcial) 'Parcial',
+                        if (s.danoTotal) 'Total',
+                      ]),
+                      if (s.necesidadesInmediatas.trim().isNotEmpty)
+                        _tbRow('Necesidades inmediatas',
+                            _v(s.necesidadesInmediatas)),
+                      if (s.observaciones.trim().isNotEmpty)
+                        _tbRow('Observaciones', _v(s.observaciones)),
+                    ])),
             ]);
           }),
       ],
     );
   }
 
-  Widget _seccion07() {
+  Widget _seccion07(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impEducacion).toList();
     return _DocSeccion(
       numero: '07',
-      titulo: 'Educación',
+      titulo: 'Impacto en educación',
+      incompleta: incompletas.contains('07'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -416,8 +489,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            final ae = l.afectacionEducativa;
-            return _bloqueLocalidad(i, l.nombre, [
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
               _sh('Unidades educativas (${l.unidadesEducativas.length})'),
               if (l.unidadesEducativas.isEmpty)
                 _vacio()
@@ -428,31 +500,33 @@ class UgrEdanPreviewScreen extends StatelessWidget {
                       _tags([
                         if (u.danoParcial) 'Parcial',
                         if (u.danoTotal) 'Total',
-                        if (u.suspensionClases) 'Suspensión de clases',
-                        if (u.perdidaMaterial) 'Pérdida de material',
-                        if (u.funcionaAlbergue) 'Funciona como albergue',
+                        if (u.suspensionClases == true) 'Suspensión de clases',
+                        if (u.perdidaMaterial == true) 'Pérdida de material educativo',
+                        if (u.funcionaAlbergue == true) 'Funciona como albergue',
                       ]),
+                      if (u.estudiantes > 0 ||
+                          u.profesores > 0 ||
+                          u.administrativos > 0) ...[
+                        _tbRow('Estudiantes', '${u.estudiantes}'),
+                        _tbRow('Profesores', '${u.profesores}'),
+                        _tbRow('Administrativos', '${u.administrativos}'),
+                        _tbRow('Total afectados', '${u.totalAfectados}'),
+                      ],
+                      if (u.observaciones.trim().isNotEmpty)
+                        _tbRow('Observaciones', _v(u.observaciones)),
                     ])),
-              _sh('Afectación educativa'),
-              _dg([
-                _df('Estudiantes', '${ae.estudiantes}'),
-                _df('Profesores', '${ae.profesores}'),
-                _df('Administrativos', '${ae.administrativos}'),
-                _df('Total', '${ae.totalAfectados}'),
-              ]),
-              if (ae.observaciones.trim().isNotEmpty)
-                _df('Observaciones', ae.observaciones),
             ]);
           }),
       ],
     );
   }
 
-  Widget _seccion08() {
+  Widget _seccion08(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impVivienda).toList();
     return _DocSeccion(
       numero: '08',
-      titulo: 'Vivienda',
+      titulo: 'Impacto en viviendas',
+      incompleta: incompletas.contains('08'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -460,16 +534,20 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            return _bloqueLocalidad(i, l.nombre, [
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
               if (l.danosVivienda.isEmpty)
                 _vacio()
               else
                 ...l.danosVivienda.map((v) => _tb([
                       _tbRow('Comunidad', _v(v.comunidad)),
-                      _dg([
-                        _df('Daño parcial', '${v.danoParcial}'),
-                        _df('Daño total', '${v.danoTotal}'),
+                      _tags([
+                        if (v.danoParcial > 0) 'Parcial',
+                        if (v.danoTotal > 0) 'Total',
                       ]),
+                      if (v.danoParcial > 0)
+                        _tbRow('Nº de viviendas', '${v.danoParcial}')
+                      else if (v.danoTotal > 0)
+                        _tbRow('Nº de viviendas', '${v.danoTotal}'),
                       if (v.necesidadesInmediatas.trim().isNotEmpty)
                         _tbRow('Necesidades inmediatas', v.necesidadesInmediatas),
                       if (v.observaciones.trim().isNotEmpty)
@@ -481,11 +559,12 @@ class UgrEdanPreviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _seccion09() {
+  Widget _seccion09(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impAgropecuario).toList();
     return _DocSeccion(
       numero: '09',
-      titulo: 'Agropecuario',
+      titulo: 'Impacto agropecuario',
+      incompleta: incompletas.contains('09'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -493,7 +572,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            return _bloqueLocalidad(i, l.nombre, [
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
               _sh('Daños en agricultura'),
               if (l.danosAgricultura.isEmpty)
                 _vacio()
@@ -526,9 +605,15 @@ class UgrEdanPreviewScreen extends StatelessWidget {
                 ...l.infraProductiva.map((x) => _tb([
                       _tbRow('Tipo', _v(x.tipo)),
                       _tags([
-                        if (x.danoParcial) 'Parcial',
-                        if (x.danoTotal) 'Total',
+                        if (x.danoParcial > 0) 'Parcial',
+                        if (x.danoTotal > 0) 'Total',
                       ]),
+                      if (x.danoParcial > 0)
+                        _tbRow('Nº de infraestructuras afectadas',
+                            '${x.danoParcial}')
+                      else if (x.danoTotal > 0)
+                        _tbRow('Nº de infraestructuras afectadas',
+                            '${x.danoTotal}'),
                     ])),
             ]);
           }),
@@ -536,11 +621,12 @@ class UgrEdanPreviewScreen extends StatelessWidget {
     );
   }
 
-  Widget _seccion10() {
+  Widget _seccion10(Set<String> incompletas) {
     final locs = edan.localidades.where((l) => l.impProteccion).toList();
     return _DocSeccion(
       numero: '10',
-      titulo: 'Protección',
+      titulo: 'Impacto en protección',
+      incompleta: incompletas.contains('10'),
       children: [
         if (locs.isEmpty)
           _vacio()
@@ -548,66 +634,103 @@ class UgrEdanPreviewScreen extends StatelessWidget {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            final p = l.proteccion;
-            final v = p.vulnerables;
-            return _bloqueLocalidad(i, l.nombre, [
-              _sh('Población en situación de mayor vulnerabilidad'),
-              _dg([
-                _df('Niños', '${v.ninos}'),
-                _df('Adolescentes', '${v.adolescentes}'),
-                _df('Lactantes', '${v.mujeresLactantes}'),
-                _df('Embarazadas', '${v.mujeresEmbarazadas}'),
-                _df('Adultos mayores', '${v.adultosMayores}'),
-                _df('Discapacidad', '${v.personasDiscapacidad}'),
-                _df('Enfermedad', '${v.personasEnfermedad}'),
-              ]),
-              _sh('Afectación por sexo'),
-              _dg([
-                _df('Mujeres', '${p.mujeres}'),
-                _df('Hombres', '${p.hombres}'),
-                _df('Total', '${p.total}'),
-              ]),
-              if (p.necesidades.trim().isNotEmpty)
-                _df('Necesidades de protección', p.necesidades),
-              if (p.apoyoPsicosocial.trim().isNotEmpty)
-                _df('Apoyo psicosocial', p.apoyoPsicosocial),
-              _tags([if (p.reposicionDocumentos) 'Reposición de documentos']),
-              if (p.observaciones.trim().isNotEmpty)
-                _df('Observaciones', p.observaciones),
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
+              ..._filasProteccion(l.proteccion.vulnerables),
             ]);
           }),
       ],
     );
   }
 
-  Widget _seccion11() {
-    final nh = edan.necesidadHumanitaria;
+  List<Widget> _filasProteccion(EdanVulnerables v) {
+    final grupos = <(String, EdanGrupoVulnerable)>[
+      ('Niñas y niños', v.ninos),
+      ('Adolescentes', v.adolescentes),
+      ('Mujeres lactantes', v.mujeresLactantes),
+      ('Mujeres embarazadas', v.mujeresEmbarazadas),
+      ('Adultos mayores', v.adultosMayores),
+      ('Personas con discapacidad', v.personasDiscapacidad),
+      ('Personas con enfermedad crónica', v.personasEnfermedad),
+    ];
+    return [
+      for (final g in grupos)
+        if (g.$2.tieneDatos)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: _tb([
+              _tbRow('Grupo', g.$1),
+              _dg([
+                _df('Mujeres', '${g.$2.mujeres}'),
+                _df('Hombres', '${g.$2.hombres}'),
+                _df('Total', '${g.$2.total}'),
+              ]),
+              _tags([
+                if (g.$2.apoyoPsicologico == true) 'Apoyo psicológico',
+                if (g.$2.reposicionDocumentos == true) 'Reposición de documento',
+              ]),
+              if (g.$2.observaciones.trim().isNotEmpty)
+                _tbRow('Observaciones', g.$2.observaciones),
+            ]),
+          ),
+    ];
+  }
+
+  Widget _seccion11(Set<String> incompletas) {
+    final locs = edan.localidades.where((l) => l.impNecesidades).toList();
     return _DocSeccion(
       numero: '11',
-      titulo: 'Necesidades Humanitarias',
+      titulo: 'Necesidades humanitarias',
+      incompleta: incompletas.contains('11'),
       children: [
-        _tags([
-          if (nh.alimentos) 'Alimentos',
-          if (nh.refugioVivienda) 'Refugio / vivienda',
-          if (nh.ropaCama) 'Ropa de cama',
-          if (nh.articulosHigiene) 'Artículos de higiene',
-          if (nh.articulosCocina) 'Artículos de cocina',
-          if (nh.prendasVestir) 'Prendas de vestir',
-          if (nh.herramientas) 'Herramientas',
-          if (nh.almacenamientoAgua) 'Almacenamiento de agua',
-          if (nh.banos) 'Baños',
-        ]),
-        if (nh.observaciones.trim().isNotEmpty)
-          _df('Observaciones', nh.observaciones),
+        if (locs.isEmpty)
+          _vacio()
+        else
+          ...locs.asMap().entries.map((entry) {
+            final i = entry.key;
+            final l = entry.value;
+            final n = l.necesidadHumanitaria;
+            return _bloqueLocalidad(i, l.etiquetaLugar, [
+              _tags([
+                if (n.alimentos) 'Alimentos',
+                if (n.refugioVivienda) 'Refugio / vivienda',
+                if (n.ropaCama) 'Ropa de cama',
+                if (n.articulosHigiene) 'Artículos de higiene',
+                if (n.articulosCocina) 'Artículos de cocina',
+                if (n.prendasVestir) 'Prendas de vestir',
+                if (n.herramientas) 'Herramientas',
+                if (n.almacenamientoAgua) 'Almacenamiento de agua',
+                if (n.banos) 'Baños',
+              ]),
+              if (n.obsAlimentos.trim().isNotEmpty)
+                _df('Observaciones · Alimentos', n.obsAlimentos),
+              if (n.obsRefugioVivienda.trim().isNotEmpty)
+                _df('Observaciones · Refugio / vivienda', n.obsRefugioVivienda),
+              if (n.obsRopaCama.trim().isNotEmpty)
+                _df('Observaciones · Ropa de cama', n.obsRopaCama),
+              if (n.obsArticulosHigiene.trim().isNotEmpty)
+                _df('Observaciones · Artículos de higiene', n.obsArticulosHigiene),
+              if (n.obsArticulosCocina.trim().isNotEmpty)
+                _df('Observaciones · Artículos de cocina', n.obsArticulosCocina),
+              if (n.obsPrendasVestir.trim().isNotEmpty)
+                _df('Observaciones · Prendas de vestir', n.obsPrendasVestir),
+              if (n.obsHerramientas.trim().isNotEmpty)
+                _df('Observaciones · Herramientas', n.obsHerramientas),
+              if (n.obsAlmacenamientoAgua.trim().isNotEmpty)
+                _df('Observaciones · Almacenamiento de agua', n.obsAlmacenamientoAgua),
+              if (n.obsBanos.trim().isNotEmpty)
+                _df('Observaciones · Baños', n.obsBanos),
+            ]);
+          }),
       ],
     );
   }
 
-  Widget _seccion13() {
+  Widget _seccion13(Set<String> incompletas) {
     final r = edan.responsable;
     return _DocSeccion(
       numero: '13',
       titulo: 'Responsable',
+      incompleta: incompletas.contains('13'),
       children: [
         _dg([
           _df('Nombre', _v(r.nombre)),
@@ -757,7 +880,7 @@ class UgrEdanPreviewScreen extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Localidad ${index + 1}${nombre.trim().isNotEmpty ? ' · ${nombre.trim()}' : ''}',
+            'Lugar ${index + 1}${nombre.trim().isNotEmpty ? ' · ${nombre.trim()}' : ''}',
             style: const TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w800,
@@ -818,12 +941,14 @@ class UgrEdanPreviewScreen extends StatelessWidget {
 class _DocSeccion extends StatelessWidget {
   final String numero;
   final String titulo;
+  final bool incompleta;
   final List<Widget> children;
 
   const _DocSeccion({
     required this.numero,
     required this.titulo,
     required this.children,
+    this.incompleta = false,
   });
 
   @override
@@ -836,7 +961,10 @@ class _DocSeccion extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        border: Border.all(
+          color: incompleta ? AppColors.rechazado : AppColors.divider,
+          width: incompleta ? 1.5 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -847,7 +975,7 @@ class _DocSeccion extends StatelessWidget {
                 width: 28,
                 height: 28,
                 decoration: BoxDecoration(
-                  color: primary,
+                  color: incompleta ? AppColors.rechazado : primary,
                   shape: BoxShape.circle,
                 ),
                 child: Center(
@@ -863,13 +991,42 @@ class _DocSeccion extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  titulo,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.textPrimary,
-                  ),
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        titulo,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    if (incompleta) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.rechazado.withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: AppColors.rechazado,
+                            width: 1,
+                          ),
+                        ),
+                        child: const Text(
+                          'Incompleto',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.rechazado,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],

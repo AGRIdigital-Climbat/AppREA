@@ -619,6 +619,10 @@ class DatabaseHelper {
     edan.idLocal = row['id_local'] as int;
     edan.idServer = row['id_server'] as int?;
     edan.idEdan = row['id_edan'] as int?;
+    edan.sincronizado = _toBool(row['sincronizado']);
+    edan.pendienteEliminacion = _toBool(row['pendiente_eliminacion']);
+    edan.pendienteActualizacion = _toBool(row['pendiente_actualizacion']);
+    edan.esBorrador = _toBool(row['es_borrador']);
     return edan;
   }
 
@@ -778,5 +782,12 @@ class DatabaseHelper {
     await db.delete('municipio_geojson');
     await db.delete('edans_offline');
     _database = null;
+  }
+
+  bool _toBool(dynamic value) {
+    if (value == null) return false;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    return value.toString().toLowerCase() == 'true';
   }
 }
