@@ -1,6 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:latlong2/latlong.dart';
 import '../../../config/theme.dart';
 import '../../../models/ugr_models.dart';
+import '../../../widgets/reporte_documento.dart';
 
 class UgrEdanDetalle extends StatefulWidget {
   final UgrEdan edan;
@@ -28,20 +33,202 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
             labelColor: Colors.white,
             unselectedLabelColor: Colors.white70,
             tabs: [
+              Tab(text: 'Documento'),
               Tab(text: 'Secciones'),
-              Tab(text: 'Historial'),
             ],
           ),
         ),
         body: TabBarView(
           children: [
+            _buildDocumentoTab(primary),
             _buildSeccionesTab(primary),
-            _buildHistorialTab(),
           ],
         ),
         bottomNavigationBar: _buildActionsBar(primary),
       ),
     );
+  }
+
+  Widget _buildDocumentoTab(Color primary) {
+    final edan = widget.edan;
+    final fechaFmt = DateFormat('dd/MM/yyyy HH:mm').format(edan.fechaCreacion);
+    
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: ReporteDocumento(
+        titulo: 'Evaluación de Daños y Análisis de Necesidades',
+        subtitulo: edan.tipoEvento,
+        fechaCabecera: fechaFmt,
+        icono: Icons.assignment,
+        chip: _buildEstadoChip(),
+        secciones: [
+          ReporteDocSeccion(
+            titulo: 'DATOS DEL EDAN',
+            campos: [
+              ReporteDocCampo('Código', edan.codigo),
+              ReporteDocCampo('Tipo de evento', edan.tipoEvento),
+              ReporteDocCampo('Fecha de evento', fechaFmt),
+            ],
+          ),
+          ReporteDocSeccion(
+            titulo: 'UBICACIÓN',
+            campos: [
+              ReporteDocCampo('Municipio', edan.municipio),
+              ReporteDocCampo('Comunidad', edan.comunidad),
+              ReporteDocCampo('Localidades afectadas', '${edan.localidades}'),
+            ],
+            contenido: edan.lat != 0.0 && edan.lon != 0.0
+                ? _buildMiniMapa()
+                : null,
+          ),
+          ReporteDocSeccion(
+            titulo: 'RESPONSABLE',
+            campos: [
+              ReporteDocCampo('Nombre', edan.responsable.isNotEmpty ? edan.responsable : 'No registrado'),
+              ReporteDocCampo('Cargo', edan.responsableRol.isNotEmpty ? edan.responsableRol : 'No registrado'),
+            ],
+            contenido: edan.responsableCelular.isNotEmpty
+                ? _buildContactActions()
+                : null,
+          ),
+          ReporteDocSeccion(
+            titulo: 'DESCRIPCIÓN',
+            campos: [
+              ReporteDocCampo('Resumen', edan.descripcion),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEstadoChip() {
+    final edan = widget.edan;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: edan.estado.color.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: edan.estado.color.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(edan.estado.icon, size: 14, color: edan.estado.color),
+          const SizedBox(width: 4),
+          Text(
+            edan.estado.label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: edan.estado.color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMiniMapa() {
+    final edan = widget.edan;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      height: 180,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: FlutterMap(
+          options: MapOptions(
+            initialCenter: LatLng(edan.lat, edan.lon),
+            initialZoom: 13.0,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.climbat.edan',
+            ),
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: LatLng(edan.lat, edan.lon),
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Colors.red,
+                    size: 36,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildContactActions() {
+    final edan = widget.edan;
+    final celular = edan.responsableCelular.replaceAll(r'\s', '');
+    
+    return Container(
+      margin: const EdgeInsets.only(top: 12, bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        children: [
+          const Text(
+            'Contactar:',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: AppColors.textPrimary,
+            ),
+          ),
+          const Spacer(),
+          IconButton(
+            icon: const Icon(Icons.call, size: 20),
+            onPressed: () => _launchUrl('tel:$celular'),
+            tooltip: 'Llamar',
+            color: AppColors.primary,
+          ),
+          IconButton(
+            icon: const Icon(Icons.message, size: 20),
+            onPressed: () => _launchWhatsapp(),
+            tooltip: 'WhatsApp',
+            color: Colors.green.shade600,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir la aplicación'),
+            backgroundColor: AppColors.rechazado,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _launchWhatsapp() async {
+    final edan = widget.edan;
+    final celular = edan.responsableCelular.replaceAll(r'\s', '');
+    final mensaje = 'Hola ${edan.responsable}, soy de UGR. Le contacto respecto al EDAN ${edan.codigo}.';
+    final url = 'https://wa.me/591$celular?text=${Uri.encodeComponent(mensaje)}';
+    await _launchUrl(url);
   }
 
   Widget _buildSeccionesTab(Color primary) {
@@ -199,87 +386,6 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
               fontSize: 12,
               fontWeight: FontWeight.w600,
               color: seccion.completada ? AppColors.aprobado : AppColors.pending,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistorialTab() {
-    final edan = widget.edan;
-    if (edan.historial.isEmpty) {
-      return const Center(
-        child: Text(
-          'Sin historial',
-          style: TextStyle(color: AppColors.textSecondary),
-        ),
-      );
-    }
-    return ListView.builder(
-      padding: const EdgeInsets.all(20),
-      itemCount: edan.historial.length,
-      itemBuilder: (context, index) {
-        final evento = edan.historial[index];
-        final isLast = index == edan.historial.length - 1;
-        return _buildTimelineItem(evento, isLast);
-      },
-    );
-  }
-
-  Widget _buildTimelineItem(UgrHistorialEvento evento, bool isLast) {
-    return IntrinsicHeight(
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          SizedBox(
-            width: 40,
-            child: Column(
-              children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: evento.color,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(evento.icon, size: 16, color: Colors.white),
-                ),
-                if (!isLast)
-                  Expanded(
-                    child: Container(
-                      width: 2,
-                      color: evento.color.withValues(alpha: 0.3),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    evento.titulo,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${evento.fecha} · ${evento.usuario}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
             ),
           ),
         ],

@@ -3,40 +3,102 @@ import '../config/theme.dart';
 import 'edan.dart';
 import 'reporte.dart';
 
-enum UgrReporteEstado { pendiente, confirmado, rechazado }
+enum UgrReporteEstado {
+  enviado,        // 1 - Reporte enviado
+  enRevision,     // 2 - En revisión para EDAN
+  aprobado,       // 3 - Aprobado para EDAN
+  rechazado,      // 4 - Rechazado para EDAN
+  cerrado,        // 5 - Cerrado
+}
 
 extension UgrReporteEstadoX on UgrReporteEstado {
+  int get id => switch (this) {
+        UgrReporteEstado.enviado => 1,
+        UgrReporteEstado.enRevision => 2,
+        UgrReporteEstado.aprobado => 3,
+        UgrReporteEstado.rechazado => 4,
+        UgrReporteEstado.cerrado => 5,
+      };
+
   String get label {
     switch (this) {
-      case UgrReporteEstado.pendiente:
-        return 'Pendiente';
-      case UgrReporteEstado.confirmado:
-        return 'Confirmado';
+      case UgrReporteEstado.enviado:
+        return 'Reporte enviado';
+      case UgrReporteEstado.enRevision:
+        return 'En revisión para EDAN';
+      case UgrReporteEstado.aprobado:
+        return 'Aprobado para EDAN';
       case UgrReporteEstado.rechazado:
-        return 'Rechazado';
+        return 'Rechazado para EDAN';
+      case UgrReporteEstado.cerrado:
+        return 'Cerrado';
+    }
+  }
+
+  String get descripcion {
+    switch (this) {
+      case UgrReporteEstado.enviado:
+        return 'Reporte registrado, pendiente de revisión';
+      case UgrReporteEstado.enRevision:
+        return 'Siendo revisado por un administrador';
+      case UgrReporteEstado.aprobado:
+        return 'Reporte verificado y aprobado';
+      case UgrReporteEstado.rechazado:
+        return 'Reporte rechazado';
+      case UgrReporteEstado.cerrado:
+        return 'Caso cerrado o resuelto';
     }
   }
 
   Color get color {
     switch (this) {
-      case UgrReporteEstado.pendiente:
+      case UgrReporteEstado.enviado:
         return AppColors.pending;
-      case UgrReporteEstado.confirmado:
+      case UgrReporteEstado.enRevision:
+        return AppColors.inProgress;
+      case UgrReporteEstado.aprobado:
         return AppColors.aprobado;
       case UgrReporteEstado.rechazado:
         return AppColors.rechazado;
+      case UgrReporteEstado.cerrado:
+        return AppColors.closed;
     }
   }
 
   IconData get icon {
     switch (this) {
-      case UgrReporteEstado.pendiente:
-        return Icons.schedule;
-      case UgrReporteEstado.confirmado:
-        return Icons.check_circle;
+      case UgrReporteEstado.enviado:
+        return Icons.send;
+      case UgrReporteEstado.enRevision:
+        return Icons.visibility;
+      case UgrReporteEstado.aprobado:
+        return Icons.verified;
       case UgrReporteEstado.rechazado:
         return Icons.cancel;
+      case UgrReporteEstado.cerrado:
+        return Icons.lock;
     }
+  }
+
+  bool get puedeCambiarA => switch (this) {
+        UgrReporteEstado.enviado => true,
+        UgrReporteEstado.enRevision => true,
+        UgrReporteEstado.aprobado => true,
+        UgrReporteEstado.rechazado => true,
+        UgrReporteEstado.cerrado => false,
+      };
+}
+
+extension UgrReporteEstadoFromInt on UgrReporteEstado {
+  static UgrReporteEstado fromId(int? id) {
+    return switch (id) {
+      1 => UgrReporteEstado.enviado,
+      2 => UgrReporteEstado.enRevision,
+      3 => UgrReporteEstado.aprobado,
+      4 => UgrReporteEstado.rechazado,
+      5 => UgrReporteEstado.cerrado,
+      _ => UgrReporteEstado.enviado,
+    };
   }
 }
 
@@ -123,6 +185,7 @@ class UgrReporte {
   final int fotos;
   final int videos;
   final int documentos;
+  int idEstado;
   UgrReporteEstado estado;
 
   UgrReporte({
@@ -139,7 +202,8 @@ class UgrReporte {
     this.fotos = 0,
     this.videos = 0,
     this.documentos = 0,
-    this.estado = UgrReporteEstado.pendiente,
+    this.idEstado = 1,
+    this.estado = UgrReporteEstado.enviado,
   });
 
   factory UgrReporte.fromServer(Reporte r) {
@@ -160,11 +224,8 @@ class UgrReporte {
         }
       }
     }
-    final estado = switch (r.idEstado) {
-      3 => UgrReporteEstado.confirmado,
-      4 => UgrReporteEstado.rechazado,
-      _ => UgrReporteEstado.pendiente,
-    };
+    final idEstado = r.idEstado ?? 1;
+    final estado = UgrReporteEstadoFromInt.fromId(idEstado);
     return UgrReporte(
       id: r.idReporte?.toString() ?? '',
       idReporte: r.idReporte,
@@ -179,6 +240,7 @@ class UgrReporte {
       fotos: (r.fotografia != null && r.fotografia!.isNotEmpty) ? 1 : 0,
       videos: 0,
       documentos: 0,
+      idEstado: idEstado,
       estado: estado,
     );
   }
@@ -217,6 +279,8 @@ class UgrHistorialEvento {
 }
 
 class UgrEdan {
+  final String id;
+  final int? idEdan;
   final String codigo;
   final String tipoEvento;
   final String comunidad;
@@ -225,8 +289,18 @@ class UgrEdan {
   final List<UgrSeccion> secciones;
   final List<UgrHistorialEvento> historial;
   UgrEdanEstado estado;
+  final String responsable;
+  final String responsableCelular;
+  final String responsableRol;
+  final double lat;
+  final double lon;
+  final int localidades;
+  final int fotos;
+  final String descripcion;
 
   UgrEdan({
+    required this.id,
+    this.idEdan,
     required this.codigo,
     required this.tipoEvento,
     required this.comunidad,
@@ -235,6 +309,14 @@ class UgrEdan {
     required this.secciones,
     required this.historial,
     this.estado = UgrEdanEstado.borrador,
+    this.responsable = '',
+    this.responsableCelular = '',
+    this.responsableRol = '',
+    this.lat = 0.0,
+    this.lon = 0.0,
+    this.localidades = 0,
+    this.fotos = 0,
+    this.descripcion = '',
   });
 
   factory UgrEdan.fromEdan(
@@ -253,6 +335,14 @@ class UgrEdan {
       _ => UgrEdanEstado.borrador,
     };
     final esBorrador = estado == UgrEdanEstado.borrador;
+
+    final primeraLocalidad = e.localidades.isNotEmpty ? e.localidades.first : null;
+    final lat = primeraLocalidad != null && primeraLocalidad.nombre.isNotEmpty 
+        ? -16.5 
+        : 0.0;
+    final lon = primeraLocalidad != null && primeraLocalidad.nombre.isNotEmpty 
+        ? -68.15 
+        : 0.0;
 
     final seccionesBase = <UgrSeccion>[
       UgrSeccion(
@@ -372,6 +462,7 @@ class UgrEdan {
     ];
 
     final secciones = [...seccionesBase, ...seccionesEspecificas];
+    final descripcion = _generarDescripcion(e);
     final historial = [
       UgrHistorialEvento(
         titulo: 'EDAN registrado como borrador',
@@ -382,6 +473,8 @@ class UgrEdan {
       ),
     ];
     return UgrEdan(
+      id: e.idLocal?.toString() ?? e.codigoEdan,
+      idEdan: e.idEdan ?? e.idServer,
       codigo: e.codigoEdan,
       tipoEvento: e.tipoEventoNombre ?? 'Evento',
       comunidad: _primerLocalidad(e.localidades),
@@ -390,7 +483,29 @@ class UgrEdan {
       secciones: secciones,
       historial: historial,
       estado: estado,
+      responsable: e.responsable.nombre,
+      responsableCelular: e.responsable.fono,
+      responsableRol: e.responsable.cargo,
+      lat: lat,
+      lon: lon,
+      localidades: e.localidadesAfectadas,
+      fotos: 0,
+      descripcion: descripcion,
     );
+  }
+
+  static String _generarDescripcion(Edan e) {
+    final partes = <String>[];
+    if (e.totalPoblacionAfectada > 0) {
+      partes.add('${e.totalPoblacionAfectada} personas afectadas');
+    }
+    if (e.totalFamiliasDamnificadas > 0) {
+      partes.add('${e.totalFamiliasDamnificadas} familias damnificadas');
+    }
+    if (e.localidadesAfectadas > 0) {
+      partes.add('${e.localidadesAfectadas} localidades');
+    }
+    return partes.isNotEmpty ? partes.join(' · ') : 'Sin datos adicionales';
   }
 
   static String _primerLocalidad(List<EdanLocalidad> localidades) {

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../../../config/theme.dart';
 import '../../../models/edan.dart';
 import '../../../models/usuario.dart';
+import '../../../models/ugr_models.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
@@ -43,8 +44,14 @@ const Map<String, String> _titulosSeccion = {
 class UgrEdanFormScreen extends StatefulWidget {
   final int? siguienteNumero;
   final Edan? edanAEditar;
+  final UgrReporte? reporteOrigen;
 
-  const UgrEdanFormScreen({super.key, this.siguienteNumero, this.edanAEditar});
+  const UgrEdanFormScreen({super.key, this.siguienteNumero, this.edanAEditar, this.reporteOrigen});
+
+  const UgrEdanFormScreen.desdeReporte({super.key, required UgrReporte reporte})
+      : siguienteNumero = null,
+        edanAEditar = null,
+        reporteOrigen = reporte;
 
   @override
   State<UgrEdanFormScreen> createState() => _UgrEdanFormScreenState();
@@ -115,6 +122,8 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
 
     if (widget.edanAEditar != null) {
       _cargarEdan(widget.edanAEditar!);
+    } else if (widget.reporteOrigen != null) {
+      _prellenarDesdeReporte(widget.reporteOrigen!);
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -133,6 +142,32 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         debugPrint('Error cargando usuarios: $e');
       }
     });
+  }
+
+  void _prellenarDesdeReporte(UgrReporte reporte) {
+    // Datos básicos desde el reporte
+    _edan.idDepartamento = null; // Se llenará con el token
+    _edan.idProvincia = null;
+    _edan.idMunicipio = AuthService.instance.currentToken?.idMunicipio;
+    _edan.municipioNombre = reporte.municipio;
+    
+    // Fecha y hora del evento
+    _fechaEvento = reporte.fechaEvento;
+    _fechaEventoController.text = _fmtFecha(_fechaEvento);
+    final hora = TimeOfDay.fromDateTime(reporte.fechaEvento);
+    _hora12 = ((hora.hour % 12 == 0 ? 12 : hora.hour % 12)).toString().padLeft(2, '0');
+    _ampm = hora.hour >= 12 ? 'PM' : 'AM';
+    
+    // Tipo de evento
+    _tipoEventoNombre = reporte.tipoEvento;
+    final index = _tiposEvento.indexWhere((t) => t == reporte.tipoEvento);
+    if (index != -1) _idTipoEvento = index + 1;
+    
+    // Descripción
+    // Se puede usar para notas adicionales
+    
+    // Coordenadas y comunidad se usarán en la sección 03
+    // Por ahora se deja placeholder que se completará en la sección de localidades
   }
 
   void _cargarEdan(Edan edan) {

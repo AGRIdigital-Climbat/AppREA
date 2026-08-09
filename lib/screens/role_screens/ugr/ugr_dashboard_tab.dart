@@ -22,8 +22,8 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
   List<UgrActividad> _actividad = [];
 
   UgrIndicadores get _indicadores => UgrIndicadores(
-        reportesNuevos: _reportes.where((r) => r.estado == UgrReporteEstado.pendiente).length,
-        reportesConfirmados: _reportes.where((r) => r.estado == UgrReporteEstado.confirmado).length,
+        reportesNuevos: _reportes.where((r) => r.estado == UgrReporteEstado.enviado).length,
+        reportesConfirmados: _reportes.where((r) => r.estado == UgrReporteEstado.aprobado).length,
         edanEnEdicion: _edanes.where((e) => e.estado == UgrEdanEstado.enEdicion).length,
         edanObservados: _edanes.where((e) => e.estado == UgrEdanEstado.observado).length,
         edanEnviados: _edanes.where((e) => e.estado == UgrEdanEstado.enviado).length,
@@ -93,14 +93,18 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
     final recientes = reportes.take(6).toList();
     return recientes.map((r) {
       final color = switch (r.estado) {
-        UgrReporteEstado.pendiente => AppColors.pending,
-        UgrReporteEstado.confirmado => AppColors.aprobado,
+        UgrReporteEstado.enviado => AppColors.pending,
+        UgrReporteEstado.enRevision => AppColors.inProgress,
+        UgrReporteEstado.aprobado => AppColors.aprobado,
         UgrReporteEstado.rechazado => AppColors.rechazado,
+        UgrReporteEstado.cerrado => AppColors.closed,
       };
       final icon = switch (r.estado) {
-        UgrReporteEstado.pendiente => Icons.warning_amber_rounded,
-        UgrReporteEstado.confirmado => Icons.check_circle,
+        UgrReporteEstado.enviado => Icons.send,
+        UgrReporteEstado.enRevision => Icons.visibility,
+        UgrReporteEstado.aprobado => Icons.verified,
         UgrReporteEstado.rechazado => Icons.cancel,
+        UgrReporteEstado.cerrado => Icons.lock,
       };
       final comunidad = r.comunidad.isNotEmpty ? ' en ${r.comunidad}' : '';
       final autor =

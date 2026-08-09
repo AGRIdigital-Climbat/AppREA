@@ -14,6 +14,7 @@ import '../services/auth_service.dart';
 import '../widgets/reporte_documento.dart';
 import 'reporte_detalle_data.dart';
 import 'reporte_form_screen.dart';
+import 'role_screens/ugr/ugr_edan_form_screen.dart';
 import 'role_screens/ugr/ugr_evento.dart';
 
 class ReporteDetailScreen extends StatefulWidget {
@@ -41,6 +42,38 @@ class ReporteDetailScreen extends StatefulWidget {
 
 class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
   bool _cambiandoEstado = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Cambio automático de estado a "En revisión" cuando es UGR y está "Enviado"
+    if (widget.reporteUgr != null && widget.reporteUgr!.estado == UgrReporteEstado.enviado) {
+      _cambiarEstadoAutomatico();
+    }
+  }
+
+  Future<void> _cambiarEstadoAutomatico() async {
+    final reporte = widget.reporteUgr!;
+    final idServer = reporte.idReporte;
+    if (idServer == null) return;
+
+    setState(() => _cambiandoEstado = true);
+    try {
+      await ApiService.instance.cambiarEstadoReporte(idServer, 2); // 2 = En revisión
+      if (mounted) {
+        setState(() {
+          reporte.idEstado = 2;
+          reporte.estado = UgrReporteEstado.enRevision;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error al cambiar estado automáticamente: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _cambiandoEstado = false);
+      }
+    }
+  }
 
   ReporteDetalle _buildDetalle(BuildContext context) {
     if (widget.reporteServer != null) {
@@ -548,65 +581,143 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
     final reporte = widget.reporteUgr!;
     final primary = PaletteScope.of(context).primary;
 
-    if (reporte.estado != UgrReporteEstado.pendiente) {
-      return SafeArea(
-        top: false,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          color: AppColors.surface,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(reporte.estado.icon, size: 18, color: reporte.estado.color),
-              const SizedBox(width: 8),
-              Text(
-                'Reporte ${reporte.estado.label.toLowerCase()}',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: reporte.estado.color,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return SafeArea(
       top: false,
       child: Container(
         padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          border: Border(
-            top: BorderSide(color: AppColors.divider.withValues(alpha: 0.6)),
-          ),
-        ),
+        color: AppColors.surface,
         child: Row(
           children: [
             Expanded(
-              child: OutlinedButton(
-                onPressed: _cambiandoEstado ? null : _confirmarRechazo,
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.rechazado,
-                  side: const BorderSide(color: AppColors.rechazado),
-                ),
-                child: const Text('Rechazar'),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(reporte.estado.icon, size: 16, color: reporte.estado.color),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          reporte.estado.label,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: reporte.estado.color,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    reporte.estado.descripcion,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.textSecondary,
+                    ),
+                  ),
+                ],
               ),
             ),
             const SizedBox(width: 12),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: _cambiandoEstado ? null : _confirmarReporte,
-                style: ElevatedButton.styleFrom(backgroundColor: primary),
-                child: const Text('Confirmar'),
+            if (reporte.estado != UgrReporteEstado.cerrado)
+              ElevatedButton.icon(
+                onPressed: _cambiandoEstado ? null : _mostrarSelectorEstado,
+                icon: const Icon(Icons.edit, size: 16),
+                label: const Text('Cambiar estado'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
               ),
-            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _mostrarSelectorEstado() async {
+    final reporte = widget.reporteUgr!;
+    final idServer = reporte.idReporte;
+    if (idServer == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Reporte sin ID del servidor'),
+            backgroundColor: AppColors.rechazado,
+          ),
+        );
+      }
+      return;
+    }
+
+    final estadoSeleccionado = await showDialog<UgrReporteEstado>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cambiar estado del reporte'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'Seleccione el nuevo estado:',
+              style: TextStyle(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 12),
+            ...UgrReporteEstado.values
+                .where((e) => e != UgrReporteEstado.enviado && e != reporte.estado)
+                .map((estado) => ListTile(
+                      leading: Icon(estado.icon, color: estado.color),
+                      title: Text(estado.label),
+                      subtitle: Text(
+                        estado.descripcion,
+                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+                      ),
+                      onTap: () => Navigator.of(ctx).pop(estado),
+                    )),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+
+    if (estadoSeleccionado == null || !mounted) return;
+
+    setState(() => _cambiandoEstado = true);
+    try {
+      await ApiService.instance.cambiarEstadoReporte(idServer, estadoSeleccionado.id);
+      if (mounted) {
+        setState(() {
+          reporte.idEstado = estadoSeleccionado.id;
+          reporte.estado = estadoSeleccionado;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Estado cambiado a "${estadoSeleccionado.label}"'),
+            backgroundColor: AppColors.aprobado,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al cambiar estado: $e'),
+            backgroundColor: AppColors.rechazado,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _cambiandoEstado = false);
+      }
+    }
   }
 
   Future<void> _confirmarReporte() async {
@@ -622,7 +733,7 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Sí'),
+            child: const Text('Sí, crear EDAN'),
           ),
         ],
       ),
@@ -633,29 +744,33 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
     final idServer = reporte.idReporte;
 
     if (idServer == null) {
-      setState(() => reporte.estado = UgrReporteEstado.confirmado);
+      setState(() => reporte.estado = UgrReporteEstado.aprobado);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Reporte confirmado.'),
           backgroundColor: AppColors.aprobado,
         ),
       );
-      Navigator.of(context).pop();
+      _navegarACrearEdan(reporte);
       return;
     }
 
     setState(() => _cambiandoEstado = true);
     try {
-      await ApiService.instance.cambiarEstadoReporte(idServer, 3);
+      await ApiService.instance.cambiarEstadoReporte(idServer, 3); // 3 = Aprobado para EDAN
       if (!mounted) return;
-      setState(() => reporte.estado = UgrReporteEstado.confirmado);
+      setState(() {
+        reporte.idEstado = 3;
+        reporte.estado = UgrReporteEstado.aprobado;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Reporte confirmado.'),
+          content: Text('Reporte confirmado. Creando EDAN...'),
           backgroundColor: AppColors.aprobado,
         ),
       );
       Navigator.of(context).pop();
+      _navegarACrearEdan(reporte);
     } catch (_) {
       if (!mounted) return;
       setState(() => _cambiandoEstado = false);
@@ -665,6 +780,19 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
           backgroundColor: AppColors.rechazado,
         ),
       );
+    }
+  }
+
+  void _navegarACrearEdan(UgrReporte reporte) async {
+    // Navegar al formulario de EDAN con datos pre-llenados
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => UgrEdanFormScreen.desdeReporte(reporte: reporte),
+      ),
+    );
+    // Regresar a la pantalla anterior después de crear EDAN
+    if (mounted) {
+      Navigator.of(context).pop();
     }
   }
 

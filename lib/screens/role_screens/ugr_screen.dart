@@ -8,10 +8,10 @@ import '../../providers/reporte_provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/database_helper.dart';
 import '../../widgets/perfil_tab.dart';
-import '../municipio_reportes_screen.dart';
 import 'ugr/ugr_dashboard_tab.dart';
 import 'ugr/ugr_edan_form_screen.dart';
 import 'ugr/ugr_edan_tab.dart';
+import 'ugr/ugr_edan_mapa_tab.dart';
 import 'ugr/ugr_reportes_tab.dart';
 import 'ugr/ugr_route.dart';
 import 'ugr/ugr_sheets.dart';
@@ -92,7 +92,7 @@ class _UgrScreenState extends State<UgrScreen> {
                 const UgrDashboardTab(),
                 const UgrReportesTab(),
                 UgrEdanTab(key: _edanTabKey),
-                const MunicipioReportesTab(),
+                const UgrEdanMapaTab(),
                 PerfilTab(key: _perfilTabKey),
               ],
             ),
@@ -230,13 +230,11 @@ class _UgrScreenState extends State<UgrScreen> {
   }
 
   UgrEdan _mapToUgrEdan(Edan edan) {
-    final profile = AuthService.instance.getSavedProfile();
+    final profile = AuthService.instance;
     return UgrEdan.fromEdan(
       edan,
       municipioNombre: edan.municipioNombre ?? 'Municipio',
-      usuarioNombre: (profile['nombre'] as String?)?.isNotEmpty == true
-          ? profile['nombre'] as String
-          : null,
+      usuarioNombre: profile.userName,
     );
   }
 
