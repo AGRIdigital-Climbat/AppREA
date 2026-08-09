@@ -576,4 +576,158 @@ class ApiService {
     final body = await _handleResponse(response);
     return Usuario.fromJson(body['data']);
   }
+
+  // ========== EDAN ENDPOINTS ==========
+
+  Future<List<Map<String, dynamic>>> getEdans({
+    int? idUsuario,
+    int? idMunicipio,
+    int? idEstado,
+    bool? sincronizado,
+    bool? esBorrador,
+    int skip = 0,
+    int limit = 50,
+  }) async {
+    final params = <String>['skip=$skip', 'limit=$limit'];
+    if (idUsuario != null) params.add('id_usuario=$idUsuario');
+    if (idMunicipio != null) params.add('id_municipio=$idMunicipio');
+    if (idEstado != null) params.add('id_estado=$idEstado');
+    if (sincronizado != null) params.add('sincronizado=$sincronizado');
+    if (esBorrador != null) params.add('es_borrador=$esBorrador');
+    
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return (body['data'] as List)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
+
+  Future<Map<String, dynamic>> getEdanById(int id) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/$id'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> createEdan(Map<String, dynamic> edan) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanEndpoint}/'),
+        headers: _headers,
+        body: jsonEncode(edan),
+      ).timeout(const Duration(seconds: 20))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> updateEdan(int id, Map<String, dynamic> edan) async {
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.edanEndpoint}/$id'),
+        headers: _headers,
+        body: jsonEncode(edan),
+      ).timeout(const Duration(seconds: 20))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<void> deleteEdan(int id, {bool permanente = false}) async {
+    final response = await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.edanEndpoint}/$id?permanente=$permanente'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    await _handleResponse(response);
+  }
+
+  Future<Map<String, dynamic>> syncEdans(List<Map<String, dynamic>> edans) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanEndpoint}/sync'),
+        headers: _headers,
+        body: jsonEncode({'edans': edans}),
+      ).timeout(const Duration(seconds: 60))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body);
+  }
+
+  Future<List<Map<String, dynamic>>> pullEdans({
+    int? idUsuario,
+    DateTime? fechaDesde,
+    int skip = 0,
+    int limit = 100,
+  }) async {
+    final params = <String>[];
+    if (idUsuario != null) params.add('id_usuario=$idUsuario');
+    if (fechaDesde != null) params.add('fecha_desde=${fechaDesde.toIso8601String()}');
+    params.add('skip=$skip');
+    params.add('limit=$limit');
+    
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/sync/pull?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    return (body['data'] as List)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getMisReportesEdan({
+    required int idUsuario,
+    int skip = 0,
+    int limit = 50,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/reportes/mis-reportes?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return (body['data'] as List)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getTipoEvento() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/tipo-evento'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return (body['data'] as List)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getEstadosEdan() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/estados'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return (body['data'] as List)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
 }

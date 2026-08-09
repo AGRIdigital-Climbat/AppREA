@@ -21,7 +21,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 8,
+      version: 9,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -121,6 +121,13 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
+      CREATE TABLE config (
+        clave TEXT PRIMARY KEY,
+        valor TEXT NOT NULL
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE edans_offline (
         id_local INTEGER PRIMARY KEY AUTOINCREMENT,
         id_server INTEGER,
@@ -192,6 +199,14 @@ class DatabaseHelper {
           fecha_modificacion TEXT,
           intentos_sync INTEGER DEFAULT 0,
           ultimo_error TEXT
+        )
+      ''');
+    }
+    if (oldVersion < 9) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS config (
+          clave TEXT PRIMARY KEY,
+          valor TEXT NOT NULL
         )
       ''');
     }
@@ -782,6 +797,32 @@ class DatabaseHelper {
     await db.delete('municipio_geojson');
     await db.delete('edans_offline');
     _database = null;
+  }
+
+  Future<int?> getLastSyncDate() async {
+    final db = await database;
+    final result = await db.rawQuery('SELECT valor FROM config WHERE clave = ?', ['ultima_sync']);
+    if (result.isEmpty) return null;
+    return result.first['valor'] as int?;
+  }
+
+  Future<void> saveLastSyncDate(int timestamp) async {
+    final db = await database;
+    await db.rawInsert('''
+      INSERT OR REPLACE INTO config (clave, valor) VALUES (?, ?)
+    ''', ['ultima_sync', timestamp]);
+  }
+
+  Future<Edan?> getEdanByServerId(int idServer) async {
+    final db = await database;
+    final maps = await db.query(
+      'edans_offline',
+      where: 'id_server = ?',
+      whereArgs: [idServer],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return _edanFromRow(maps.first);
   }
 
   bool _toBool(dynamic value) {

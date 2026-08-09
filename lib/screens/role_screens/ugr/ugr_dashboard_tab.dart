@@ -6,6 +6,7 @@ import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/edan_sync_service.dart';
 import 'ugr_edan_list_screen.dart';
 
 class UgrDashboardTab extends StatefulWidget {
@@ -31,8 +32,21 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
   @override
   void initState() {
     super.initState();
+    _sincronizarEnSegundoPlano();
     _cargarReportes();
     _cargarEdanes();
+  }
+
+  Future<void> _sincronizarEnSegundoPlano() async {
+    await Future.delayed(const Duration(seconds: 2));
+    if (!mounted) return;
+    
+    final result = await EdanSyncService.instance.sincronizar();
+    
+    if (!mounted) return;
+    if (result.exito && (result.creados > 0 || result.actualizados > 0 || result.enviados > 0)) {
+      _cargarEdanes();
+    }
   }
 
   Future<void> _cargarEdanes() async {
@@ -105,6 +119,7 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
     final primary = PaletteScope.of(context).primary;
     return RefreshIndicator(
       onRefresh: () async {
+        await _sincronizarManual();
         await _cargarReportes();
         await _cargarEdanes();
       },
@@ -122,6 +137,19 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
           const SizedBox(height: 8),
           _buildActividad(),
         ],
+      ),
+    );
+  }
+
+  Future<void> _sincronizarManual() async {
+    final result = await EdanSyncService.instance.sincronizar();
+    if (!mounted) return;
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.resumen),
+        backgroundColor: result.exito ? AppColors.aprobado : AppColors.rechazado,
+        duration: const Duration(seconds: 3),
       ),
     );
   }

@@ -38,35 +38,86 @@ class AuthService {
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
-    final hasLoggedIn = _prefs!.getBool('has_logged_in') ?? false;
+    await _autoLogin();
+  }
 
+  Future<void> _autoLogin() async {
+    final hasLoggedIn = _prefs!.getBool('has_logged_in') ?? false;
     if (!hasLoggedIn) {
       _currentToken = null;
       return;
     }
 
     try {
-      final token = await _storage
-          .read(key: 'auth_token')
-          .timeout(const Duration(seconds: 3));
-      final userId = await _storage
-          .read(key: 'user_id')
-          .timeout(const Duration(seconds: 3));
-      final usuario = await _storage
-          .read(key: 'usuario')
-          .timeout(const Duration(seconds: 3));
-      final nombre = await _storage
-          .read(key: 'nombre')
-          .timeout(const Duration(seconds: 3));
-      final idRolStr = await _storage
-          .read(key: 'id_rol')
-          .timeout(const Duration(seconds: 3));
-      final rolName = await _storage
-          .read(key: 'rol_name')
-          .timeout(const Duration(seconds: 3));
-      final permisosStr = await _storage
-          .read(key: 'permisos')
-          .timeout(const Duration(seconds: 3));
+      final token = await _storage.read(key: 'auth_token');
+      final userId = await _storage.read(key: 'user_id');
+      final usuario = await _storage.read(key: 'usuario');
+      final contrasena = await _storage.read(key: 'contrasena');
+      final idRolStr = await _storage.read(key: 'id_rol');
+      final lastLoginStr = await _storage.read(key: 'last_login');
+
+      if (token != null && token.isNotEmpty) {
+        final idRol = idRolStr != null ? int.tryParse(idRolStr) : null;
+        DateTime? lastLogin;
+        if (lastLoginStr != null) {
+          lastLogin = DateTime.tryParse(lastLoginStr);
+        }
+
+        final tokenVigente = await _verificarToken(token, idRol, lastLogin);
+        if (tokenVigente) {
+          await _loadUserProfile();
+          return;
+        }
+      }
+
+      if (usuario != null && usuario.isNotEmpty && 
+          contrasena != null && contrasena.isNotEmpty) {
+        final loginExitoso = await login(usuario, contrasena);
+        if (loginExitoso) {
+          debugPrint('Auto-login exitoso con credenciales guardadas');
+          return;
+        }
+      }
+
+      _currentToken = null;
+      await logout();
+    } catch (e) {
+      debugPrint('Error en auto-login: $e');
+      _currentToken = null;
+    }
+  }
+
+  Future<bool> _verificarToken(String token, int? idRol, DateTime? lastLogin) async {
+    if (token.isEmpty) return false;
+
+    if (lastLogin == null) return false;
+
+    final ahora = DateTime.now();
+    final diasDesdeLogin = ahora.difference(lastLogin).inDays;
+
+    if (idRol == 7) {
+      return true;
+    }
+
+    if (diasDesdeLogin > 3) {
+      debugPrint('Token expirado: $diasDesdeLogin días desde último login');
+      return false;
+    }
+
+    return true;
+  }
+
+  Future<void> _loadUserProfile() async {
+    try {
+      final token = await _storage.read(key: 'auth_token');
+      if (token == null) return;
+
+      final userId = await _storage.read(key: 'user_id');
+      final usuario = await _storage.read(key: 'usuario');
+      final nombre = await _storage.read(key: 'nombre');
+      final idRolStr = await _storage.read(key: 'id_rol');
+      final rolName = await _storage.read(key: 'rol_name');
+      final permisosStr = await _storage.read(key: 'permisos');
 
       if (token != null && userId != null) {
         _idRol = idRolStr != null ? int.tryParse(idRolStr) : null;
@@ -104,7 +155,17 @@ class AuthService {
           comunidad: comunidad,
           correo: correo,
           cargo: cargo,
+          idRol: _idRol,
+          rol: _rolName,
+          permisos: _permisos,
         );
+
+        ApiService.instance.setToken(token);
+      }
+    } catch (e) {
+      debugPrint('Error cargando perfil: $e');
+    }
+  }
         _api.setToken(token);
       }
     } catch (e) {
@@ -158,8 +219,10 @@ class AuthService {
       await _storage.write(key: 'user_id', value: token.userId.toString());
       await _storage.write(key: 'usuario', value: token.usuario);
       await _storage.write(key: 'nombre', value: token.nombre);
+      await _storage.write(key: 'contrasena', value: contrasena);
       await _storage.write(key: 'id_rol', value: token.idRol?.toString() ?? '');
       await _storage.write(key: 'rol_name', value: token.rol ?? '');
+      await _storage.write(key: 'last_login', value: DateTime.now().toIso8601String());
 
       _idRol = token.idRol;
       _rolName = token.rol;
@@ -256,38 +319,59 @@ class AuthService {
     _rolName = null;
     _permisos = null;
     _api.setToken(null);
+    
+    await _storage.delete(key: 'auth_token');
+    await _storage.delete(key: 'user_id');
+    await _storage.delete(key: 'usuario');
+    await _storage.delete(key: 'nombre');
+    await _storage.delete(key: 'contrasena');
+    await _storage.delete(key: 'id_rol');
+    await _storage.delete(key: 'rol_name');
+    await _storage.delete(key: 'permisos');
+    await _storage.delete(key: 'last_login');
+    
+    _prefs?.remove('has_logged_in');
+    _prefs?.remove('profile_nombre');
+    _prefs?.remove('profile_celular');
+    _prefs?.remove('profile_carnet');
+    _prefs?.remove('profile_comunidad');
+    _prefs?.remove('profile_usuario');
+    _prefs?.remove('profile_id_departamento');
+    _prefs?.remove('profile_departamento_nombre');
+    _prefs?.remove('profile_id_provincia');
+    _prefs?.remove('profile_provincia_nombre');
+    _prefs?.remove('profile_id_municipio');
+    _prefs?.remove('profile_municipio_nombre');
+    _prefs?.remove('profile_correo');
+    _prefs?.remove('profile_cargo');
+  }
 
+  Future<Map<String, dynamic>> cargarCatalogos() async {
     try {
-      await _storage.delete(key: 'auth_token');
-      await _storage.delete(key: 'user_id');
-      await _storage.delete(key: 'usuario');
-      await _storage.delete(key: 'nombre');
-      await _storage.delete(key: 'id_rol');
-      await _storage.delete(key: 'rol_name');
-      await _storage.delete(key: 'permisos');
-
-      _prefs ??= await SharedPreferences.getInstance();
-      await _prefs!.setBool('has_logged_in', false);
-      await _prefs!.remove('profile_nombre');
-      await _prefs!.remove('profile_celular');
-      await _prefs!.remove('profile_carnet');
-      await _prefs!.remove('profile_comunidad');
-      await _prefs!.remove('profile_usuario');
-      await _prefs!.remove('profile_id_departamento');
-      await _prefs!.remove('profile_departamento_nombre');
-      await _prefs!.remove('profile_id_provincia');
-      await _prefs!.remove('profile_provincia_nombre');
-      await _prefs!.remove('profile_id_municipio');
-      await _prefs!.remove('profile_municipio_nombre');
-      await _prefs!.remove('profile_correo');
-      await _prefs!.remove('profile_cargo');
-
-      await DatabaseHelper.instance.clearAll();
-      await ImageService().clearAllImages();
+      final catalogos = <String, dynamic>{};
+      
+      final departamentos = await _api.getDepartamentos();
+      catalogos['departamentos'] = departamentos;
+      
+      final provincias = await _api.getProvincias();
+      catalogos['provincias'] = provincias;
+      
+      final municipios = await _api.getMunicipios();
+      catalogos['municipios'] = municipios;
+      
+      final tiposEvento = await _api.getTiposEvento();
+      catalogos['tiposEvento'] = tiposEvento;
+      
+      final estadosEdan = await _api.getEstadosEdan();
+      catalogos['estadosEdan'] = estadosEdan;
+      
+      return catalogos;
     } catch (e) {
-      debugPrint('[logout] Error al limpiar datos locales: $e');
+      debugPrint('Error cargando catálogos: $e');
+      return <String, dynamic>{};
     }
   }
+}
 
   dynamic _decodePermisos(String encoded) {
     try {
