@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
-import 'package:latlong2/latlong.dart';
 import '../../../config/theme.dart';
 import '../../../models/ugr_models.dart';
 import '../../../widgets/reporte_documento.dart';
@@ -56,8 +54,8 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: ReporteDocumento(
-        titulo: 'Evaluación de Daños y Análisis de Necesidades',
-        subtitulo: edan.tipoEvento,
+        titulo: 'EVALUACIÓN DE DAÑOS Y ANÁLISIS DE NECESIDADES',
+        subtitulo: 'EDAN - ${edan.tipoEvento}',
         fechaCabecera: fechaFmt,
         icono: Icons.assignment,
         chip: _buildEstadoChip(),
@@ -76,25 +74,31 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
               ReporteDocCampo('Municipio', edan.municipio),
               ReporteDocCampo('Comunidad', edan.comunidad),
               ReporteDocCampo('Localidades afectadas', '${edan.localidades}'),
+              if (edan.lat != 0.0 && edan.lon != 0.0)
+                ReporteDocCampo('Latitud', edan.lat.toStringAsFixed(6)),
+              if (edan.lat != 0.0 && edan.lon != 0.0)
+                ReporteDocCampo('Longitud', edan.lon.toStringAsFixed(6)),
             ],
             contenido: edan.lat != 0.0 && edan.lon != 0.0
-                ? _buildMiniMapa()
+                ? ReporteDocMapa(lat: edan.lat, lon: edan.lon)
                 : null,
           ),
           ReporteDocSeccion(
-            titulo: 'RESPONSABLE',
+            titulo: 'RESPONSABLE DEL EDAN',
             campos: [
               ReporteDocCampo('Nombre', edan.responsable.isNotEmpty ? edan.responsable : 'No registrado'),
               ReporteDocCampo('Cargo', edan.responsableRol.isNotEmpty ? edan.responsableRol : 'No registrado'),
+              if (edan.responsableCelular.isNotEmpty)
+                ReporteDocCampo('Celular', edan.responsableCelular),
             ],
             contenido: edan.responsableCelular.isNotEmpty
                 ? _buildContactActions()
                 : null,
           ),
           ReporteDocSeccion(
-            titulo: 'DESCRIPCIÓN',
+            titulo: 'DESCRIPTOR DEL IMPACTO',
             campos: [
-              ReporteDocCampo('Resumen', edan.descripcion),
+              ReporteDocCampo('Resumen', edan.descripcion.isNotEmpty ? edan.descripcion : 'Sin descripción'),
             ],
           ),
         ],
@@ -129,46 +133,6 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
     );
   }
 
-  Widget _buildMiniMapa() {
-    final edan = widget.edan;
-    return Container(
-      margin: const EdgeInsets.only(top: 12),
-      height: 180,
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: FlutterMap(
-          options: MapOptions(
-            initialCenter: LatLng(edan.lat, edan.lon),
-            initialZoom: 13.0,
-          ),
-          children: [
-            TileLayer(
-              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-              userAgentPackageName: 'com.climbat.edan',
-            ),
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: LatLng(edan.lat, edan.lon),
-                  child: const Icon(
-                    Icons.location_on,
-                    color: Colors.red,
-                    size: 36,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildContactActions() {
     final edan = widget.edan;
     final celular = edan.responsableCelular.replaceAll(r'\s', '');
@@ -181,28 +145,44 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: AppColors.divider),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Contactar:',
+            'ACCIONES DE CONTROL',
             style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textPrimary,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textSecondary,
+              letterSpacing: 0.5,
             ),
           ),
-          const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.call, size: 20),
-            onPressed: () => _launchUrl('tel:$celular'),
-            tooltip: 'Llamar',
-            color: AppColors.primary,
-          ),
-          IconButton(
-            icon: const Icon(Icons.message, size: 20),
-            onPressed: () => _launchWhatsapp(),
-            tooltip: 'WhatsApp',
-            color: Colors.green.shade600,
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.call, size: 18),
+                  label: const Text('Llamar'),
+                  onPressed: () => _launchUrl('tel:$celular'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.message, size: 18),
+                  label: const Text('WhatsApp'),
+                  onPressed: _launchWhatsapp,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade600,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
