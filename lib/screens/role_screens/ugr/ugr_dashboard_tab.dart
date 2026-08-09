@@ -24,8 +24,8 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
   UgrIndicadores get _indicadores => UgrIndicadores(
         reportesNuevos: _reportes.where((r) => r.estado == UgrReporteEstado.enviado).length,
         reportesConfirmados: _reportes.where((r) => r.estado == UgrReporteEstado.aprobado).length,
-        edanEnEdicion: _edanes.where((e) => e.estado == UgrEdanEstado.enEdicion).length,
-        edanObservados: _edanes.where((e) => e.estado == UgrEdanEstado.observado).length,
+        edanEnEdicion: _edanes.where((e) => e.estado == UgrEdanEstado.borrador).length,
+        edanObservados: _edanes.where((e) => e.estado == UgrEdanEstado.rechazado).length,
         edanEnviados: _edanes.where((e) => e.estado == UgrEdanEstado.enviado).length,
       );
 

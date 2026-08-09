@@ -166,12 +166,6 @@ class AuthService {
       debugPrint('Error cargando perfil: $e');
     }
   }
-        _api.setToken(token);
-      }
-    } catch (e) {
-      _currentToken = null;
-    }
-  }
 
   Map<String, dynamic> getSavedProfile() {
     final data = <String, dynamic>{};
@@ -371,7 +365,6 @@ class AuthService {
       return <String, dynamic>{};
     }
   }
-}
 
   dynamic _decodePermisos(String encoded) {
     try {

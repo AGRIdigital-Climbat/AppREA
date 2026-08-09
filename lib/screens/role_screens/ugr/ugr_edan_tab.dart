@@ -91,12 +91,10 @@ class UgrEdanTabState extends State<UgrEdanTab> {
     const estados = <UgrEdanEstado?>[
       null,
       UgrEdanEstado.borrador,
-      UgrEdanEstado.enEdicion,
-      UgrEdanEstado.firmado,
       UgrEdanEstado.enviado,
-      UgrEdanEstado.enRevision,
-      UgrEdanEstado.observado,
       UgrEdanEstado.aprobado,
+      UgrEdanEstado.rechazado,
+      UgrEdanEstado.cerrado,
     ];
 
     return Container(

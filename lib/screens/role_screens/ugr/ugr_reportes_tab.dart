@@ -127,8 +127,9 @@ class _UgrReportesTabState extends State<UgrReportesTab> {
   Widget _buildFilterBar(Color primary) {
     final filters = <(String, UgrReporteEstado?)>[
       ('Todos', null),
-      ('Pendientes', UgrReporteEstado.pendiente),
-      ('Confirmados', UgrReporteEstado.confirmado),
+      ('Pendientes', UgrReporteEstado.enviado),
+      ('En Revisión', UgrReporteEstado.enRevision),
+      ('Confirmados', UgrReporteEstado.aprobado),
       ('Rechazados', UgrReporteEstado.rechazado),
     ];
     return Container(

@@ -345,7 +345,7 @@ class _UgrReporteDetalleLegacyState extends State<UgrReporteDetalleLegacy> {
 
   Widget _buildActionsBar(Color primary) {
     final reporte = widget.reporte;
-    if (reporte.estado != UgrReporteEstado.pendiente) {
+    if (reporte.estado != UgrReporteEstado.enviado) {
       return SafeArea(
         top: false,
         child: Container(
@@ -426,7 +426,7 @@ class _UgrReporteDetalleLegacyState extends State<UgrReporteDetalleLegacy> {
     );
     if (crearEdan == null || !mounted) return;
 
-    setState(() => widget.reporte.estado = UgrReporteEstado.confirmado);
+    setState(() => widget.reporte.estado = UgrReporteEstado.aprobado);
 
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(
