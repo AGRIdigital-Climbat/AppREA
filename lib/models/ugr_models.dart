@@ -103,32 +103,49 @@ extension UgrReporteEstadoFromInt on UgrReporteEstado {
 }
 
 enum UgrEdanEstado {
-  borrador,
-  enEdicion,
-  firmado,
-  enviado,
-  enRevision,
-  observado,
-  aprobado,
+  borrador,      // 1 - Borrador inicial (editable, eliminable)
+  enviado,       // 2 - Formulario enviado al servidor (no editable)
+  aprobado,      // 3 - Formulario aprobado (no editable)
+  rechazado,     // 4 - Formulario rechazado (editable para corregir)
+  cerrado,       // 5 - Formulario cerrado (no editable)
 }
 
 extension UgrEdanEstadoX on UgrEdanEstado {
+  int get id => switch (this) {
+        UgrEdanEstado.borrador => 1,
+        UgrEdanEstado.enviado => 2,
+        UgrEdanEstado.aprobado => 3,
+        UgrEdanEstado.rechazado => 4,
+        UgrEdanEstado.cerrado => 5,
+      };
+
   String get label {
     switch (this) {
       case UgrEdanEstado.borrador:
         return 'Borrador';
-      case UgrEdanEstado.enEdicion:
-        return 'En edición';
-      case UgrEdanEstado.firmado:
-        return 'Firmado';
       case UgrEdanEstado.enviado:
         return 'Enviado';
-      case UgrEdanEstado.enRevision:
-        return 'En revisión';
-      case UgrEdanEstado.observado:
-        return 'Observado';
       case UgrEdanEstado.aprobado:
         return 'Aprobado';
+      case UgrEdanEstado.rechazado:
+        return 'Rechazado';
+      case UgrEdanEstado.cerrado:
+        return 'Cerrado';
+    }
+  }
+
+  String get descripcion {
+    switch (this) {
+      case UgrEdanEstado.borrador:
+        return 'Borrador inicial';
+      case UgrEdanEstado.enviado:
+        return 'Formulario enviado al servidor';
+      case UgrEdanEstado.aprobado:
+        return 'Formulario aprobado';
+      case UgrEdanEstado.rechazado:
+        return 'Formulario rechazado';
+      case UgrEdanEstado.cerrado:
+        return 'Formulario cerrado';
     }
   }
 
@@ -136,18 +153,14 @@ extension UgrEdanEstadoX on UgrEdanEstado {
     switch (this) {
       case UgrEdanEstado.borrador:
         return AppColors.closed;
-      case UgrEdanEstado.enEdicion:
-        return AppColors.inProgress;
-      case UgrEdanEstado.firmado:
-        return AppColors.enRevision;
       case UgrEdanEstado.enviado:
         return AppColors.enviado;
-      case UgrEdanEstado.enRevision:
-        return AppColors.pending;
-      case UgrEdanEstado.observado:
-        return AppColors.rechazado;
       case UgrEdanEstado.aprobado:
         return AppColors.aprobado;
+      case UgrEdanEstado.rechazado:
+        return AppColors.rechazado;
+      case UgrEdanEstado.cerrado:
+        return AppColors.closed;
     }
   }
 
@@ -155,19 +168,44 @@ extension UgrEdanEstadoX on UgrEdanEstado {
     switch (this) {
       case UgrEdanEstado.borrador:
         return Icons.edit_note;
-      case UgrEdanEstado.enEdicion:
-        return Icons.edit;
-      case UgrEdanEstado.firmado:
-        return Icons.draw;
       case UgrEdanEstado.enviado:
         return Icons.send;
-      case UgrEdanEstado.enRevision:
-        return Icons.visibility;
-      case UgrEdanEstado.observado:
-        return Icons.feedback;
       case UgrEdanEstado.aprobado:
         return Icons.verified;
+      case UgrEdanEstado.rechazado:
+        return Icons.cancel;
+      case UgrEdanEstado.cerrado:
+        return Icons.lock;
     }
+  }
+
+  bool get puedeEditar => switch (this) {
+        UgrEdanEstado.borrador => true,
+        UgrEdanEstado.enviado => false,
+        UgrEdanEstado.aprobado => false,
+        UgrEdanEstado.rechazado => true,  // Puede corregir y re-enviar
+        UgrEdanEstado.cerrado => false,
+      };
+
+  bool get puedeEliminar => switch (this) {
+        UgrEdanEstado.borrador => true,
+        UgrEdanEstado.enviado => false,
+        UgrEdanEstado.aprobado => false,
+        UgrEdanEstado.rechazado => true,
+        UgrEdanEstado.cerrado => false,
+      };
+}
+
+extension UgrEdanEstadoFromInt on UgrEdanEstado {
+  static UgrEdanEstado fromId(int? id) {
+    return switch (id) {
+      1 => UgrEdanEstado.borrador,
+      2 => UgrEdanEstado.enviado,
+      3 => UgrEdanEstado.aprobado,
+      4 => UgrEdanEstado.rechazado,
+      5 => UgrEdanEstado.cerrado,
+      _ => UgrEdanEstado.borrador,
+    };
   }
 }
 
@@ -327,13 +365,8 @@ class UgrEdan {
     final fecha = DateTime.tryParse(e.fechaLlenado) ??
         DateTime.tryParse(e.fechaEvento) ??
         DateTime.now();
-    final estado = switch (e.estado) {
-      'enviado' => UgrEdanEstado.enviado,
-      'observado' => UgrEdanEstado.observado,
-      'aprobado' => UgrEdanEstado.aprobado,
-      'en_revision' || 'enRevision' => UgrEdanEstado.enRevision,
-      _ => UgrEdanEstado.borrador,
-    };
+    final idEstado = e.idEstado;
+    final estado = UgrEdanEstadoFromInt.fromId(idEstado);
     final esBorrador = estado == UgrEdanEstado.borrador;
 
     final primeraLocalidad = e.localidades.isNotEmpty ? e.localidades.first : null;

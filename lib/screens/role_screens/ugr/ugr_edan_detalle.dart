@@ -227,7 +227,7 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
 
   Widget _buildEstadoBanner(Color primary) {
     final edan = widget.edan;
-    final observado = edan.estado == UgrEdanEstado.observado;
+    final rechazado = edan.estado == UgrEdanEstado.rechazado;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
@@ -241,8 +241,8 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              observado
-                  ? 'EDAN observado por la autoridad municipal. Corrija las observaciones y vuelva a enviar.'
+              rechazado
+                  ? 'EDAN rechazado por la autoridad municipal. Corrija las observaciones y vuelva a enviar.'
                   : 'Estado: ${edan.estado.label}',
               style: TextStyle(
                 fontSize: 13,
@@ -375,9 +375,11 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
 
   Widget _buildActionsBar(Color primary) {
     final edan = widget.edan;
-    final puedeFirmar =
-        edan.estado == UgrEdanEstado.borrador || edan.estado == UgrEdanEstado.enEdicion;
-    final puedeEnviar = edan.estado == UgrEdanEstado.firmado;
+    final puedeEditar = edan.estado.puedeEditar;
+    final puedeEliminar = edan.estado.puedeEliminar;
+    final esBorrador = edan.estado == UgrEdanEstado.borrador;
+    final esEnviado = edan.estado == UgrEdanEstado.enviado;
+    final esRechazado = edan.estado == UgrEdanEstado.rechazado;
 
     return SafeArea(
       top: false,
@@ -389,35 +391,117 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
             top: BorderSide(color: AppColors.divider.withValues(alpha: 0.6)),
           ),
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Expanded(
-              child: OutlinedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Cambios guardados (diseño).'),
-                      backgroundColor: AppColors.aprobado,
+            // Banner de estado
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: edan.estado.color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: edan.estado.color.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(edan.estado.icon, size: 16, color: edan.estado.color),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Estado: ${edan.estado.label}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: edan.estado.color,
+                          ),
+                        ),
+                        Text(
+                          edan.estado.descripcion,
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
                     ),
-                  );
-                },
-                child: const Text('Guardar'),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: OutlinedButton(
-                onPressed: puedeFirmar ? _firmar : null,
-                child: const Text('Firmar'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: ElevatedButton(
-                onPressed: puedeEnviar ? _enviar : null,
-                style: ElevatedButton.styleFrom(backgroundColor: primary),
-                child: const Text('Enviar'),
-              ),
+            const SizedBox(height: 12),
+            // Botones de acción
+            Row(
+              children: [
+                if (puedeEliminar)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.delete_outline, size: 18),
+                      label: const Text('Eliminar'),
+                      onPressed: () => _confirmarEliminar(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.rechazado,
+                      ),
+                    ),
+                  ),
+                if (puedeEditar && !esBorrador)
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      icon: const Icon(Icons.edit, size: 18),
+                      label: const Text('Editar'),
+                      onPressed: () => _navegarAEditar(context),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.primary,
+                      ),
+                    ),
+                  ),
+                if (esBorrador) ...[
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => _guardarBorrador(context),
+                      child: const Text('Guardar'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.send, size: 18),
+                      label: const Text('Enviar'),
+                      onPressed: () => _confirmarEnviar(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primary,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+                if (esRechazado)
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.refresh, size: 18),
+                      label: const Text('Corregir y Re-enviar'),
+                      onPressed: () => _navegarAEditar(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                if (esEnviado)
+                  const Expanded(
+                    child: Text(
+                      'Enviado - Pendiente de sincronización',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ],
         ),
@@ -425,21 +509,96 @@ class _UgrEdanDetalleState extends State<UgrEdanDetalle> {
     );
   }
 
-  void _firmar() {
-    setState(() => widget.edan.estado = UgrEdanEstado.firmado);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('EDAN firmado (diseño).'),
-        backgroundColor: AppColors.enRevision,
+  void _confirmarEliminar(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar EDAN'),
+        content: const Text('¿Está seguro de eliminar este EDAN? Esta acción no se puede deshacer.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              // TODO: Implementar eliminación de BD y servidor
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('EDAN eliminado correctamente'),
+                  backgroundColor: AppColors.rechazado,
+                ),
+              );
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.rechazado,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Eliminar'),
+          ),
+        ],
       ),
     );
   }
 
-  void _enviar() {
-    setState(() => widget.edan.estado = UgrEdanEstado.enviado);
+  void _navegarAEditar(BuildContext context) {
+    // TODO: Navegar a UgrEdanFormScreen con edanAEditar
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('EDAN enviado a revisión (diseño).'),
+        content: Text('Abriendo editor de EDAN...'),
+        backgroundColor: AppColors.primary,
+      ),
+    );
+  }
+
+  void _guardarBorrador(BuildContext context) {
+    // TODO: Guardar en BD local como borrador
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('EDAN guardado como borrador'),
+        backgroundColor: AppColors.aprobado,
+      ),
+    );
+  }
+
+  Future<void> _confirmarEnviar(BuildContext context) async {
+    final edan = widget.edan;
+    
+    // Verificar secciones incompletas
+    final incompletas = edan.secciones.where((s) => !s.completada).length;
+    
+    if (incompletas > 0) {
+      final confirmar = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('EDAN Incompleto'),
+          content: Text(
+            'El EDAN tiene $incompletas secciones incompletas.\n\n'
+            'Puede enviarlo ahora y completarlo desde la computadora, '
+            'o seguir editando aquí.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Seguir Editando'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Enviar Ahora'),
+            ),
+          ],
+        ),
+      );
+      
+      if (confirmar != true) return;
+    }
+    
+    // TODO: Cambiar estado a "enviado" y sincronizar
+    setState(() => edan.estado = UgrEdanEstado.enviado);
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('EDAN enviado. Pendiente de sincronización con el servidor.'),
         backgroundColor: AppColors.enviado,
       ),
     );
