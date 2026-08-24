@@ -558,7 +558,10 @@ class EdanServicioBasicoDetalle {
   bool danoTotal;
   String necesidadesInmediatas;
   String observaciones;
+  List<EdanFoto> fotos;
   String? fotografia;
+  double coordenadaLat;
+  double coordenadaLon;
 
   EdanServicioBasicoDetalle({
     required this.tipo,
@@ -567,10 +570,14 @@ class EdanServicioBasicoDetalle {
     this.danoTotal = false,
     this.necesidadesInmediatas = '',
     this.observaciones = '',
+    List<EdanFoto>? fotos,
     this.fotografia,
-  });
+    this.coordenadaLat = 0,
+    this.coordenadaLon = 0,
+  }) : fotos = fotos ?? [];
 
   factory EdanServicioBasicoDetalle.fromJson(Map<String, dynamic> json) {
+    final fotosRaw = json['fotos'];
     return EdanServicioBasicoDetalle(
       tipo: _str(json['tipo']),
       afectado: _toBool(json['afectado'] ?? json['impactado']),
@@ -579,7 +586,12 @@ class EdanServicioBasicoDetalle {
       necesidadesInmediatas: _str(json['necesidades_inmediatas'] ??
           json['necesidadesInmediatas']),
       observaciones: _str(json['observaciones']),
+      fotos: fotosRaw is List
+          ? fotosRaw.map((f) => EdanFoto.fromJson(f is Map ? Map<String, dynamic>.from(f) : {})).toList()
+          : [],
       fotografia: json['fotografia'],
+      coordenadaLat: _toDouble(json['coordenada_lat'] ?? json['coordenadaLat']),
+      coordenadaLon: _toDouble(json['coordenada_lon'] ?? json['coordenadaLon']),
     );
   }
 
@@ -590,7 +602,10 @@ class EdanServicioBasicoDetalle {
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
+        'fotos': fotos.map((f) => f.toJson()).toList(),
         'fotografia': fotografia,
+        'coordenada_lat': coordenadaLat,
+        'coordenada_lon': coordenadaLon,
       };
 
   Map<String, dynamic> toApiJson() => {
@@ -599,6 +614,12 @@ class EdanServicioBasicoDetalle {
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
+      };
+
+  Map<String, dynamic> toFotoData(EdanFoto foto) => {
+        ...toApiJson(),
+        'coordenada_lat': foto.latitud,
+        'coordenada_lon': foto.longitud,
       };
 
   String get etiqueta {
@@ -622,7 +643,10 @@ class EdanServicioBasicoDetalle {
       danoParcial ||
       danoTotal ||
       necesidadesInmediatas.trim().isNotEmpty ||
-      observaciones.trim().isNotEmpty;
+      observaciones.trim().isNotEmpty ||
+      fotos.isNotEmpty ||
+      coordenadaLat != 0 ||
+      coordenadaLon != 0;
 }
 
 class EdanDanoServicioBasico {

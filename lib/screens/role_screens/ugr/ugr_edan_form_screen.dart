@@ -2107,6 +2107,8 @@ class _BotonSacarFoto extends StatefulWidget {
   final String? fotografia;
   final double coordenadaLat;
   final double coordenadaLon;
+  final void Function(double lat, double lon)? onCoordenadasCapturadas;
+  final String? seccion;
 
   const _BotonSacarFoto({
     required this.fotos,
@@ -2114,6 +2116,8 @@ class _BotonSacarFoto extends StatefulWidget {
     this.fotografia,
     this.coordenadaLat = 0,
     this.coordenadaLon = 0,
+    this.onCoordenadasCapturadas,
+    this.seccion,
   });
 
   @override
@@ -4038,6 +4042,19 @@ class _FilaServicioRowState extends State<_FilaServicioRow> {
             widget.onChanged();
           },
         ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+          fotografia: valor.fotografia,
+          coordenadaLat: valor.coordenadaLat,
+          coordenadaLon: valor.coordenadaLon,
+          seccion: 'Servicios básicos',
+          onCoordenadasCapturadas: (lat, lon) {
+            valor.coordenadaLat = lat;
+            valor.coordenadaLon = lon;
+          },
+        ),
       ],
     );
   }
@@ -4145,6 +4162,14 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
         _BotonSacarFoto(
           fotos: valor.fotos,
           onChanged: widget.onChanged,
+          fotografia: valor.fotografia,
+          coordenadaLat: valor.coordenadaLat,
+          coordenadaLon: valor.coordenadaLon,
+          seccion: 'Infraestructura pública',
+          onCoordenadasCapturadas: (lat, lon) {
+            valor.coordenadaLat = lat;
+            valor.coordenadaLon = lon;
+          },
         ),
       ],
     );

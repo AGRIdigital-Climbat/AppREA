@@ -1293,6 +1293,15 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
                   s.observaciones.trim().isNotEmpty ? s.observaciones : '-',
                 ]).toList(),
               ),
+              ...l.serviciosBasicos.where((s) => s.fotos.isNotEmpty || s.coordenadaLat != 0 || s.fotografia != null).map((s) => 
+                _FotosDe(
+                  fotos: s.fotos,
+                  servidor: s.fotografia,
+                  coordenadaLat: s.coordenadaLat,
+                  coordenadaLon: s.coordenadaLon,
+                  seccion: 'Servicios básicos',
+                ),
+              ),
             ]);
           }),
       ],

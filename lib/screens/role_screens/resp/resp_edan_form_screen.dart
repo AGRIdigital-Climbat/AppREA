@@ -4585,11 +4585,13 @@ class _FilaServicioRow extends StatefulWidget {
   final String titulo;
   final EdanServicioBasicoDetalle valor;
   final VoidCallback onChanged;
+  final void Function(double lat, double lon)? onCoordenadasCapturadas;
 
   const _FilaServicioRow({
     required this.titulo,
     required this.valor,
     required this.onChanged,
+    this.onCoordenadasCapturadas,
   });
 
   @override
@@ -4659,6 +4661,20 @@ class _FilaServicioRowState extends State<_FilaServicioRow> {
             widget.onChanged();
           },
         ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+          fotografia: valor.fotografia,
+          coordenadaLat: valor.coordenadaLat,
+          coordenadaLon: valor.coordenadaLon,
+          seccion: 'Servicios básicos',
+          onCoordenadasCapturadas: (lat, lon) {
+            valor.coordenadaLat = lat;
+            valor.coordenadaLon = lon;
+            widget.onCoordenadasCapturadas?.call(lat, lon);
+          },
+        ),
       ],
     );
   }
@@ -4671,6 +4687,7 @@ class _FilaInfraRow extends StatefulWidget {
   final bool puedeEliminar;
   final VoidCallback onEliminar;
   final VoidCallback onChanged;
+  final void Function(double lat, double lon)? onCoordenadasCapturadas;
 
   const _FilaInfraRow({
     required this.titulo,
@@ -4679,6 +4696,7 @@ class _FilaInfraRow extends StatefulWidget {
     required this.puedeEliminar,
     required this.onEliminar,
     required this.onChanged,
+    this.onCoordenadasCapturadas,
   });
 
   @override
@@ -4760,6 +4778,20 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
           onChanged: (v) {
             valor.observaciones = v;
             widget.onChanged();
+          },
+        ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+          fotografia: valor.fotografia,
+          coordenadaLat: valor.coordenadaLat,
+          coordenadaLon: valor.coordenadaLon,
+          seccion: 'Infraestructura pública',
+          onCoordenadasCapturadas: (lat, lon) {
+            valor.coordenadaLat = lat;
+            valor.coordenadaLon = lon;
+            widget.onCoordenadasCapturadas?.call(lat, lon);
           },
         ),
       ],

@@ -547,6 +547,13 @@ class _UgrEdanLocalidadPreviewScreenState
                   _tbRow('Necesidades inmediatas', _v(s.necesidadesInmediatas)),
                 if (s.observaciones.trim().isNotEmpty)
                   _tbRow('Observaciones', _v(s.observaciones)),
+                _FotosDe(
+                  fotos: s.fotos,
+                  servidor: s.fotografia,
+                  coordenadaLat: s.coordenadaLat,
+                  coordenadaLon: s.coordenadaLon,
+                  seccion: 'Servicios básicos',
+                ),
               ])),
       ],
     );
