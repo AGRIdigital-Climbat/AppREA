@@ -13,7 +13,7 @@ import 'ugr_evento.dart';
 import 'ugr_route.dart';
 import '../resp/resp_edan_form_screen.dart';
 
-enum _VistaLocalidades { sinConsolidar, consolidadas }
+enum _VistaLocalidades { todos, sinConsolidar, consolidadas }
 
 class UgrLocalidadesTab extends StatefulWidget {
   final VoidCallback? onVistaChanged;
@@ -34,13 +34,13 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
   String _query = '';
   bool _modoConsolidacion = false;
   final Set<int> _seleccionadas = {};
-  _VistaLocalidades _vistaActual = _VistaLocalidades.sinConsolidar;
+  _VistaLocalidades _vistaActual = _VistaLocalidades.todos;
 
   void refresh() => _cargarDatos();
 
   bool get mostrarFabConsolidar =>
       !_modoConsolidacion &&
-      _vistaActual == _VistaLocalidades.sinConsolidar &&
+      (_vistaActual == _VistaLocalidades.sinConsolidar || _vistaActual == _VistaLocalidades.todos) &&
       _localidades.where((l) => l.idEdan == null || l.idEdan == 0).isNotEmpty;
 
   void activarConsolidacion() => _activarModoConsolidacion();
@@ -148,7 +148,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
     if (_vistaActual == _VistaLocalidades.sinConsolidar) {
       list = list.where((l) => l.idEdan == null || l.idEdan == 0).toList();
-    } else {
+    } else if (_vistaActual == _VistaLocalidades.consolidadas) {
       list = list.where((l) => l.idEdan != null && l.idEdan! > 0).toList();
     }
 
@@ -449,7 +449,20 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           Row(
             children: [
               Expanded(
-                child: _ResumenChip(label: 'Total', value: '$total', color: primary),
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _vistaActual = _VistaLocalidades.todos;
+                    });
+                    widget.onVistaChanged?.call();
+                  },
+                  child: _ResumenChip(
+                    label: 'Total',
+                    value: '$total',
+                    color: primary,
+                    highlighted: _vistaActual == _VistaLocalidades.todos,
+                  ),
+                ),
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -538,12 +551,18 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
                   ? 'Sin resultados'
                   : _vistaActual == _VistaLocalidades.sinConsolidar
                       ? 'No hay localidades sin consolidar'
-                      : 'No hay localidades consolidadas',
+                      : _vistaActual == _VistaLocalidades.consolidadas
+                          ? 'No hay localidades consolidadas'
+                          : 'No hay localidades',
               style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
             ),
           ],
         ),
       );
+    }
+
+    if (_vistaActual == _VistaLocalidades.todos) {
+      return _buildGroupedListTodos(list, primary);
     }
 
     final Map<String, List<EdanLocalidad>> grupos = {};
@@ -580,6 +599,99 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildGroupedListTodos(List<EdanLocalidad> list, Color primary) {
+    final sinConsolidar = list.where((l) => l.idEdan == null || l.idEdan == 0).toList();
+    final consolidadas = list.where((l) => l.idEdan != null && l.idEdan! > 0).toList();
+
+    final Map<String, List<EdanLocalidad>> gruposSin = {};
+    for (final l in sinConsolidar) {
+      final key = l.tipoEventoNombre ?? 'Otro evento';
+      gruposSin.putIfAbsent(key, () => []).add(l);
+    }
+
+    final Map<String, List<EdanLocalidad>> gruposCon = {};
+    for (final l in consolidadas) {
+      final key = l.tipoEventoNombre ?? 'Otro evento';
+      gruposCon.putIfAbsent(key, () => []).add(l);
+    }
+
+    final items = <_GroupedListEntry>[];
+    if (gruposSin.isNotEmpty) {
+      items.add(_GroupedListEntry.section('Sin consolidar', AppColors.pending));
+      for (final e in gruposSin.entries) {
+        items.add(_GroupedListEntry.group(e.key, e.value));
+      }
+    }
+    if (gruposCon.isNotEmpty) {
+      items.add(_GroupedListEntry.section('Consolidadas', AppColors.aprobado));
+      for (final e in gruposCon.entries) {
+        items.add(_GroupedListEntry.group(e.key, e.value));
+      }
+    }
+
+    return Stack(
+      children: [
+        RefreshIndicator(
+          onRefresh: _cargarDatos,
+          child: ListView.builder(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 80),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final item = items[index];
+              if (item.isSection) {
+                return _buildSeccionHeader(item.sectionLabel!, item.sectionColor!, primary);
+              }
+              final localidadesGrupo = item.localidades!;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildGrupoHeader(item.groupName!, localidadesGrupo.length, primary),
+                  ...localidadesGrupo.map((localidad) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: _buildLocalidadItem(localidad, primary),
+                    );
+                  }),
+                  const SizedBox(height: 8),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSeccionHeader(String label, Color color, Color primary) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4, bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            label == 'Sin consolidar' ? Icons.folder_off : Icons.folder,
+            size: 15,
+            color: color,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -831,6 +943,24 @@ class _ResumenChip extends StatelessWidget {
   }
 }
 
+class _GroupedListEntry {
+  final bool isSection;
+  final String? sectionLabel;
+  final Color? sectionColor;
+  final String? groupName;
+  final List<EdanLocalidad>? localidades;
+
+  _GroupedListEntry.section(this.sectionLabel, this.sectionColor)
+      : isSection = true,
+        groupName = null,
+        localidades = null;
+
+  _GroupedListEntry.group(this.groupName, this.localidades)
+      : isSection = false,
+        sectionLabel = null,
+        sectionColor = null;
+}
+
 class _LocalidadCard extends StatelessWidget {
   final EdanLocalidad localidad;
   final Color primary;
@@ -951,16 +1081,16 @@ class _LocalidadCard extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Icon(Icons.people, size: 12, color: AppColors.textSecondary),
+                  const Icon(Icons.people, size: 12, color: AppColors.textSecondary),
                   const SizedBox(width: 3),
                   Text('${localidad.totalPoblacionAfectada}', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                   const SizedBox(width: 10),
-                  Icon(Icons.home, size: 12, color: AppColors.textSecondary),
+                  const Icon(Icons.home, size: 12, color: AppColors.textSecondary),
                   const SizedBox(width: 3),
                   Text('${localidad.totalFamiliasAfectadas} fam', style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
                   if (localidad.totalFamiliasDamnificadas > 0) ...[
                     const SizedBox(width: 10),
-                    Icon(Icons.warning, size: 11, color: AppColors.rechazado),
+                    const Icon(Icons.warning, size: 11, color: AppColors.rechazado),
                     const SizedBox(width: 3),
                     Text('${localidad.totalFamiliasDamnificadas} damn', style: const TextStyle(fontSize: 12, color: AppColors.rechazado)),
                   ],

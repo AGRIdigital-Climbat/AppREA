@@ -91,7 +91,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
       final data = await ApiService.instance.listarEdansPorMunicipio(municipioId);
       if (!mounted) return;
       setState(() {
-        _edanesServidor = data;
+        _edanesServidor = data.map(_enriquecerEdanMap).toList();
         _cargando = false;
       });
     } catch (e) {
@@ -115,7 +115,11 @@ class UgrEdanTabState extends State<UgrEdanTab>
         final codigo = _extractStr(e['codigo_edan'] ?? e['codigoEdan']).toLowerCase();
         final municipio = _extractStr(
             e['municipio_nombre'] ?? e['municipioNombre'] ?? e['municipio']).toLowerCase();
-        return codigo.contains(q) || municipio.contains(q);
+        final departamento = _extractStr(
+            e['departamento_nombre'] ?? e['departamentoNombre'] ?? e['departamento']).toLowerCase();
+        final tipoEvento = _extractStr(
+            e['tipo_evento_nombre'] ?? e['tipoEventoNombre'] ?? e['tipo_evento']).toLowerCase();
+        return codigo.contains(q) || municipio.contains(q) || departamento.contains(q) || tipoEvento.contains(q);
       }).toList();
     }
     return list;
@@ -126,6 +130,27 @@ class UgrEdanTabState extends State<UgrEdanTab>
     if (v is String) return v;
     if (v is Map) return '${v['nombre'] ?? v['name'] ?? fallback}';
     return '$v';
+  }
+
+  static Map<String, dynamic> _enriquecerEdanMap(Map<String, dynamic> e) {
+    if (e.containsKey('secciones')) return e;
+    final localidades = e['localidades'];
+    if (localidades is List && localidades.isNotEmpty) {
+      final secciones = <String>{};
+      for (final loc in localidades) {
+        if (loc is! Map) continue;
+        if (loc['imp_poblacion'] == true || loc['impPoblacion'] == true) secciones.add('Población');
+        if (loc['imp_salud'] == true || loc['impSalud'] == true) secciones.add('Salud');
+        if (loc['imp_infraestructura'] == true || loc['impInfraestructura'] == true) secciones.add('Infra');
+        if (loc['imp_servicios'] == true || loc['impServicios'] == true) secciones.add('Servicios');
+        if (loc['imp_educacion'] == true || loc['impEducacion'] == true) secciones.add('Educación');
+        if (loc['imp_vivienda'] == true || loc['impVivienda'] == true) secciones.add('Vivienda');
+        if (loc['imp_agropecuario'] == true || loc['impAgropecuario'] == true) secciones.add('Agropecuario');
+        if (loc['imp_proteccion'] == true || loc['impProteccion'] == true) secciones.add('Protección');
+      }
+      e['secciones'] = secciones.toList();
+    }
+    return e;
   }
 
   @override
@@ -209,7 +234,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
         onChanged: (value) => setState(() => _query = value),
         style: const TextStyle(fontSize: 14),
         decoration: InputDecoration(
-          hintText: 'Buscar código o municipio...',
+          hintText: 'Buscar código, municipio, departamento o tipo...',
           prefixIcon: const Icon(Icons.search, size: 20),
           isDense: true,
           filled: true,
@@ -323,10 +348,14 @@ class _EdanServidorCard extends StatelessWidget {
         'codigo_edan': e.codigoEdan,
         'tipo_evento_nombre': e.tipoEventoNombre ?? '',
         'municipio_nombre': e.municipioNombre ?? '',
+        'departamento_nombre': e.departamentoNombre ?? '',
         'estado': e.estado,
         'total_localidades': e.localidades.length,
         'total_poblacion_afectada': e.totalPoblacionAfectada,
+        'total_familias_afectadas': e.totalFamiliasAfectadas,
+        'total_familias_damnificadas': e.totalFamiliasDamnificadas,
         'fecha_evento': e.fechaEvento,
+        'hora_evento': e.horaEvento,
       };
 
   static String _safeStr(dynamic v, [String fallback = '']) {
@@ -344,19 +373,45 @@ class _EdanServidorCard extends StatelessWidget {
     return 0;
   }
 
+  static String _formatFecha(String fecha, [String hora = '']) {
+    String? f;
+    if (fecha.isNotEmpty) {
+      try {
+        final dt = DateTime.parse(fecha);
+        f = '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year}';
+      } catch (_) {
+        f = fecha;
+      }
+    }
+    String? h;
+    if (hora.isNotEmpty) {
+      try {
+        final ht = DateTime.parse('2000-01-01T$hora');
+        h = '${ht.hour.toString().padLeft(2, '0')}:${ht.minute.toString().padLeft(2, '0')}';
+      } catch (_) {
+        h = hora;
+      }
+    }
+    if (f != null && h != null) return '$f $h';
+    return f ?? h ?? '';
+  }
+
   @override
   Widget build(BuildContext context) {
-    final codigo = _safeStr(edan['codigo_edan'] ?? edan['codigoEdan'], 'Sin codigo');
+    final codigo = _safeStr(edan['codigo_edan'] ?? edan['codigoEdan'], 'Sin código');
     final tipoEvento = _safeStr(
         edan['tipo_evento_nombre'] ?? edan['tipoEventoNombre'] ?? edan['tipo_evento']);
     final municipio = _safeStr(
         edan['municipio_nombre'] ?? edan['municipioNombre'] ?? edan['municipio']);
+    final departamento = _safeStr(
+        edan['departamento_nombre'] ?? edan['departamentoNombre'] ?? edan['departamento']);
     final estado = _safeStr(edan['estado']);
     final localidades = _safeInt(edan['total_localidades']);
-    final poblacion = _safeInt(edan['total_poblacion_afectada']);
     final fechaEvento = _safeStr(edan['fecha_evento'] ?? edan['fechaEvento']);
+    final horaEvento = _safeStr(edan['hora_evento'] ?? edan['horaEvento']);
 
     final estadoColor = _estadoColor(estado);
+    final fechaLegible = _formatFecha(fechaEvento, horaEvento);
 
     return Card(
       margin: EdgeInsets.zero,
@@ -368,6 +423,7 @@ class _EdanServidorCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // Row1: dot estado + tipo evento + badge + chevron
               Row(
                 children: [
                   Container(
@@ -381,7 +437,7 @@ class _EdanServidorCard extends StatelessWidget {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      codigo,
+                      tipoEvento.isNotEmpty ? tipoEvento : codigo,
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -408,42 +464,74 @@ class _EdanServidorCard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(width: 6),
+                  const Icon(Icons.chevron_right, size: 18, color: AppColors.textSecondary),
                 ],
               ),
-              const SizedBox(height: 6),
-              if (tipoEvento.isNotEmpty || municipio.isNotEmpty)
+              const SizedBox(height: 4),
+              // Row2: código del EDAN
+              Padding(
+                padding: const EdgeInsets.only(left: 20),
+                child: Text(
+                  codigo,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.textSecondary,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(height: 4),
+              // Row3: 📍 municipio, departamento
+              if (municipio.isNotEmpty || departamento.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(left: 20),
-                  child: Text(
-                    [tipoEvento, municipio].where((s) => s.isNotEmpty).join(' · '),
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  child: Row(
+                    children: [
+                      const Icon(Icons.location_on_outlined, size: 13, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          [municipio, departamento].where((s) => s.isNotEmpty).join(', '),
+                          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  const SizedBox(width: 20),
-                  Expanded(
-                    child: Text(
-                      [
-                        if (localidades != 0)
-                          '$localidades localidad${localidades == 1 ? '' : 'es'}',
-                        if (poblacion != 0)
-                          '$poblacion pers.',
-                        if (fechaEvento.isNotEmpty)
-                          fechaEvento,
-                      ].join(' · '),
-                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
+              const SizedBox(height: 4),
+              // Row4: 📋 N localidades  ·  📅 fecha
+              Padding(
+                padding: const EdgeInsets.only(left: 20),
+                child: Row(
+                  children: [
+                    if (localidades != 0) ...[
+                      const Icon(Icons.folder_open, size: 13, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(
+                        '$localidades localidad${localidades == 1 ? '' : 'es'}',
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ],
+                    if (localidades != 0 && fechaLegible.isNotEmpty)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 8),
+                        child: Text('·', style: TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                      ),
+                    if (fechaLegible.isNotEmpty) ...[
+                      const Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
+                      const SizedBox(width: 4),
+                      Text(
+                        fechaLegible,
+                        style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ],
+                ),
               ),
             ],
           ),
