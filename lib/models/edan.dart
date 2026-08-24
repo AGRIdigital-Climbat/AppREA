@@ -1571,7 +1571,8 @@ class EdanLocalidad {
     final localidad = EdanLocalidad(
       idLocal: json['id_local'],
       idServer: _toInt(json['id_edan_localidad']),
-      idEdan: _jsonIntFk(json['id_edan']),
+      idEdan: _jsonIntFk(json['id_edan'] ??
+          (json['edan'] is Map ? json['edan']['id_edan'] : null)),
       idUsuario: _toInt(json['id_usuario']),
       idEdanLocalidadEstado: idEdanLocalidadEstado,
       estadoLocalidad: estadoLocalidad,

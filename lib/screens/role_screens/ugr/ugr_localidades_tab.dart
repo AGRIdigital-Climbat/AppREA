@@ -108,6 +108,22 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       final localidades =
           data.map((j) => EdanLocalidad.fromJson(j)).toList();
 
+      // DEBUG TEMPORAL — diagnosticar consolidadas
+      debugPrint('[Localidades] resumen keys: ${resumen.keys.toList()}');
+      debugPrint('[Localidades] resumen: $resumen');
+      if (data.isNotEmpty) {
+        debugPrint('[Localidades] primera localidad keys: ${data[0].keys.toList()}');
+        debugPrint('[Localidades] id_edan raw: ${data[0]['id_edan']} type: ${data[0]['id_edan'].runtimeType}');
+        debugPrint('[Localidades] edan raw: ${data[0]['edan']}');
+        debugPrint('[Localidades] es_huerfana: ${data[0]['es_huerfana']}');
+      }
+      final conApi = localidades.where((l) => l.idEdan != null && l.idEdan! > 0).toList();
+      debugPrint('[Localidades] consolidadas from API: ${conApi.length}');
+      for (final c in conApi) {
+        debugPrint('[Localidades]   - ${c.nombre} idEdan=${c.idEdan}');
+      }
+      // FIN DEBUG
+
       final userId = AuthService.instance.userId;
       if (userId != null) {
         try {
@@ -437,8 +453,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
   Widget _buildResumen(Color primary) {
     final r = _resumen!;
     final total = r['total'] ?? 0;
-    final huerfanas = r['huerfanas'] ?? 0;
-    final consolidadas = r['consolidadas'] ?? 0;
+    final huerfanas = r['huerfanas'] ?? r['total_huerfanas'] ?? 0;
+    final consolidadas = r['consolidadas'] ?? r['total_consolidadas'] ?? 0;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
@@ -620,13 +636,13 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
     final items = <_GroupedListEntry>[];
     if (gruposSin.isNotEmpty) {
-      items.add(_GroupedListEntry.section('Sin consolidar', AppColors.pending));
+      items.add(_GroupedListEntry.section('Sin consolidar', AppColors.pending, sinConsolidar.length));
       for (final e in gruposSin.entries) {
         items.add(_GroupedListEntry.group(e.key, e.value));
       }
     }
     if (gruposCon.isNotEmpty) {
-      items.add(_GroupedListEntry.section('Consolidadas', AppColors.aprobado));
+      items.add(_GroupedListEntry.section('Consolidadas', AppColors.aprobado, consolidadas.length));
       for (final e in gruposCon.entries) {
         items.add(_GroupedListEntry.group(e.key, e.value));
       }
@@ -642,7 +658,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
             itemBuilder: (context, index) {
               final item = items[index];
               if (item.isSection) {
-                return _buildSeccionHeader(item.sectionLabel!, item.sectionColor!, primary);
+                return _buildSeccionHeader(item.sectionLabel!, item.sectionColor!, primary, item.count);
               }
               final localidadesGrupo = item.localidades!;
               return Column(
@@ -665,31 +681,42 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     );
   }
 
-  Widget _buildSeccionHeader(String label, Color color, Color primary) {
-    return Container(
-      margin: const EdgeInsets.only(top: 4, bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.25)),
-      ),
+  Widget _buildSeccionHeader(String label, Color color, Color primary, [int? count]) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
       child: Row(
         children: [
-          Icon(
-            label == 'Sin consolidar' ? Icons.folder_off : Icons.folder,
-            size: 15,
-            color: color,
+          Container(
+            width: 8,
+            height: 8,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 8),
           Text(
             label,
             style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color.withValues(alpha: 0.7),
             ),
           ),
+          if (count != null) ...[
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -947,10 +974,11 @@ class _GroupedListEntry {
   final bool isSection;
   final String? sectionLabel;
   final Color? sectionColor;
+  final int? count;
   final String? groupName;
   final List<EdanLocalidad>? localidades;
 
-  _GroupedListEntry.section(this.sectionLabel, this.sectionColor)
+  _GroupedListEntry.section(this.sectionLabel, this.sectionColor, [this.count])
       : isSection = true,
         groupName = null,
         localidades = null;
@@ -958,7 +986,8 @@ class _GroupedListEntry {
   _GroupedListEntry.group(this.groupName, this.localidades)
       : isSection = false,
         sectionLabel = null,
-        sectionColor = null;
+        sectionColor = null,
+        count = null;
 }
 
 class _LocalidadCard extends StatelessWidget {
