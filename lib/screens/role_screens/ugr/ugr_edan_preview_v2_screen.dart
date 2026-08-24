@@ -1198,7 +1198,9 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion05() {
-    final locs = edan.localidades.where((l) => l.impInfraestructura).toList();
+    final locs = edan.localidades.where((l) =>
+        l.danosViales.isNotEmpty ||
+        l.danosInfraPublica.isNotEmpty).toList();
     return _DocSeccion(
       numero: '05',
       titulo: 'Impacto en infraestructuras',
@@ -1271,7 +1273,8 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion06() {
-    final locs = edan.localidades.where((l) => l.impServicios).toList();
+    final locs = edan.localidades.where((l) =>
+        l.serviciosBasicos.any((s) => s.tieneDatos)).toList();
     return _DocSeccion(
       numero: '06',
       titulo: 'Impacto en servicios básicos',

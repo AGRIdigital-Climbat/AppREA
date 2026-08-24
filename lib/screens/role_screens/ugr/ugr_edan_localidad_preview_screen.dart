@@ -534,10 +534,10 @@ class _UgrEdanLocalidadPreviewScreenState
       numero: '06',
       titulo: 'Impacto en servicios básicos',
       children: [
-        if (localidad.serviciosBasicos.isEmpty)
+        if (localidad.serviciosBasicos.where((s) => s.tieneDatos).isEmpty)
           _vacio()
         else
-          ...localidad.serviciosBasicos.map((s) => _tb([
+          ...localidad.serviciosBasicos.where((s) => s.tieneDatos).map((s) => _tb([
                 _tbRow('Servicio', s.etiqueta),
                 _tags([
                   if (s.danoParcial) 'Parcial',
