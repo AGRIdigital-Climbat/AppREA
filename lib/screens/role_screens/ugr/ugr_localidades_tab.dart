@@ -947,24 +947,23 @@ class _ResumenChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        decoration: BoxDecoration(
-          color: highlighted ? color.withValues(alpha: 0.18) : color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: highlighted ? color.withValues(alpha: 0.6) : color.withValues(alpha: 0.2),
-            width: highlighted ? 1.5 : 1,
-          ),
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: highlighted ? color.withValues(alpha: 0.18) : color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: highlighted ? color.withValues(alpha: 0.6) : color.withValues(alpha: 0.2),
+          width: highlighted ? 1.5 : 1,
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
-            Text(label, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.7))),
-          ],
-        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
+          Text(label, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.7))),
+        ],
       ),
     );
   }
