@@ -6,6 +6,7 @@ import '../services/database_helper.dart';
 import '../services/api_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/auth_service.dart';
+import '../services/edan_sync_service.dart';
 
 class SyncManager {
   static final SyncManager _instance = SyncManager._();
@@ -104,6 +105,12 @@ class SyncManager {
       _pendingCountController.add(await _getPendingCount());
     } finally {
       _isSyncing = false;
+    }
+
+    try {
+      await EdanSyncService.instance.sincronizar();
+    } catch (e) {
+      debugPrint('[syncPendingReports] Error sincronizando EDANs: $e');
     }
   }
 

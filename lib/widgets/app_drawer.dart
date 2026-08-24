@@ -77,7 +77,7 @@ class AppDrawer extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           const Text(
-            'SINAGERSAT',
+            'SINAGER-SAT',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w800,

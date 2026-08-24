@@ -1,20 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
-import '../../models/edan.dart';
-import '../../models/ugr_models.dart';
 import '../../providers/connectivity_provider.dart';
 import '../../providers/reporte_provider.dart';
+import '../../services/edan_sync_service.dart';
+import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
-import '../../services/database_helper.dart';
+import '../../models/edan.dart';
+import '../../widgets/asistente_ia.dart';
 import '../../widgets/perfil_tab.dart';
-import 'ugr/ugr_dashboard_tab.dart';
-import 'ugr/ugr_edan_form_screen.dart';
 import 'ugr/ugr_edan_tab.dart';
-import 'ugr/ugr_edan_mapa_tab.dart';
-import 'ugr/ugr_reportes_tab.dart';
+import 'ugr/ugr_guia_tab.dart';
+import 'ugr/ugr_localidades_tab.dart';
 import 'ugr/ugr_route.dart';
-import 'ugr/ugr_sheets.dart';
+import 'resp/resp_edan_form_screen.dart';
+import 'resp/resp_mapa_tab.dart';
 
 class UgrScreen extends StatefulWidget {
   const UgrScreen({super.key});
@@ -23,11 +23,53 @@ class UgrScreen extends StatefulWidget {
   State<UgrScreen> createState() => _UgrScreenState();
 }
 
-class _UgrScreenState extends State<UgrScreen> {
+class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   int _selectedIndex = 0;
   bool _isProfileEditing = false;
+  bool _wasOnline = true;
+  ConnectivityProvider? _connectivity;
   final _edanTabKey = GlobalKey<UgrEdanTabState>();
   final _perfilTabKey = GlobalKey<PerfilTabState>();
+  final _localidadesTabKey = GlobalKey<UgrLocalidadesTabState>();
+  final _mapaTabKey = GlobalKey<RespMapaTabState>();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final connectivity = context.read<ConnectivityProvider>();
+      _connectivity = connectivity;
+      _wasOnline = connectivity.isConnected;
+      connectivity.addListener(_onConnectivityChanged);
+      connectivity.initialize();
+      EdanSyncService.instance.recargarPendientes();
+      context.read<ReporteProvider>().initializeUgr();
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _connectivity?.removeListener(_onConnectivityChanged);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      EdanSyncService.instance.recargarPendientes();
+    }
+  }
+
+  void _onConnectivityChanged() {
+    final online = _connectivity?.isConnected ?? true;
+    if (online && !_wasOnline) {
+      _sincronizar(auto: true);
+    }
+    _wasOnline = online;
+    EdanSyncService.instance.recargarPendientes();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,11 +78,80 @@ class _UgrScreenState extends State<UgrScreen> {
       palette: palette,
       child: Theme(
         data: AppTheme.buildTheme(palette),
-        child: Scaffold(
+        child: Consumer<ReporteProvider>(
+          builder: (context, rp, _) {
+            if (rp.isInitializing) {
+              return _buildDownloadOverlay(palette, rp.downloadPhase);
+            }
+            return _buildMainContent(palette);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDownloadOverlay(ToolPalette palette, String phase) {
+    return Scaffold(
+      backgroundColor: palette.background,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Image.asset(
+              'assets/images/SINAGER.png',
+              width: 100,
+              height: 100,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(height: 32),
+            Text(
+              'SINAGER-SAT',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.bold,
+                color: palette.primary,
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'EDAN',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: palette.primary.withValues(alpha: 0.7),
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 40),
+            const SizedBox(
+              width: 36,
+              height: 36,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              phase.isNotEmpty ? phase : 'Inicializando...',
+              style: const TextStyle(
+                fontSize: 14,
+                color: AppColors.textSecondary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMainContent(ToolPalette palette) {
+    return Scaffold(
           backgroundColor: palette.background,
           appBar: AppBar(
             title: Text(_getTabTitle()),
+            centerTitle: false,
             actions: [
+              _buildSyncButton(),
               Consumer<ConnectivityProvider>(
                 builder: (context, connectivity, child) {
                   final isOnline = connectivity.isConnected;
@@ -89,169 +200,233 @@ class _UgrScreenState extends State<UgrScreen> {
             child: IndexedStack(
               index: _selectedIndex,
               children: [
-                const UgrDashboardTab(),
-                const UgrReportesTab(),
+                UgrLocalidadesTab(
+                  key: _localidadesTabKey,
+                  onVistaChanged: () => setState(() {}),
+                  onConsolidado: () => _edanTabKey.currentState?.refresh(),
+                  onNavigateToEdan: () => setState(() => _selectedIndex = 1),
+                ),
                 UgrEdanTab(key: _edanTabKey),
-                const UgrEdanMapaTab(),
-                PerfilTab(key: _perfilTabKey),
+                RespMapaTab(
+                  key: _mapaTabKey,
+                  cargarLocalidades: () async {
+                    final token = AuthService.instance.currentToken;
+                    if (token?.idMunicipio == null) return <EdanLocalidad>[];
+                    final data = await ApiService.instance
+                        .getLocalidadesMunicipio(token!.idMunicipio!);
+                    return data
+                        .map((j) => EdanLocalidad.fromJson(j))
+                        .toList();
+                  },
+                ),
+                const UgrGuiaTab(),
+                PerfilTab(key: _perfilTabKey, catalogoEdan: true),
               ],
             ),
           ),
           floatingActionButton: _buildFab(),
           bottomNavigationBar: BottomNavigationBar(
             currentIndex: _selectedIndex,
-            onTap: (index) {
-              setState(() {
-                _selectedIndex = index;
-                if (_isProfileEditing) {
-                  _isProfileEditing = false;
-                  _perfilTabKey.currentState?.resetEditing();
+              onTap: (index) {
+                setState(() {
+                  _selectedIndex = index;
+                  if (_isProfileEditing) {
+                    _isProfileEditing = false;
+                    _perfilTabKey.currentState?.resetEditing();
+                  }
+                });
+                switch (index) {
+                  case 0:
+                    _localidadesTabKey.currentState?.refresh();
+                  case 1:
+                    _edanTabKey.currentState?.refresh();
+                  case 2:
+                    _mapaTabKey.currentState?.refresh();
                 }
-              });
-            },
-            selectedItemColor: palette.primary,
-            unselectedItemColor: AppColors.textSecondary,
-            backgroundColor: AppColors.surface,
-            type: BottomNavigationBarType.fixed,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.home_outlined),
-                activeIcon: Icon(Icons.home),
-                label: 'Inicio',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.receipt_long_outlined),
-                activeIcon: Icon(Icons.receipt_long),
-                label: 'Reportes',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.assessment_outlined),
-                activeIcon: Icon(Icons.assessment),
-                label: 'EDAN',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.map_outlined),
-                activeIcon: Icon(Icons.map),
-                label: 'Mapa',
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.person_outline),
-                activeIcon: Icon(Icons.person),
-                label: 'Perfil',
-              ),
-            ],
+                EdanSyncService.instance.recargarPendientes();
+              },
+              selectedItemColor: palette.primary,
+              unselectedItemColor: AppColors.textSecondary,
+              backgroundColor: AppColors.surface,
+              type: BottomNavigationBarType.fixed,
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.location_on_outlined),
+                  activeIcon: Icon(Icons.location_on),
+                  label: 'Localidades',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.assessment_outlined),
+                  activeIcon: Icon(Icons.assessment),
+                  label: 'EDAN',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.map_outlined),
+                  activeIcon: Icon(Icons.map),
+                  label: 'Mapa',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.menu_book_outlined),
+                  activeIcon: Icon(Icons.menu_book),
+                  label: 'Guía',
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.person_outline),
+                  activeIcon: Icon(Icons.person),
+                  label: 'Perfil',
+                ),
+              ],
           ),
-        ),
+        );
+  }
+
+  Widget _buildSyncButton() {
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        EdanSyncService.instance.pendientes,
+        EdanSyncService.instance.sincronizando,
+      ]),
+      builder: (context, _) {
+        final pendientes = EdanSyncService.instance.pendientes.value;
+        final sincronizando = EdanSyncService.instance.sincronizando.value;
+        return IconButton(
+          tooltip: sincronizando
+              ? 'Sincronizando...'
+              : pendientes > 0
+                  ? 'Sincronizar ($pendientes pendientes)'
+                  : 'Sincronizar',
+          onPressed: sincronizando ? null : () => _sincronizar(auto: false),
+          icon: Badge(
+            isLabelVisible: pendientes > 0 && !sincronizando,
+            label: Text('$pendientes'),
+            child: sincronizando
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cloud_upload_outlined),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _sincronizar({bool auto = false}) async {
+    if (EdanSyncService.instance.isSyncing) return;
+    if (!(_connectivity?.isConnected ?? true)) {
+      if (!auto && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sin conexión: los cambios están guardados localmente.'),
+            backgroundColor: AppColors.pending,
+          ),
+        );
+      }
+      return;
+    }
+
+    final result = await EdanSyncService.instance.sincronizar();
+    if (!mounted) return;
+
+    _localidadesTabKey.currentState?.refresh();
+    _edanTabKey.currentState?.refresh();
+    EdanSyncService.instance.recargarPendientes();
+
+    if (auto &&
+        result.exito &&
+        result.enviados == 0 &&
+        result.fallidos == 0 &&
+        result.eliminados == 0) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result.resumen),
+        backgroundColor: result.exito ? AppColors.aprobado : AppColors.rechazado,
+        duration: const Duration(seconds: 3),
       ),
     );
   }
 
   Widget? _buildFab() {
+    final palette = PaletteScope.of(context);
+    final primary = palette.primary;
+    final specificFab = _buildTabFab(primary);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        AsistenteIaFab(fabColor: primary),
+        if (specificFab != null) ...[
+          const SizedBox(height: 12),
+          specificFab,
+        ],
+      ],
+    );
+  }
+
+  Widget? _buildTabFab(Color primary) {
     switch (_selectedIndex) {
       case 0:
-        return FloatingActionButton(
-          onPressed: () => showUgrGlobalSearch(context),
-          tooltip: 'Buscar',
-          child: const Icon(Icons.search),
+        final tab = _localidadesTabKey.currentState;
+        final consolidarVisible = tab != null && tab.mostrarFabConsolidar;
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (consolidarVisible) ...[
+              FloatingActionButton(
+                onPressed: () => tab.activarConsolidacion(),
+                tooltip: 'Consolidar',
+                backgroundColor: primary,
+                foregroundColor: Colors.white,
+                heroTag: 'fab_consolidar',
+                child: const Icon(Icons.layers),
+              ),
+              const SizedBox(height: 12),
+            ],
+            FloatingActionButton(
+              onPressed: () async {
+                final creado = await Navigator.of(context).push<bool>(
+                  ugrRoute(const RespEdanFormScreen()),
+                );
+                if (creado == true && mounted) {
+                  _localidadesTabKey.currentState?.refresh();
+                }
+              },
+              tooltip: 'Crear EDAN localidad',
+              backgroundColor: primary,
+              foregroundColor: Colors.white,
+              heroTag: 'fab_crear',
+              child: const Icon(Icons.add),
+            ),
+          ],
         );
       case 1:
         return null;
       case 2:
-        return FloatingActionButton(
-          onPressed: () async {
-            final siguienteNumero = await _calcularSiguienteNumero();
-            if (!mounted) return;
-            final edan = await Navigator.of(context).push<Edan>(
-              ugrRoute(UgrEdanFormScreen(
-                siguienteNumero: siguienteNumero,
-              )),
-            );
-            if (edan == null || !mounted) return;
-            _prepararEdan(edan);
-            await _persistirEdan(edan);
-            if (!mounted) return;
-            final ugr = _mapToUgrEdan(edan);
-            _edanTabKey.currentState?.addEdan(ugr);
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('EDAN guardado correctamente.'),
-                backgroundColor: AppColors.completed,
-              ),
-            );
-          },
-          tooltip: 'Nuevo EDAN',
-          child: const Icon(Icons.add),
-        );
+        return null;
       default:
         return null;
     }
-  }
-
-  Future<int> _calcularSiguienteNumero() async {
-    final userId = AuthService.instance.userId;
-    if (userId != null) {
-      try {
-        final count = await DatabaseHelper.instance
-            .countEdansDelAnio(userId, DateTime.now().year);
-        return count + 1;
-      } catch (_) {}
-    }
-    return (_edanTabKey.currentState?.edanesCount ?? 0) + 1;
-  }
-
-  void _prepararEdan(Edan edan) {
-    final rp = context.read<ReporteProvider>();
-    if (edan.idDepartamento != null) {
-      final d = rp.departamentos.where((x) => x.id == edan.idDepartamento);
-      if (d.isNotEmpty) edan.departamentoNombre = d.first.nombre;
-    }
-    if (edan.idProvincia != null) {
-      final p = rp.provincias.where((x) => x.id == edan.idProvincia);
-      if (p.isNotEmpty) edan.provinciaNombre = p.first.nombre;
-    }
-    if (edan.idMunicipio != null) {
-      final m = rp.municipios.where((x) => x.id == edan.idMunicipio);
-      if (m.isNotEmpty) edan.municipioNombre = m.first.nombre;
-    }
-  }
-
-  Future<void> _persistirEdan(Edan edan) async {
-    final userId = AuthService.instance.userId;
-    if (userId == null) return;
-    try {
-      await DatabaseHelper.instance.insertEdan(
-        edan,
-        usuarioId: userId,
-        municipioNombre: edan.municipioNombre,
-      );
-    } catch (e) {
-      debugPrint('[UgrScreen] Error al guardar EDAN: $e');
-    }
-  }
-
-  UgrEdan _mapToUgrEdan(Edan edan) {
-    final profile = AuthService.instance;
-    return UgrEdan.fromEdan(
-      edan,
-      municipioNombre: edan.municipioNombre ?? 'Municipio',
-      usuarioNombre: profile.userName,
-    );
   }
 
   String _getTabTitle() {
     switch (_selectedIndex) {
       case 0:
-        return 'Inicio';
+        return 'Localidades';
       case 1:
-        return 'Reportes';
-      case 2:
         return 'EDAN';
-      case 3:
+      case 2:
         return 'Mapa';
+      case 3:
+        return 'Guía';
       case 4:
         return 'Perfil';
       default:
-        return 'Inicio';
+        return 'Localidades';
     }
   }
 }

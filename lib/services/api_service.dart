@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -50,10 +51,20 @@ class ApiService {
         if (attempt == maxRetries) rethrow;
       } on HttpException {
         if (attempt == maxRetries) rethrow;
+      } on TimeoutException {
+        if (attempt == maxRetries) rethrow;
       }
       await Future.delayed(Duration(milliseconds: 500 * (attempt + 1)));
     }
     return lastResponse!;
+  }
+
+  static String traducirError(Object e) {
+    if (e is SocketException) return 'Sin conexión a internet. Verifica tu red.';
+    if (e is TimeoutException) return 'Tiempo de espera agotado. Intenta de nuevo.';
+    if (e is http.ClientException) return 'Error de conexión con el servidor.';
+    if (e is FormatException) return 'Respuesta inválida del servidor.';
+    return e.toString().replaceFirst('Exception: ', '');
   }
 
   Future<Map<String, dynamic>> _handleResponse(http.Response response) async {
@@ -61,16 +72,35 @@ class ApiService {
       if (response.statusCode >= 200 && response.statusCode < 300) {
         return <String, dynamic>{};
       }
-      throw Exception('Error $response.statusCode');
+      throw Exception('Error ${response.statusCode}');
     }
     final body = jsonDecode(response.body);
     if (response.statusCode >= 200 && response.statusCode < 300) {
       return body;
     } else {
       throw Exception(
-        body['detail'] ?? body['message'] ?? body['error'] ?? 'Error $response.statusCode',
+        body['detail'] ?? body['message'] ?? body['error'] ?? 'Error ${response.statusCode}',
       );
     }
+  }
+
+  /// Extrae una lista de Maps desde body['data'].
+  /// Maneja tanto `{"data": [...]}` como `{"data": {"items": [...]}}`.
+  List<Map<String, dynamic>> _extractDataList(Map<String, dynamic> body) {
+    final data = body['data'];
+    if (data is List) {
+      return data.map((json) => Map<String, dynamic>.from(json)).toList();
+    }
+    if (data is Map) {
+      final items = data['items'] ??
+          data['localidades'] ??
+          data['results'] ??
+          data['data'];
+      if (items is List) {
+        return items.map((json) => Map<String, dynamic>.from(json)).toList();
+      }
+    }
+    return [];
   }
 
   Future<TokenResponse> login(String usuario, String contrasena) async {
@@ -105,7 +135,7 @@ class ApiService {
     int? idMunicipio,
   }) async {
     final response = await http.post(
-      Uri.parse(ApiConfig.usuariosEndpoint),
+      Uri.parse('${ApiConfig.authEndpoint}/register'),
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
@@ -114,16 +144,15 @@ class ApiService {
         'usuario': usuario,
         'contrasena': contrasena,
         'nombre': nombre,
-        'celular': celular ?? '',
-        'carnet': carnet ?? '',
-        'comunidad': comunidad ?? '',
-        'correo': correo ?? '',
-        'cargo': cargo ?? '',
-        'id_departamento': idDepartamento,
-        'id_provincia': idProvincia,
-        'id_municipio': idMunicipio,
+        if (celular != null && celular.isNotEmpty) 'celular': celular,
+        if (carnet != null && carnet.isNotEmpty) 'carnet': carnet,
+        if (comunidad != null && comunidad.isNotEmpty) 'comunidad': comunidad,
+        if (correo != null && correo.isNotEmpty) 'correo': correo,
+        if (cargo != null && cargo.isNotEmpty) 'cargo': cargo,
+        if (idDepartamento != null) 'id_departamento': idDepartamento,
+        if (idProvincia != null) 'id_provincia': idProvincia,
+        if (idMunicipio != null) 'id_municipio': idMunicipio,
         'id_rol': 7,
-        'activo': true,
       }),
     ).timeout(const Duration(seconds: 15));
     final body = await _handleResponse(response);
@@ -181,12 +210,14 @@ class ApiService {
   }
 
   Future<List<Departamento>> getDepartamentos() async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.sharedEndpoint}/departamentos'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/departamentos'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => Departamento.fromJson(json))
         .toList();
   }
@@ -196,10 +227,12 @@ class ApiService {
         ? Uri.parse(
             '${ApiConfig.sharedEndpoint}/provincias?id_departamento=$idDepartamento')
         : Uri.parse('${ApiConfig.sharedEndpoint}/provincias');
-    final response = await http.get(uri, headers: _headers)
-        .timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => Provincia.fromJson(json))
         .toList();
   }
@@ -212,21 +245,25 @@ class ApiService {
     if (idProvincia != null) params.add('id_provincia=$idProvincia');
     if (idDepartamento != null) params.add('id_departamento=$idDepartamento');
     final queryString = params.isNotEmpty ? '?${params.join('&')}' : '';
-    final response = await http.get(
-      Uri.parse('${ApiConfig.sharedEndpoint}/municipios$queryString'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/municipios$queryString'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => Municipio.fromJson(json))
         .toList();
   }
 
   Future<Map<String, dynamic>> getMunicipioGeojson(String codigoIne) async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.sharedEndpoint}/municipios/$codigoIne/geojson'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/municipios/$codigoIne/geojson'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
     return _handleResponse(response);
   }
 
@@ -246,7 +283,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => Reporte.fromJson(json))
         .toList();
   }
@@ -263,9 +300,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
-        .toList();
+    return _extractDataList(body);
   }
 
   Future<List<Map<String, dynamic>>> getMisReportes({
@@ -280,9 +315,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 15))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
-        .toList();
+    return _extractDataList(body);
   }
 
   Future<String?> downloadImage(String serverPath, String savePath) async {
@@ -366,11 +399,13 @@ class ApiService {
   }
 
   Future<void> cambiarEstadoReporte(int id, int idEstado) async {
-    final response = await http.put(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id/estado'),
-      headers: _headers,
-      body: jsonEncode({'id_estado': idEstado}),
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id/estado'),
+        headers: _headers,
+        body: jsonEncode({'id_estado': idEstado}),
+      ).timeout(const Duration(seconds: 15))
+    );
     await _handleResponse(response);
   }
 
@@ -401,33 +436,40 @@ class ApiService {
     if (comunidad != null && comunidad.isNotEmpty) queryParams.add('comunidad=$comunidad');
     final queryString = queryParams.isNotEmpty ? '?${queryParams.join('&')}' : '';
 
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('${ApiConfig.baseUrl}/upload$queryString'),
-    );
+    Future<http.Response> doUpload() async {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.baseUrl}/upload$queryString'),
+      );
 
-    if (_token != null) {
-      request.headers['Authorization'] = 'Bearer $_token';
+      if (_token != null) {
+        request.headers['Authorization'] = 'Bearer $_token';
+      }
+      request.headers['Accept'] = 'application/json';
+
+      final contentType = _getImageContentType(filePath);
+      request.files.add(await http.MultipartFile.fromPath(
+        'file',
+        filePath,
+        contentType: MediaType.parse(contentType),
+      ));
+
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+      return http.Response.fromStream(streamedResponse);
     }
-    request.headers['Accept'] = 'application/json';
 
-    final contentType = _getImageContentType(filePath);
-    request.files.add(await http.MultipartFile.fromPath(
-      'file',
-      filePath,
-      contentType: MediaType.parse(contentType),
-    ));
-
-    final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
-    final response = await http.Response.fromStream(streamedResponse);
+    final response = await _requestWithRetry(doUpload);
     return _handleResponse(response);
   }
 
   Future<void> deleteReporte(int id) async {
-    await http.delete(
-      Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    await _handleResponse(response);
   }
 
   Future<List<TipoEvento>> getTiposEvento() async {
@@ -438,8 +480,47 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => TipoEvento.fromJson(json))
+        .toList();
+  }
+
+  Future<List<Cultivo>> getCultivos() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/cultivos'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => Cultivo.fromJson(json))
+        .toList();
+  }
+
+  Future<List<PecuarioGrupo>> getPecuarioGrupos() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/pecuario'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => PecuarioGrupo.fromJson(json))
+        .toList();
+  }
+
+  Future<List<GrupoVulnerableCatalogo>> getGruposVulnerables() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/grupo-vulnerable'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => GrupoVulnerableCatalogo.fromJson(json))
         .toList();
   }
 
@@ -451,7 +532,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => Estado.fromJson(json))
         .toList();
   }
@@ -464,7 +545,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
+    return _extractDataList(body)
         .map((json) => Categoria.fromJson(json))
         .toList();
   }
@@ -540,10 +621,12 @@ class ApiService {
   }
 
   Future<Usuario> getUsuario(int id) async {
-    final response = await http.get(
-      Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),
-      headers: _headers,
-    ).timeout(const Duration(seconds: 10));
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
     final body = await _handleResponse(response);
     return Usuario.fromJson(body['data']);
   }
@@ -568,11 +651,13 @@ class ApiService {
     if (idProvincia != null) data['id_provincia'] = idProvincia;
     if (idMunicipio != null) data['id_municipio'] = idMunicipio;
 
-    final response = await http.put(
-      Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),
-      headers: _headers,
-      body: jsonEncode(data),
-    ).timeout(const Duration(seconds: 15));
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),
+        headers: _headers,
+        body: jsonEncode(data),
+      ).timeout(const Duration(seconds: 15))
+    );
     final body = await _handleResponse(response);
     return Usuario.fromJson(body['data']);
   }
@@ -602,9 +687,31 @@ class ApiService {
       ).timeout(const Duration(seconds: 15))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
-        .toList();
+    return _extractDataList(body);
+  }
+
+  /// Lista EDANs del servidor por municipio (sin localidades; usar
+  /// getEdanById para el detalle completo).
+  Future<List<Map<String, dynamic>>> listarEdansPorMunicipio(
+    int idMunicipio, {
+    int skip = 0,
+    int limit = 500,
+  }) async {
+    final params = <String>[
+      'order_by=id_edan',
+      'order=desc',
+      'skip=$skip',
+      'limit=$limit',
+      'id_municipio=$idMunicipio',
+    ];
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
   }
 
   Future<Map<String, dynamic>> getEdanById(int id) async {
@@ -683,9 +790,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 30))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
-        .toList();
+    return _extractDataList(body);
   }
 
   Future<List<Map<String, dynamic>>> getMisReportesEdan({
@@ -700,9 +805,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 15))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
-        .toList();
+    return _extractDataList(body);
   }
 
   Future<List<Map<String, dynamic>>> getTipoEvento() async {
@@ -713,9 +816,7 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
-        .toList();
+    return _extractDataList(body);
   }
 
   Future<List<Map<String, dynamic>>> getEstadosEdan() async {
@@ -726,8 +827,455 @@ class ApiService {
       ).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
-    return (body['data'] as List)
-        .map((json) => Map<String, dynamic>.from(json))
+    return _extractDataList(body);
+  }
+
+  // ========== EDAN LOCALIDADES ENDPOINTS ==========
+
+  Future<Map<String, dynamic>> getLocalidadesMisResumen({
+    required int idUsuario,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/mis-resumen?id_usuario=$idUsuario'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalidadesMisReportes({
+    required int idUsuario,
+    bool? soloHuerfanas,
+    int skip = 0,
+    int limit = 50,
+  }) async {
+    final params = <String>['id_usuario=$idUsuario', 'skip=$skip', 'limit=$limit'];
+    if (soloHuerfanas != null) params.add('solo_huerfanas=$soloHuerfanas');
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/mis-reportes?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalidadesSyncPull({
+    required int idUsuario,
+    DateTime? fechaDesde,
+    int skip = 0,
+    int limit = 50,
+  }) async {
+    final params = <String>['id_usuario=$idUsuario', 'skip=$skip', 'limit=$limit'];
+    if (fechaDesde != null) params.add('fecha_desde=${fechaDesde.toIso8601String()}');
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync/pull?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<Map<String, dynamic>> syncLocalidades(List<Map<String, dynamic>> localidades) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync'),
+        headers: _headers,
+        body: jsonEncode({'localidades': localidades}),
+      ).timeout(const Duration(seconds: 60))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body);
+  }
+
+  Future<Map<String, dynamic>> cambiarEstadoLocalidad(int idLocalidad, int idEstado) async {
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/estado'),
+        headers: _headers,
+        body: jsonEncode({'id_edan_localidad_estado': idEstado}),
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<List<Map<String, dynamic>>> getConsolidarPendientes({
+    required int idMunicipio,
+    String estado = 'aprobado',
+  }) async {
+    final encodedEstado = Uri.encodeComponent(estado);
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/consolidar/pendientes?id_municipio=$idMunicipio&estado=$encodedEstado'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<Map<String, dynamic>> consolidar({
+    required int idMunicipio,
+    required int idTipoEvento,
+    required List<int> localidadIds,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanEndpoint}/consolidar'),
+        headers: _headers,
+        body: jsonEncode({
+          'id_municipio': idMunicipio,
+          'id_tipo_evento': idTipoEvento,
+          'localidad_ids': localidadIds,
+        }),
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> consolidarAuto({
+    required int idMunicipio,
+    required int idTipoEvento,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanEndpoint}/consolidar/auto'),
+        headers: _headers,
+        body: jsonEncode({
+          'id_municipio': idMunicipio,
+          'id_tipo_evento': idTipoEvento,
+        }),
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> desconsolidar(int idLocalidad) async {
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/desconsolidar'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> deshacerEdan(int idEdan) async {
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.edanEndpoint}/$idEdan/deshacer'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> cambiarEstadoEdan(
+    int idEdan,
+    int idEstado, {
+    String? observaciones,
+  }) async {
+    final bodyMap = <String, dynamic>{
+      'id_estado': idEstado,
+    };
+    if (observaciones != null) bodyMap['observaciones'] = observaciones;
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse('${ApiConfig.edanEndpoint}/$idEdan/estado'),
+        headers: _headers,
+        body: jsonEncode(bodyMap),
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> consolidarEdanConLocalidades(dynamic edan) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse(ApiConfig.edanEndpoint),
+        headers: _headers,
+        body: jsonEncode(edan.toJson()),
+      ).timeout(const Duration(seconds: 60))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> getLocalidadById(int idLocalidad) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<Map<String, dynamic>> deleteLocalidad(int idLocalidad) async {
+    final response = await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body);
+  }
+
+  Future<List<TipoLocalidad>> getTipoLocalidad() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/tipo-localidad'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => TipoLocalidad.fromJson(Map<String, dynamic>.from(json)))
         .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalidadesMunicipio(int idMunicipio) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/municipio/$idMunicipio'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<Map<String, dynamic>> getResumenLocalidades(int idMunicipio) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/municipio/$idMunicipio/resumen'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data']);
+  }
+
+  Future<List<Map<String, dynamic>>> getLocalidadesEstado() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/localidades-estado'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  // Secciones 1:N de localidad
+  Future<List<Map<String, dynamic>>> getLocalidadSeccion(int idLocalidad, String seccion) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<Map<String, dynamic>> createLocalidadSeccionConFoto({
+    required int idLocalidad,
+    required String seccion,
+    required String filePath,
+    required Map<String, dynamic> data,
+  }) async {
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion/con-foto'),
+    );
+    if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+    request.headers['Accept'] = 'application/json';
+    final contentType = _getImageContentType(filePath);
+    request.files.add(await http.MultipartFile.fromPath('file', filePath, contentType: MediaType.parse(contentType)));
+    data.forEach((key, value) {
+      if (value != null) request.fields[key] = value.toString();
+    });
+    final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+    final response = await http.Response.fromStream(streamedResponse);
+    final body = await _handleResponse(response);
+    final creado = body['data'];
+    if (creado is Map) {
+      return Map<String, dynamic>.from(creado);
+    }
+    return <String, dynamic>{};
+  }
+
+  // ========== REPOSITORIO ENDPOINTS ==========
+
+  Future<List<Map<String, dynamic>>> listarTiposRepositorio() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/tipos'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<List<Map<String, dynamic>>> listarDocumentosEdan(int idEdan) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/edan/$idEdan/documentos'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<Map<String, dynamic>> subirDocumentoEdan({
+    required int idEdan,
+    required String filePath,
+    required int idTipoDocumento,
+    required String nombreDocumento,
+    required String fechaDocumento,
+    required int idDepartamento,
+    required int idProvincia,
+    required int idMunicipio,
+    String? observaciones,
+  }) async {
+    Future<http.Response> doUpload() async {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.repositorioEndpoint}/edan/$idEdan/documentos'),
+      );
+      if (_token != null) request.headers['Authorization'] = 'Bearer $_token';
+      request.headers['Accept'] = 'application/json';
+      final contentType = _getPdfContentType(filePath);
+      request.files.add(await http.MultipartFile.fromPath(
+        'file',
+        filePath,
+        contentType: MediaType.parse(contentType),
+      ));
+      request.fields['id_tipo_documento'] = idTipoDocumento.toString();
+      request.fields['nombre_documento'] = nombreDocumento;
+      request.fields['fecha_documento'] = fechaDocumento;
+      request.fields['id_departamento'] = idDepartamento.toString();
+      request.fields['id_provincia'] = idProvincia.toString();
+      request.fields['id_municipio'] = idMunicipio.toString();
+      if (observaciones != null && observaciones.isNotEmpty) {
+        request.fields['observaciones'] = observaciones;
+      }
+      final streamedResponse = await request.send().timeout(const Duration(seconds: 60));
+      return http.Response.fromStream(streamedResponse);
+    }
+
+    final response = await _requestWithRetry(doUpload);
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data'] ?? body);
+  }
+
+  Future<List<int>> descargarDocRepositorio(int idDocumento) async {
+    final response = await http.get(
+      Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento/descargar'),
+      headers: _headers,
+    ).timeout(const Duration(seconds: 60));
+    if (response.statusCode >= 200 && response.statusCode < 300) {
+      return response.bodyBytes;
+    }
+    throw Exception('Error al descargar documento: ${response.statusCode}');
+  }
+
+  Future<List<Map<String, dynamic>>> filtrarDocumentos({
+    int? idDepartamento,
+    int? idProvincia,
+    int? idMunicipio,
+    int? idTipoDocumento,
+    String? fechaDesde,
+    String? fechaHasta,
+    String? nombre,
+  }) async {
+    final params = <String>[];
+    if (idDepartamento != null) params.add('id_departamento=$idDepartamento');
+    if (idProvincia != null) params.add('id_provincia=$idProvincia');
+    if (idMunicipio != null) params.add('id_municipio=$idMunicipio');
+    if (idTipoDocumento != null) params.add('id_tipo_documento=$idTipoDocumento');
+    if (fechaDesde != null) params.add('fecha_desde=$fechaDesde');
+    if (fechaHasta != null) params.add('fecha_hasta=$fechaHasta');
+    if (nombre != null && nombre.isNotEmpty) params.add('nombre_documento_like=$nombre');
+    final queryString = params.isNotEmpty ? '?${params.join('&')}' : '';
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/filtrar$queryString'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<List<Map<String, dynamic>>> buscarDocumentos(String query) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/buscar?q=$query'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
+  Future<void> eliminarDocRepositorio(int idDocumento) async {
+    final response = await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    await _handleResponse(response);
+  }
+
+  Future<void> eliminarDocRepositorioHard(int idDocumento) async {
+    final response = await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento/hard'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    await _handleResponse(response);
+  }
+
+  Future<Map<String, dynamic>> getDocRepositorio(int idDocumento) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data'] ?? body);
+  }
+
+  String _getPdfContentType(String filePath) {
+    final ext = filePath.split('.').last.toLowerCase();
+    switch (ext) {
+      case 'pdf':
+        return 'application/pdf';
+      case 'doc':
+      case 'docx':
+        return 'application/msword';
+      default:
+        return 'application/pdf';
+    }
   }
 }

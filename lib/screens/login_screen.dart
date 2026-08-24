@@ -79,7 +79,17 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 32),
                       Text(
-                        'REA',
+                        'SINAGER-SAT',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: palette.primary,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'EDAN',
                         style: TextStyle(
                           fontSize: 36,
                           fontWeight: FontWeight.bold,

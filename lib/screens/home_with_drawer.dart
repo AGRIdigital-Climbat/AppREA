@@ -4,6 +4,8 @@ import '../config/modules.dart';
 import '../providers/auth_provider.dart';
 import '../providers/reporte_provider.dart';
 import '../providers/connectivity_provider.dart';
+import '../services/database_helper.dart';
+import '../services/image_service.dart';
 import '../services/sync_manager.dart';
 import '../widgets/app_drawer.dart';
 import '../widgets/slide_drawer.dart';
@@ -28,7 +30,6 @@ class _HomeWithDrawerState extends State<HomeWithDrawer>
     super.initState();
     _drawerController = SlideDrawerController(vsync: this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<ReporteProvider>().initialize();
       context.read<ConnectivityProvider>().initialize();
     });
   }
@@ -56,10 +57,14 @@ class _HomeWithDrawerState extends State<HomeWithDrawer>
 
   bool _canAccess(ModuleType type, AuthProvider auth) {
     switch (type) {
-      case ModuleType.preEdan: return auth.canAccessPreEdan;
-      case ModuleType.edan: return auth.canAccessEdan;
-      case ModuleType.rida: return auth.canAccessRida;
-      case ModuleType.sinb: return auth.canAccessSinb;
+      case ModuleType.preEdan:
+        return auth.canAccessPreEdan;
+      case ModuleType.edan:
+        return auth.canAccessEdan;
+      case ModuleType.rida:
+        return auth.canAccessRida;
+      case ModuleType.sinb:
+        return auth.canAccessSinb;
     }
   }
 
@@ -93,6 +98,8 @@ class _HomeWithDrawerState extends State<HomeWithDrawer>
       final nav = Navigator.of(context);
       reporte.clearData();
       SyncManager.instance.reset();
+      await ImageService().clearAllImages();
+      await DatabaseHelper.instance.clearAll();
       await auth.logout();
       if (mounted) {
         nav.pushReplacement(

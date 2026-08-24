@@ -9,6 +9,7 @@ class Usuario {
   final String? celular;
   final String? carnet;
   final String? comunidad;
+  final String? correo;
   final int? idDepartamento;
   final int? idProvincia;
   final int? idMunicipio;
@@ -26,6 +27,7 @@ class Usuario {
     this.celular,
     this.carnet,
     this.comunidad,
+    this.correo,
     this.idDepartamento,
     this.idProvincia,
     this.idMunicipio,
@@ -45,6 +47,7 @@ class Usuario {
       celular: json['celular'],
       carnet: json['carnet'],
       comunidad: json['comunidad'],
+      correo: json['correo'],
       idDepartamento: json['id_departamento'],
       idProvincia: json['id_provincia'],
       idMunicipio: json['id_municipio'],
@@ -71,6 +74,7 @@ class Usuario {
       'celular': celular,
       'carnet': carnet,
       'comunidad': comunidad,
+      'correo': correo,
       'id_departamento': idDepartamento,
       'id_provincia': idProvincia,
       'id_municipio': idMunicipio,

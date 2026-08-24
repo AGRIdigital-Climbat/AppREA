@@ -4,8 +4,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
-import '../services/database_helper.dart';
-import '../services/image_service.dart';
 
 class AuthService {
   static final AuthService _instance = AuthService._();
@@ -50,7 +48,6 @@ class AuthService {
 
     try {
       final token = await _storage.read(key: 'auth_token');
-      final userId = await _storage.read(key: 'user_id');
       final usuario = await _storage.read(key: 'usuario');
       final contrasena = await _storage.read(key: 'contrasena');
       final idRolStr = await _storage.read(key: 'id_rol');
@@ -119,7 +116,7 @@ class AuthService {
       final rolName = await _storage.read(key: 'rol_name');
       final permisosStr = await _storage.read(key: 'permisos');
 
-      if (token != null && userId != null) {
+      if (userId != null) {
         _idRol = idRolStr != null ? int.tryParse(idRolStr) : null;
         _rolName = rolName;
         if (permisosStr != null) {

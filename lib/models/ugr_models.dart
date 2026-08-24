@@ -1,113 +1,13 @@
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import 'edan.dart';
-import 'reporte.dart';
-
-enum UgrReporteEstado {
-  enviado,        // 1 - Reporte enviado
-  enRevision,     // 2 - En revisión para EDAN
-  aprobado,       // 3 - Aprobado para EDAN
-  rechazado,      // 4 - Rechazado para EDAN
-  cerrado,        // 5 - Cerrado
-}
-
-extension UgrReporteEstadoX on UgrReporteEstado {
-  int get id => switch (this) {
-        UgrReporteEstado.enviado => 1,
-        UgrReporteEstado.enRevision => 2,
-        UgrReporteEstado.aprobado => 3,
-        UgrReporteEstado.rechazado => 4,
-        UgrReporteEstado.cerrado => 5,
-      };
-
-  String get label {
-    switch (this) {
-      case UgrReporteEstado.enviado:
-        return 'Reporte enviado';
-      case UgrReporteEstado.enRevision:
-        return 'En revisión para EDAN';
-      case UgrReporteEstado.aprobado:
-        return 'Aprobado para EDAN';
-      case UgrReporteEstado.rechazado:
-        return 'Rechazado para EDAN';
-      case UgrReporteEstado.cerrado:
-        return 'Cerrado';
-    }
-  }
-
-  String get descripcion {
-    switch (this) {
-      case UgrReporteEstado.enviado:
-        return 'Reporte registrado, pendiente de revisión';
-      case UgrReporteEstado.enRevision:
-        return 'Siendo revisado por un administrador';
-      case UgrReporteEstado.aprobado:
-        return 'Reporte verificado y aprobado';
-      case UgrReporteEstado.rechazado:
-        return 'Reporte rechazado';
-      case UgrReporteEstado.cerrado:
-        return 'Caso cerrado o resuelto';
-    }
-  }
-
-  Color get color {
-    switch (this) {
-      case UgrReporteEstado.enviado:
-        return AppColors.pending;
-      case UgrReporteEstado.enRevision:
-        return AppColors.inProgress;
-      case UgrReporteEstado.aprobado:
-        return AppColors.aprobado;
-      case UgrReporteEstado.rechazado:
-        return AppColors.rechazado;
-      case UgrReporteEstado.cerrado:
-        return AppColors.closed;
-    }
-  }
-
-  IconData get icon {
-    switch (this) {
-      case UgrReporteEstado.enviado:
-        return Icons.send;
-      case UgrReporteEstado.enRevision:
-        return Icons.visibility;
-      case UgrReporteEstado.aprobado:
-        return Icons.verified;
-      case UgrReporteEstado.rechazado:
-        return Icons.cancel;
-      case UgrReporteEstado.cerrado:
-        return Icons.lock;
-    }
-  }
-
-  bool get puedeCambiarA => switch (this) {
-        UgrReporteEstado.enviado => true,
-        UgrReporteEstado.enRevision => true,
-        UgrReporteEstado.aprobado => true,
-        UgrReporteEstado.rechazado => true,
-        UgrReporteEstado.cerrado => false,
-      };
-}
-
-extension UgrReporteEstadoFromInt on UgrReporteEstado {
-  static UgrReporteEstado fromId(int? id) {
-    return switch (id) {
-      1 => UgrReporteEstado.enviado,
-      2 => UgrReporteEstado.enRevision,
-      3 => UgrReporteEstado.aprobado,
-      4 => UgrReporteEstado.rechazado,
-      5 => UgrReporteEstado.cerrado,
-      _ => UgrReporteEstado.enviado,
-    };
-  }
-}
 
 enum UgrEdanEstado {
-  borrador,      // 1 - Borrador inicial (editable, eliminable)
-  enviado,       // 2 - Formulario enviado al servidor (no editable)
-  aprobado,      // 3 - Formulario aprobado (no editable)
-  rechazado,     // 4 - Formulario rechazado (editable para corregir)
-  cerrado,       // 5 - Formulario cerrado (no editable)
+  borrador,
+  enviado,
+  aprobado,
+  rechazado,
+  cerrado,
 }
 
 extension UgrEdanEstadoX on UgrEdanEstado {
@@ -183,7 +83,7 @@ extension UgrEdanEstadoX on UgrEdanEstado {
         UgrEdanEstado.borrador => true,
         UgrEdanEstado.enviado => false,
         UgrEdanEstado.aprobado => false,
-        UgrEdanEstado.rechazado => true,  // Puede corregir y re-enviar
+        UgrEdanEstado.rechazado => true,
         UgrEdanEstado.cerrado => false,
       };
 
@@ -207,83 +107,6 @@ extension UgrEdanEstadoFromInt on UgrEdanEstado {
       _ => UgrEdanEstado.borrador,
     };
   }
-}
-
-class UgrReporte {
-  final String id;
-  final int? idReporte;
-  final String tipoEvento;
-  final String comunidad;
-  final String municipio;
-  final String responsable;
-  final DateTime fechaEvento;
-  final String descripcion;
-  final double lat;
-  final double lon;
-  final int fotos;
-  final int videos;
-  final int documentos;
-  int idEstado;
-  UgrReporteEstado estado;
-
-  UgrReporte({
-    required this.id,
-    this.idReporte,
-    required this.tipoEvento,
-    required this.comunidad,
-    required this.municipio,
-    required this.responsable,
-    required this.fechaEvento,
-    required this.descripcion,
-    required this.lat,
-    required this.lon,
-    this.fotos = 0,
-    this.videos = 0,
-    this.documentos = 0,
-    this.idEstado = 1,
-    this.estado = UgrReporteEstado.enviado,
-  });
-
-  factory UgrReporte.fromServer(Reporte r) {
-    DateTime fecha = DateTime.tryParse(r.fechaEvento) ?? DateTime.now();
-    if (r.horaEvento != null && r.horaEvento!.isNotEmpty) {
-      final partes = r.horaEvento!.split(':');
-      if (partes.isNotEmpty) {
-        final h = int.tryParse(partes[0]);
-        final m = partes.length > 1 ? int.tryParse(partes[1]) : null;
-        if (h != null) {
-          fecha = DateTime(
-            fecha.year,
-            fecha.month,
-            fecha.day,
-            h,
-            m ?? 0,
-          );
-        }
-      }
-    }
-    final idEstado = r.idEstado ?? 1;
-    final estado = UgrReporteEstadoFromInt.fromId(idEstado);
-    return UgrReporte(
-      id: r.idReporte?.toString() ?? '',
-      idReporte: r.idReporte,
-      tipoEvento: r.tipoEvento?.nombre ?? 'Evento',
-      comunidad: r.comunidad,
-      municipio: r.municipio?.nombre ?? '',
-      responsable: r.usuario?.nombre ?? 'Reportador',
-      fechaEvento: fecha,
-      descripcion: r.descripcion ?? '',
-      lat: r.coordenadaLat ?? 0.0,
-      lon: r.coordenadaLon ?? 0.0,
-      fotos: (r.fotografia != null && r.fotografia!.isNotEmpty) ? 1 : 0,
-      videos: 0,
-      documentos: 0,
-      idEstado: idEstado,
-      estado: estado,
-    );
-  }
-
-  String get tiempoRelativo => _tiempoRelativo(fechaEvento);
 }
 
 class UgrSeccion {
@@ -319,6 +142,11 @@ class UgrHistorialEvento {
 class UgrEdan {
   final String id;
   final int? idEdan;
+  final int? idLocal;
+  final int? idServer;
+  final bool sincronizado;
+  final bool pendienteEliminacion;
+  final bool esBorrador;
   final String codigo;
   final String tipoEvento;
   final String comunidad;
@@ -339,6 +167,11 @@ class UgrEdan {
   UgrEdan({
     required this.id,
     this.idEdan,
+    this.idLocal,
+    this.idServer,
+    this.sincronizado = false,
+    this.pendienteEliminacion = false,
+    this.esBorrador = false,
     required this.codigo,
     required this.tipoEvento,
     required this.comunidad,
@@ -434,7 +267,7 @@ class UgrEdan {
           descripcion: 'Agua, luz, alcantarillado y comunicaciones',
           icon: Icons.water_drop_outlined,
           completada: e.localidades.any((l) =>
-              l.impServicios && l.serviciosBasicos.algunaSeleccionada),
+              l.impServicios && l.serviciosBasicos.any((s) => s.tieneDatos)),
         ),
       if (!esBorrador || e.localidades.any((l) => l.impEducacion))
         UgrSeccion(
@@ -476,14 +309,15 @@ class UgrEdan {
           descripcion: 'Población vulnerable y afectación por sexo',
           icon: Icons.volunteer_activism_outlined,
           completada: e.localidades.any((l) =>
-              l.impProteccion && l.proteccion.vulnerables.algunoPositivo),
+              l.impProteccion && l.proteccion.any((g) => g.tieneDatos)),
         ),
       if (!esBorrador || e.localidades.any((l) => l.impNecesidades))
         UgrSeccion(
           nombre: '11 · Necesidades humanitarias',
           descripcion: 'Alimentos, refugio, higiene y otros',
           icon: Icons.inventory_2_outlined,
-          completada: e.localidades.any((l) => l.impNecesidades && l.necesidadHumanitaria.algunaSeleccionada),
+          completada: e.localidades.any((l) =>
+              l.impNecesidades && (l.necesidadHumanitaria?.algunaSeleccionada ?? false)),
         ),
       UgrSeccion(
         nombre: '13 · Responsable del formulario',
@@ -508,6 +342,11 @@ class UgrEdan {
     return UgrEdan(
       id: e.idLocal?.toString() ?? e.codigoEdan,
       idEdan: e.idEdan ?? e.idServer,
+      idLocal: e.idLocal,
+      idServer: e.idServer,
+      sincronizado: e.sincronizado,
+      pendienteEliminacion: e.pendienteEliminacion,
+      esBorrador: esBorrador,
       codigo: e.codigoEdan,
       tipoEvento: e.tipoEventoNombre ?? 'Evento',
       comunidad: _primerLocalidad(e.localidades),
@@ -556,18 +395,16 @@ class UgrEdan {
 }
 
 class UgrIndicadores {
-  final int reportesNuevos;
-  final int reportesConfirmados;
-  final int edanEnEdicion;
-  final int edanObservados;
-  final int edanEnviados;
+  final int localidadesPendientes;
+  final int localidadesAprobadas;
+  final int edanesConsolidados;
+  final int edanesEnviados;
 
   const UgrIndicadores({
-    required this.reportesNuevos,
-    required this.reportesConfirmados,
-    required this.edanEnEdicion,
-    required this.edanObservados,
-    required this.edanEnviados,
+    required this.localidadesPendientes,
+    required this.localidadesAprobadas,
+    required this.edanesConsolidados,
+    required this.edanesEnviados,
   });
 }
 

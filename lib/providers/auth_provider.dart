@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
+import '../services/edan_sync_service.dart';
+import '../services/localidad_sync_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService.instance;
@@ -43,6 +45,8 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = false;
     if (!success) {
       _error = 'Usuario o contraseña incorrectos';
+    } else {
+      _dispararCargaEdansMunicipio();
     }
     notifyListeners();
     return success;
@@ -88,9 +92,28 @@ class AuthProvider extends ChangeNotifier {
     _isLoading = false;
     if (!success) {
       _error = _authService.lastError ?? 'Error al registrar usuario';
+    } else {
+      _dispararCargaEdansMunicipio();
     }
     notifyListeners();
     return success;
+  }
+
+  void _dispararCargaEdansMunicipio() {
+    final userId = _authService.userId;
+    if (userId == null) return;
+    if (_authService.idRol == 6) {
+      final idMunicipio = _authService.currentToken?.idMunicipio;
+      if (idMunicipio == null) return;
+      EdanSyncService.instance.recargarEdansMunicipio(
+        idMunicipio: idMunicipio,
+        usuarioId: userId,
+      );
+    } else if (_authService.idRol == 7) {
+      LocalidadSyncService.instance.recargarLocalidadesUsuario(
+        idUsuario: userId,
+      );
+    }
   }
 
   Future<void> logout() async {

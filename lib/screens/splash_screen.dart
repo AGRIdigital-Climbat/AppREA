@@ -76,7 +76,17 @@ class _SplashScreenState extends State<SplashScreen>
               ),
               const SizedBox(height: 32),
               const Text(
-                'REA',
+                'SINAGER-SAT',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 2,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'EDAN',
                 style: TextStyle(
                   fontSize: 48,
                   fontWeight: FontWeight.bold,

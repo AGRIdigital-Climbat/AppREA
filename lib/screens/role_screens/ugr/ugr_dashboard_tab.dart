@@ -1,121 +1,120 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../config/theme.dart';
-import '../../../models/ugr_models.dart';
+import '../../../models/edan.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
-import '../../../services/database_helper.dart';
+import '../../../services/connectivity_service.dart';
 import '../../../services/edan_sync_service.dart';
-import 'ugr_edan_list_screen.dart';
+import 'ugr_edan_preview_screen.dart';
+import 'ugr_route.dart';
 
 class UgrDashboardTab extends StatefulWidget {
   const UgrDashboardTab({super.key});
 
   @override
-  State<UgrDashboardTab> createState() => _UgrDashboardTabState();
+  State<UgrDashboardTab> createState() => UgrDashboardTabState();
 }
 
-class _UgrDashboardTabState extends State<UgrDashboardTab> {
-  List<UgrReporte> _reportes = [];
-  final List<UgrEdan> _edanes = [];
-  List<UgrActividad> _actividad = [];
+class UgrDashboardTabState extends State<UgrDashboardTab>
+    with WidgetsBindingObserver {
+  List<Map<String, dynamic>> _edanesServidor = [];
+  List<EdanLocalidad> _localidadesPendientes = [];
+  int _localidadesAprobadas = 0;
 
-  UgrIndicadores get _indicadores => UgrIndicadores(
-        reportesNuevos: _reportes.where((r) => r.estado == UgrReporteEstado.enviado).length,
-        reportesConfirmados: _reportes.where((r) => r.estado == UgrReporteEstado.aprobado).length,
-        edanEnEdicion: _edanes.where((e) => e.estado == UgrEdanEstado.borrador).length,
-        edanObservados: _edanes.where((e) => e.estado == UgrEdanEstado.rechazado).length,
-        edanEnviados: _edanes.where((e) => e.estado == UgrEdanEstado.enviado).length,
-      );
+  int get edanesCount => _edanesServidor.length;
+
+  int get _edanEnviados =>
+      _edanesServidor.where((e) => (e['estado'] ?? '').toString().toLowerCase() == 'enviado').length;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _sincronizarEnSegundoPlano();
-    _cargarReportes();
-    _cargarEdanes();
+    _cargarEdanesServidor();
+    _cargarLocalidadesServidor();
   }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _cargarEdanesServidor();
+      _cargarLocalidadesServidor();
+    }
+  }
+
+  void refresh() {
+    _cargarEdanesServidor();
+    _cargarLocalidadesServidor();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  int? get _idMunicipio => AuthService.instance.currentToken?.idMunicipio;
 
   Future<void> _sincronizarEnSegundoPlano() async {
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
-    
     final result = await EdanSyncService.instance.sincronizar();
-    
     if (!mounted) return;
     if (result.exito && (result.creados > 0 || result.actualizados > 0 || result.enviados > 0)) {
-      _cargarEdanes();
+      _cargarEdanesServidor();
+      _cargarLocalidadesServidor();
     }
   }
 
-  Future<void> _cargarEdanes() async {
-    final userId = AuthService.instance.userId;
-    if (userId == null) return;
+  Future<void> _cargarEdanesServidor() async {
+    final municipioId = _idMunicipio;
+    if (municipioId == null) return;
+    if (!ConnectivityService().isConnected) return;
     try {
-      final edanes = await DatabaseHelper.instance.getEdans(userId);
+      final data = await ApiService.instance.listarEdansPorMunicipio(municipioId);
       if (!mounted) return;
       setState(() {
-        _edanes
-          ..clear()
-          ..addAll(edanes.map((e) => UgrEdan.fromEdan(
-                e,
-                municipioNombre: e.municipioNombre ?? '',
-                usuarioNombre: AuthService.instance.userName,
-              )));
+        _edanesServidor = data;
       });
-    } catch (_) {}
-  }
-
-  Future<void> _cargarReportes() async {
-    final municipioId = AuthService.instance.currentToken?.idMunicipio;
-    if (municipioId == null) return;
-    try {
-      final reportes = await ApiService.instance.getReportes(
-        idMunicipio: municipioId,
-        limit: 50,
-      );
-      reportes.sort((a, b) {
-        final fa = a.fechaReporte ?? '';
-        final fb = b.fechaReporte ?? '';
-        return fb.compareTo(fa);
-      });
+    } catch (e) {
       if (mounted) {
-        setState(() {
-          _reportes = reportes.map(UgrReporte.fromServer).toList();
-          _actividad = _buildActividadFromReportes(_reportes);
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al cargar EDANs: ${ApiService.traducirError(e)}'), backgroundColor: AppColors.error),
+        );
       }
-    } catch (_) {}
+    }
   }
 
-  List<UgrActividad> _buildActividadFromReportes(List<UgrReporte> reportes) {
-    final recientes = reportes.take(6).toList();
-    return recientes.map((r) {
-      final color = switch (r.estado) {
-        UgrReporteEstado.enviado => AppColors.pending,
-        UgrReporteEstado.enRevision => AppColors.inProgress,
-        UgrReporteEstado.aprobado => AppColors.aprobado,
-        UgrReporteEstado.rechazado => AppColors.rechazado,
-        UgrReporteEstado.cerrado => AppColors.closed,
-      };
-      final icon = switch (r.estado) {
-        UgrReporteEstado.enviado => Icons.send,
-        UgrReporteEstado.enRevision => Icons.visibility,
-        UgrReporteEstado.aprobado => Icons.verified,
-        UgrReporteEstado.rechazado => Icons.cancel,
-        UgrReporteEstado.cerrado => Icons.lock,
-      };
-      final comunidad = r.comunidad.isNotEmpty ? ' en ${r.comunidad}' : '';
-      final autor =
-          r.responsable.isNotEmpty ? ' por ${r.responsable}' : '';
-      return UgrActividad(
-        texto: 'Reporte de ${r.tipoEvento}$comunidad$autor',
-        tiempo: r.tiempoRelativo,
-        icon: icon,
-        color: color,
-      );
-    }).toList();
+  Future<void> _cargarLocalidadesServidor() async {
+    final municipioId = _idMunicipio;
+    if (municipioId == null) return;
+    if (!ConnectivityService().isConnected) return;
+    try {
+      final resultados = await Future.wait([
+        ApiService.instance.getConsolidarPendientes(
+          idMunicipio: municipioId,
+          estado: 'revision',
+        ),
+        ApiService.instance.getConsolidarPendientes(
+          idMunicipio: municipioId,
+          estado: 'aprobado',
+        ),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _localidadesPendientes = (resultados[0] as List).map((j) => EdanLocalidad.fromJson(j)).toList();
+        _localidadesAprobadas = (resultados[1] as List).length;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error al cargar localidades: ${ApiService.traducirError(e)}'), backgroundColor: AppColors.error),
+        );
+      }
+    }
   }
 
   @override
@@ -124,8 +123,8 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
     return RefreshIndicator(
       onRefresh: () async {
         await _sincronizarManual();
-        await _cargarReportes();
-        await _cargarEdanes();
+        await _cargarEdanesServidor();
+        await _cargarLocalidadesServidor();
       },
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -139,211 +138,136 @@ class _UgrDashboardTabState extends State<UgrDashboardTab> {
           const SizedBox(height: 20),
           const _SectionTitle('Actividad reciente'),
           const SizedBox(height: 8),
-          _buildActividad(),
+          _buildActividad(primary),
         ],
       ),
     );
   }
 
   Future<void> _sincronizarManual() async {
-    final result = await EdanSyncService.instance.sincronizar();
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result.resumen),
-        backgroundColor: result.exito ? AppColors.aprobado : AppColors.rechazado,
-        duration: const Duration(seconds: 3),
-      ),
-    );
+    await EdanSyncService.instance.sincronizar();
   }
 
   Widget _buildWelcomeHeader() {
-    final auth = context.watch<AuthProvider>();
-    final primary = PaletteScope.of(context).primary;
-    final light = Color.lerp(primary, Colors.white, 0.18)!;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [primary, light],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: 0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Image.asset(
-            'assets/images/SINAGER.png',
-            width: 62,
-            height: 62,
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Bienvenido,',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.8),
-                  ),
-                ),
-                Text(
-                  auth.userName ?? 'Usuario',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  auth.rolName ?? 'Unidad de Gestión de Riesgo',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.7),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildIndicadores(Color primary) {
-    final ind = _indicadores;
-    final cards = <_IndicatorCard>[
-      _IndicatorCard(
-        value: ind.reportesNuevos,
-        label: 'Reportes nuevos',
-        icon: Icons.warning_amber_rounded,
-        color: AppColors.pending,
-      ),
-      _IndicatorCard(
-        value: ind.reportesConfirmados,
-        label: 'Reportes confirmados',
-        icon: Icons.check_circle,
-        color: AppColors.aprobado,
-      ),
-      _IndicatorCard(
-        value: ind.edanEnEdicion,
-        label: 'EDAN en edición',
-        icon: Icons.edit,
-        color: AppColors.inProgress,
-      ),
-      _IndicatorCard(
-        value: ind.edanObservados,
-        label: 'EDAN observados',
-        icon: Icons.feedback,
-        color: AppColors.rechazado,
-      ),
-      _IndicatorCard(
-        value: ind.edanEnviados,
-        label: 'EDAN enviados',
-        icon: Icons.send,
-        color: primary,
-      ),
-    ];
-
-    return Column(
+    final nombre = context.watch<AuthProvider>().userName ?? 'UGR';
+    return Row(
       children: [
-        Row(
-          children: [
-            Expanded(child: cards[0]),
-            const SizedBox(width: 8),
-            Expanded(child: cards[1]),
-            const SizedBox(width: 8),
-            Expanded(child: cards[2]),
-          ],
+        CircleAvatar(
+          radius: 24,
+          backgroundColor: PaletteScope.of(context).primary.withValues(alpha: 0.1),
+          child: Icon(Icons.location_city, color: PaletteScope.of(context).primary),
         ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(child: cards[3]),
-            const SizedBox(width: 8),
-            Expanded(child: cards[4]),
-          ],
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const UgrEdanListScreen()),
-            ),
-            icon: const Icon(Icons.folder_outlined),
-            label: const Text('Ver mis EDAN'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Bienvenido, $nombre',
+                style: const TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textPrimary,
+                ),
               ),
-            ),
+              const SizedBox(height: 2),
+              Text(
+                'Gestión de EDAN y localidades',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textSecondary,
+                ),
+              ),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildActividad() {
-    return Container(
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
-      ),
-      child: Column(
-        children: _actividad.map((item) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            child: Row(
+  Widget _buildIndicadores(Color primary) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: _IndicatorCard(
+                value: _localidadesPendientes.length,
+                label: 'Localidades pendientes',
+                icon: Icons.pending_actions,
+                color: AppColors.pending,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _IndicatorCard(
+                value: _localidadesAprobadas,
+                label: 'Aprobadas',
+                icon: Icons.check_circle_outline,
+                color: AppColors.aprobado,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: _IndicatorCard(
+                value: edanesCount,
+                label: 'EDAN consolidados',
+                icon: Icons.folder_outlined,
+                color: primary,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _IndicatorCard(
+                value: _edanEnviados,
+                label: 'EDAN enviados',
+                icon: Icons.send_outlined,
+                color: AppColors.enviado,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActividad(Color primary) {
+    if (_localidadesPendientes.isEmpty && _edanesServidor.isEmpty) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Center(
+            child: Column(
               children: [
-                Icon(item.icon, size: 20, color: item.color),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    item.texto,
-                    style: const TextStyle(
-                      fontSize: 13,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  item.tiempo,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.textSecondary,
-                  ),
+                Icon(Icons.inbox_outlined, size: 36, color: AppColors.textSecondary.withValues(alpha: 0.4)),
+                const SizedBox(height: 8),
+                const Text(
+                  'Sin actividad reciente',
+                  style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
                 ),
               ],
             ),
-          );
-        }).toList(),
-      ),
+          ),
+        ),
+      );
+    }
+    return Column(
+      children: [
+        for (final loc in _localidadesPendientes.take(5))
+          _LocalidadActividadCard(localidad: loc, primary: primary),
+        for (final edan in _edanesServidor.take(3))
+          _EdanActividadCard(edan: edan, primary: primary),
+      ],
     );
   }
 }
 
 class _SectionTitle extends StatelessWidget {
   final String title;
-
   const _SectionTitle(this.title);
 
   @override
@@ -374,39 +298,127 @@ class _IndicatorCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withValues(alpha: 0.15)),
-      ),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 18, color: color),
-              const SizedBox(width: 6),
-              Text(
-                '$value',
-                style: TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: color,
-                ),
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 22),
+            const SizedBox(height: 8),
+            Text(
+              '$value',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+                color: color,
               ),
-            ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalidadActividadCard extends StatelessWidget {
+  final EdanLocalidad localidad;
+  final Color primary;
+  const _LocalidadActividadCard({required this.localidad, required this.primary});
+
+  @override
+  Widget build(BuildContext context) {
+    final estado = localidad.estadoLocalidad;
+    final estadoColor = estado?.color ?? AppColors.textSecondary;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: primary.withValues(alpha: 0.1),
+          child: Icon(Icons.location_on, color: primary, size: 18),
+        ),
+        title: Text(
+          localidad.nombre.isNotEmpty ? localidad.nombre : 'Sin nombre',
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          '${localidad.tipoEventoNombre ?? "Evento"} · ${localidad.totalPoblacionAfectada} personas',
+          style: const TextStyle(fontSize: 12),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: estadoColor.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.85)),
+          child: Text(
+            estado?.label ?? '?',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: estadoColor),
           ),
-        ],
+        ),
+        onTap: () {
+          final edan = Edan.desdeLocalidad(localidad);
+          Navigator.of(context).push(
+            ugrRoute(UgrEdanPreviewScreen(edan: edan, soloLectura: true, esConsolidado: true)),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _EdanActividadCard extends StatelessWidget {
+  final Map<String, dynamic> edan;
+  final Color primary;
+  const _EdanActividadCard({required this.edan, required this.primary});
+
+  @override
+  Widget build(BuildContext context) {
+    final codigo = (edan['codigo_edan'] ?? '').toString();
+    final estado = (edan['estado'] ?? '').toString();
+    final totalLocalidades = edan['total_localidades'] ?? 0;
+    final totalPoblacion = edan['total_poblacion_afectada'] ?? 0;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: AppColors.aprobado.withValues(alpha: 0.1),
+          child: const Icon(Icons.folder, color: AppColors.aprobado, size: 18),
+        ),
+        title: Text(
+          codigo.isNotEmpty ? codigo : 'EDAN',
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          '$totalLocalidades localidades · $totalPoblacion personas',
+          style: const TextStyle(fontSize: 12),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        trailing: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+          decoration: BoxDecoration(
+            color: AppColors.aprobado.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            estado.toUpperCase(),
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.aprobado),
+          ),
+        ),
       ),
     );
   }

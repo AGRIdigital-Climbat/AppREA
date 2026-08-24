@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
 import '../../../config/theme.dart';
 
-Route<T> ugrRoute<T>(Widget screen) {
+Route<T> ugrRoute<T>(Widget screen, {ToolPalette? palette}) {
+  final p = palette ?? Palettes.edan;
   return MaterialPageRoute<T>(
     builder: (_) => PaletteScope(
-      palette: Palettes.edan,
+      palette: p,
       child: Theme(
-        data: AppTheme.buildTheme(Palettes.edan),
+        data: AppTheme.buildTheme(p),
         child: screen,
       ),
     ),
   );
 }
 
-Widget ugrSheetWrap(Widget child) {
+Widget ugrSheetWrap(Widget child, {ToolPalette? palette}) {
+  final p = palette ?? Palettes.edan;
   return PaletteScope(
-    palette: Palettes.edan,
+    palette: p,
     child: Theme(
-      data: AppTheme.buildTheme(Palettes.edan),
+      data: AppTheme.buildTheme(p),
       child: child,
     ),
   );

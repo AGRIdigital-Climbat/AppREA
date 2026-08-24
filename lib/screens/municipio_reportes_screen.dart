@@ -59,7 +59,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
     try {
       final reportes = await _api.getReportes(
         idMunicipio: municipioId,
-        limit: 30,
+        limit: 15,
       );
       reportes.sort((a, b) {
         final fa = a.fechaReporte ?? '';
@@ -536,31 +536,33 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
         .where((r) =>
             r.coordenadaLat != null &&
             r.coordenadaLon != null &&
-            !r.coordenadaLat!.isNaN &&
-            !r.coordenadaLon!.isNaN &&
-            !r.coordenadaLat!.isInfinite &&
-            !r.coordenadaLon!.isInfinite)
+            _coordsValidas(r.coordenadaLat!, r.coordenadaLon!))
         .map((r) => _buildMarker(r))
         .toList();
 
     final hasCoordinates = markers.isNotEmpty;
 
     final geojson = context.watch<ReporteProvider>().municipioGeojson;
-    final hasPolygon = geojson != null && geojson.polygons.isNotEmpty;
-    final polygonBounds = hasPolygon
-        ? LatLngBounds.fromPoints(
-            geojson.polygons.expand((ring) => ring).toList())
-        : null;
+    final hasPolygonData = geojson != null && geojson.polygons.isNotEmpty;
+    final polygonBounds =
+        hasPolygonData ? _safePolygonBounds(geojson.polygons) : null;
+    final hasPolygon = polygonBounds != null;
 
     LatLng center;
-    if (hasPolygon) {
-      center = polygonBounds!.center;
+    if (polygonBounds != null) {
+      center = polygonBounds.center;
     } else if (hasCoordinates) {
       final validLat = filtered
-          .where((r) => r.coordenadaLat != null && !r.coordenadaLat!.isNaN && !r.coordenadaLat!.isInfinite)
+          .where((r) =>
+              r.coordenadaLat != null &&
+              r.coordenadaLon != null &&
+              _coordsValidas(r.coordenadaLat!, r.coordenadaLon!))
           .map((r) => r.coordenadaLat!);
       final validLon = filtered
-          .where((r) => r.coordenadaLon != null && !r.coordenadaLon!.isNaN && !r.coordenadaLon!.isInfinite)
+          .where((r) =>
+              r.coordenadaLat != null &&
+              r.coordenadaLon != null &&
+              _coordsValidas(r.coordenadaLat!, r.coordenadaLon!))
           .map((r) => r.coordenadaLon!);
       if (validLat.isNotEmpty && validLon.isNotEmpty) {
         center = LatLng(
@@ -616,7 +618,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
             ),
             children: [
               if (_isSatellite) satelliteTileLayer else streetTileLayer,
-              if (hasPolygon)
+              if (hasPolygon && geojson != null)
                 PolygonLayer(
                   polygons: [
                     for (final ring in geojson.polygons)
@@ -848,7 +850,8 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
 
   void _centerMapOnDate() {
     final geojson = context.read<ReporteProvider>().municipioGeojson;
-    final hasPolygon = geojson != null && geojson.polygons.isNotEmpty;
+    final hasPolygon = geojson != null &&
+        _safePolygonBounds(geojson.polygons) != null;
     if (hasPolygon) return;
 
     final filtered = _filteredReportes;
@@ -856,10 +859,7 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
         .where((r) =>
             r.coordenadaLat != null &&
             r.coordenadaLon != null &&
-            !r.coordenadaLat!.isNaN &&
-            !r.coordenadaLon!.isNaN &&
-            !r.coordenadaLat!.isInfinite &&
-            !r.coordenadaLon!.isInfinite)
+            _coordsValidas(r.coordenadaLat!, r.coordenadaLon!))
         .toList();
     if (withCoords.isEmpty) return;
 
@@ -871,17 +871,36 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
       return;
     }
 
-    final bounds = LatLngBounds.fromPoints(
-      withCoords.map((r) => LatLng(r.coordenadaLat!, r.coordenadaLon!)).toList(),
-    );
+    try {
+      final bounds = LatLngBounds.fromPoints(
+        withCoords
+            .map((r) => LatLng(r.coordenadaLat!, r.coordenadaLon!))
+            .toList(),
+      );
 
-    _mapController.fitCamera(
-      CameraFit.bounds(
-        bounds: bounds,
-        padding: const EdgeInsets.all(60),
-        maxZoom: 16,
-      ),
-    );
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.all(60),
+          maxZoom: 16,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Error calculando bounds de reportes: $e');
+    }
+  }
+
+  bool _coordsValidas(double lat, double lon) {
+    return lat != 0.0 &&
+        lon != 0.0 &&
+        !lat.isNaN &&
+        !lon.isNaN &&
+        !lat.isInfinite &&
+        !lon.isInfinite &&
+        lat >= -90 &&
+        lat <= 90 &&
+        lon >= -180 &&
+        lon <= 180;
   }
 
   Marker _buildMarker(Reporte r) {
@@ -920,5 +939,16 @@ class _MunicipioReportesTabState extends State<MunicipioReportesTab>
         builder: (_) => ReporteDetailScreen.server(reporte: r),
       ),
     );
+  }
+
+  LatLngBounds? _safePolygonBounds(List<List<LatLng>> polygons) {
+    try {
+      final points = polygons.expand((ring) => ring).toList();
+      if (points.isEmpty) return null;
+      return LatLngBounds.fromPoints(points);
+    } catch (e) {
+      debugPrint('Error calculando bounds del geojson: $e');
+      return null;
+    }
   }
 }

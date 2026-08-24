@@ -5,13 +5,16 @@ import '../providers/auth_provider.dart';
 import '../providers/reporte_provider.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
+import '../services/database_helper.dart';
+import '../services/image_service.dart';
 import '../services/sync_manager.dart';
 import '../screens/login_screen.dart';
 
 class PerfilTab extends StatefulWidget {
   final VoidCallback? onLogout;
+  final bool catalogoEdan;
 
-  const PerfilTab({super.key, this.onLogout});
+  const PerfilTab({super.key, this.onLogout, this.catalogoEdan = false});
 
   @override
   State<PerfilTab> createState() => PerfilTabState();
@@ -159,8 +162,7 @@ class PerfilTabState extends State<PerfilTab> {
                 ? 'Perfil actualizado exitosamente'
                 : 'Cambios guardados localmente, no se pudo sincronizar con el servidor',
           ),
-          backgroundColor:
-              serverOk ? AppColors.completed : AppColors.error,
+          backgroundColor: serverOk ? AppColors.completed : AppColors.error,
         ),
       );
       _loadProfile();
@@ -204,6 +206,8 @@ class PerfilTabState extends State<PerfilTab> {
       final nav = Navigator.of(context);
       reporte.clearData();
       SyncManager.instance.reset();
+      await ImageService().clearAllImages();
+      await DatabaseHelper.instance.clearAll();
       await auth.logout();
       if (mounted) {
         nav.pushReplacement(
@@ -217,8 +221,10 @@ class PerfilTabState extends State<PerfilTab> {
   Widget build(BuildContext context) {
     if (_isLoading) {
       return Center(
-          child: CircularProgressIndicator(
-              color: PaletteScope.of(context).primary));
+        child: CircularProgressIndicator(
+          color: PaletteScope.of(context).primary,
+        ),
+      );
     }
 
     return SingleChildScrollView(
@@ -292,8 +298,10 @@ class PerfilTabState extends State<PerfilTab> {
           child: OutlinedButton.icon(
             onPressed: _handleLogout,
             icon: const Icon(Icons.logout, color: AppColors.error),
-            label: const Text('Cerrar sesion',
-                style: TextStyle(color: AppColors.error)),
+            label: const Text(
+              'Cerrar sesion',
+              style: TextStyle(color: AppColors.error),
+            ),
             style: OutlinedButton.styleFrom(
               side: const BorderSide(color: AppColors.error),
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -307,10 +315,10 @@ class PerfilTabState extends State<PerfilTab> {
   Widget _buildOfflineDataButton() {
     return Consumer<ReporteProvider>(
       builder: (context, rp, child) {
-        final estadosCount = rp.estados.length;
-        final categoriasCount = rp.categorias.length;
+        final esEdan = widget.catalogoEdan;
+        final estadosCount = esEdan ? rp.estadosEdan.length : rp.estados.length;
         final tiposCount = rp.tiposEvento.length;
-        final hasData = estadosCount > 0 || categoriasCount > 0 || tiposCount > 0;
+        final hasData = estadosCount > 0 || tiposCount > 0;
 
         return Container(
           width: double.infinity,
@@ -325,9 +333,11 @@ class PerfilTabState extends State<PerfilTab> {
             children: [
               Row(
                 children: [
-                  Icon(Icons.download_for_offline,
-                      size: 20,
-                      color: PaletteScope.of(context).primary),
+                  Icon(
+                    Icons.download_for_offline,
+                    size: 20,
+                    color: PaletteScope.of(context).primary,
+                  ),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
@@ -344,7 +354,9 @@ class PerfilTabState extends State<PerfilTab> {
               if (hasData) ...[
                 const SizedBox(height: 8),
                 Text(
-                  '$estadosCount estados  ·  $tiposCount tipos  ·  $categoriasCount categorias',
+                  esEdan
+                      ? '$estadosCount estados  ·  $tiposCount tipos de evento'
+                      : '$estadosCount estados  ·  $tiposCount tipos  ·  ${rp.categorias.length} categorias',
                   style: TextStyle(
                     fontSize: 11,
                     color: AppColors.textSecondary.withValues(alpha: 0.7),
@@ -363,12 +375,16 @@ class PerfilTabState extends State<PerfilTab> {
                         backgroundColor: AppColors.inProgress,
                       ),
                     );
-                    final result = await rp.fetchAndCacheCatalogs();
+                    final result = esEdan
+                        ? await rp.fetchAndCacheCatalogsEdan()
+                        : await rp.fetchAndCacheCatalogs();
                     if (context.mounted) {
                       messenger.showSnackBar(
                         SnackBar(
                           content: Text(
-                            '${result['estados']} estados, ${result['tipos']} tipos y ${result['categorias']} categorias cargados',
+                            esEdan
+                                ? '${result['estados']} estados, ${result['tipos']} tipos y geojson del municipio cargados'
+                                : '${result['estados']} estados, ${result['tipos']} tipos y ${result['categorias']} categorias cargados',
                           ),
                           backgroundColor: AppColors.completed,
                         ),
@@ -411,10 +427,12 @@ class PerfilTabState extends State<PerfilTab> {
       ),
       child: Column(
         children: rows
-            .map((row) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: row,
-                ))
+            .map(
+              (row) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: row,
+              ),
+            )
             .toList(),
       ),
     );
@@ -462,124 +480,155 @@ class PerfilTabState extends State<PerfilTab> {
             ),
           ),
           const SizedBox(height: 20),
-          _buildSectionCard(
-            'DATOS PERSONALES',
-            [
-              _buildTextField('Nombre completo', _nombreController, validator: (v) {
+          _buildSectionCard('DATOS PERSONALES', [
+            _buildTextField(
+              'Nombre completo',
+              _nombreController,
+              validator: (v) {
                 if (v == null || v.isEmpty) return 'Ingrese su nombre';
                 return null;
-              }),
-              const SizedBox(height: 12),
-              _buildTextField('Celular', _celularController,
-                  keyboardType: TextInputType.phone),
-              const SizedBox(height: 12),
-              _buildTextField('Correo', _correoController,
-                  keyboardType: TextInputType.emailAddress),
-              const SizedBox(height: 12),
-              _buildTextField('Cargo', _cargoController),
-              const SizedBox(height: 12),
-              _buildTextField('Comunidad', _comunidadController),
-            ],
-          ),
+              },
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              'Celular',
+              _celularController,
+              keyboardType: TextInputType.phone,
+            ),
+            const SizedBox(height: 12),
+            _buildTextField(
+              'Correo',
+              _correoController,
+              keyboardType: TextInputType.emailAddress,
+            ),
+            const SizedBox(height: 12),
+            _buildTextField('Cargo', _cargoController),
+            const SizedBox(height: 12),
+            _buildTextField('Comunidad', _comunidadController),
+          ]),
           const SizedBox(height: 16),
           Consumer<ReporteProvider>(
             builder: (context, rp, child) {
-              return _buildSectionCard(
-                'UBICACION GEOGRAFICA',
-                [
-                  DropdownButtonFormField<int>(
-                    initialValue: rp.departamentos.any((d) => d.id == _selectedDepartamento)
-                        ? _selectedDepartamento
-                        : null,
-                    decoration: _fieldDecoration('Departamento', rp.isLoading
+              return _buildSectionCard('UBICACION GEOGRAFICA', [
+                DropdownButtonFormField<int>(
+                  initialValue:
+                      rp.departamentos.any((d) => d.id == _selectedDepartamento)
+                      ? _selectedDepartamento
+                      : null,
+                  decoration: _fieldDecoration(
+                    'Departamento',
+                    rp.isLoading
                         ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : null),
-                    items: rp.departamentos
-                        .map((dep) => DropdownMenuItem(
-                            value: dep.id, child: Text(dep.nombre)))
-                        .toList(),
-                    onChanged: rp.isLoading
-                        ? null
-                        : (value) {
-                            setState(() {
-                              _selectedDepartamento = value;
-                              _selectedProvincia = null;
-                              _selectedMunicipio = null;
-                            });
-                            if (value != null) {
-                              rp.loadProvincias(value);
-                            }
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    initialValue: rp.provincias.any((p) => p.id == _selectedProvincia)
-                        ? _selectedProvincia
                         : null,
-                    decoration: _fieldDecoration('Provincia', rp.isLoadingProvincias
+                  ),
+                  items: rp.departamentos
+                      .map(
+                        (dep) => DropdownMenuItem(
+                          value: dep.id,
+                          child: Text(dep.nombre),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: rp.isLoading
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedDepartamento = value;
+                            _selectedProvincia = null;
+                            _selectedMunicipio = null;
+                          });
+                          if (value != null) {
+                            rp.loadProvincias(value);
+                          }
+                        },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue:
+                      rp.provincias.any((p) => p.id == _selectedProvincia)
+                      ? _selectedProvincia
+                      : null,
+                  decoration: _fieldDecoration(
+                    'Provincia',
+                    rp.isLoadingProvincias
                         ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : null),
-                    items: rp.provincias
-                        .map((prov) => DropdownMenuItem(
-                            value: prov.id, child: Text(prov.nombre)))
-                        .toList(),
-                    onChanged: _selectedDepartamento == null || rp.isLoadingProvincias
-                        ? null
-                        : (value) {
-                            setState(() {
-                              _selectedProvincia = value;
-                              _selectedMunicipio = null;
-                            });
-                            if (value != null) {
-                              rp.loadMunicipios(value, _selectedDepartamento!);
-                            }
-                          },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<int>(
-                    initialValue: rp.municipios.any((m) => m.id == _selectedMunicipio)
-                        ? _selectedMunicipio
                         : null,
-                    decoration: _fieldDecoration('Municipio', rp.isLoadingMunicipios
+                  ),
+                  items: rp.provincias
+                      .map(
+                        (prov) => DropdownMenuItem(
+                          value: prov.id,
+                          child: Text(prov.nombre),
+                        ),
+                      )
+                      .toList(),
+                  onChanged:
+                      _selectedDepartamento == null || rp.isLoadingProvincias
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedProvincia = value;
+                            _selectedMunicipio = null;
+                          });
+                          if (value != null) {
+                            rp.loadMunicipios(value, _selectedDepartamento!);
+                          }
+                        },
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<int>(
+                  initialValue:
+                      rp.municipios.any((m) => m.id == _selectedMunicipio)
+                      ? _selectedMunicipio
+                      : null,
+                  decoration: _fieldDecoration(
+                    'Municipio',
+                    rp.isLoadingMunicipios
                         ? const SizedBox(
                             width: 20,
                             height: 20,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : null),
-                    items: rp.municipios
-                        .map((mun) => DropdownMenuItem(
-                            value: mun.id, child: Text(mun.nombre)))
-                        .toList(),
-                    onChanged: _selectedProvincia == null || rp.isLoadingMunicipios
-                        ? null
-                        : (value) {
-                            setState(() {
-                              _selectedMunicipio = value;
-                            });
-                          },
+                        : null,
                   ),
-                ],
-              );
+                  items: rp.municipios
+                      .map(
+                        (mun) => DropdownMenuItem(
+                          value: mun.id,
+                          child: Text(mun.nombre),
+                        ),
+                      )
+                      .toList(),
+                  onChanged:
+                      _selectedProvincia == null || rp.isLoadingMunicipios
+                      ? null
+                      : (value) {
+                          setState(() {
+                            _selectedMunicipio = value;
+                          });
+                        },
+                ),
+              ]);
             },
           ),
           const SizedBox(height: 16),
-          _buildSectionCard(
-            'IDENTIFICACION',
-            [
-              _buildTextField('Usuario', _usuarioController, enabled: false),
-              const SizedBox(height: 12),
-              _buildTextField('Carnet de identidad', _carnetController, enabled: false),
-            ],
-          ),
+          _buildSectionCard('IDENTIFICACION', [
+            _buildTextField('Usuario', _usuarioController, enabled: false),
+            const SizedBox(height: 12),
+            _buildTextField(
+              'Carnet de identidad',
+              _carnetController,
+              enabled: false,
+            ),
+          ]),
           const SizedBox(height: 24),
           Row(
             children: [
@@ -683,7 +732,10 @@ class PerfilTabState extends State<PerfilTab> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(10),
-        borderSide: BorderSide(color: PaletteScope.of(context).primary, width: 1.5),
+        borderSide: BorderSide(
+          color: PaletteScope.of(context).primary,
+          width: 1.5,
+        ),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       suffixIcon: suffixIcon,
@@ -716,9 +768,15 @@ class PerfilTabState extends State<PerfilTab> {
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: BorderSide(color: PaletteScope.of(context).primary, width: 1.5),
+          borderSide: BorderSide(
+            color: PaletteScope.of(context).primary,
+            width: 1.5,
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
       ),
     );
   }

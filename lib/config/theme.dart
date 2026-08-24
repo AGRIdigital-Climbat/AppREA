@@ -118,7 +118,7 @@ class PaletteScope extends InheritedWidget {
 
   static ToolPalette of(BuildContext context) {
     return context.dependOnInheritedWidgetOfExactType<PaletteScope>()?.palette ??
-        Palettes.rea;
+        Palettes.edan;
   }
 
   @override
@@ -207,5 +207,5 @@ class AppTheme {
     );
   }
 
-  static ThemeData get lightTheme => buildTheme(Palettes.rea);
+  static ThemeData get lightTheme => buildTheme(Palettes.edan);
 }

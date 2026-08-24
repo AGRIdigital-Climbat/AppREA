@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../models/reporte.dart';
 import '../models/reporte_offline.dart';
-import '../models/ugr_models.dart';
 import '../providers/reporte_provider.dart';
 
 enum ReporteDetalleFuente { offline, server, ugr }
@@ -145,26 +143,6 @@ class ReporteDetalle {
           DateTime.tryParse(reporte.fechaReporte ?? '') ?? DateTime.now(),
       fechaReporte: reporte.fechaReporte,
       idServer: reporte.idReporte,
-    );
-  }
-
-  factory ReporteDetalle.fromUgr(UgrReporte reporte) {
-    return ReporteDetalle(
-      fuente: ReporteDetalleFuente.ugr,
-      tipoEventoNombre: reporte.tipoEvento,
-      fechaEvento: DateFormat('dd/MM/yyyy HH:mm').format(reporte.fechaEvento),
-      descripcion: reporte.descripcion,
-      municipioNombre: reporte.municipio,
-      comunidad: reporte.comunidad,
-      responsable: reporte.responsable,
-      lat: reporte.lat,
-      lon: reporte.lon,
-      fotos: reporte.fotos,
-      videos: reporte.videos,
-      documentos: reporte.documentos,
-      estadoNombre: reporte.estado.label,
-      sincronizado: true,
-      fechaCreacion: reporte.fechaEvento,
     );
   }
 }

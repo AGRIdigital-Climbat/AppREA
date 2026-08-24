@@ -199,7 +199,7 @@ class ReportePreviewScreen extends StatelessWidget {
 
     return ReporteDocumento(
       titulo: 'REPORTE DE EVENTO ADVERSO',
-      subtitulo: 'REA - SINAGER SAT',
+      subtitulo: 'PRE-EDAN - SINAGER-SAT',
       fechaCabecera: fechaEventoDisplay,
       secciones: secciones,
       footerNota: 'Este reporte sera verificado por el equipo SINAGER-SAT.',

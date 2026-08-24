@@ -1,13 +1,19 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import '../../../config/api_config.dart';
 import '../../../config/theme.dart';
 import '../../../models/edan.dart';
 import '../../../models/usuario.dart';
-import '../../../models/ugr_models.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
+import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
 import '../../../widgets/custom_text_field.dart';
 import 'crear_usuario_screen.dart';
@@ -42,16 +48,9 @@ const Map<String, String> _titulosSeccion = {
 };
 
 class UgrEdanFormScreen extends StatefulWidget {
-  final int? siguienteNumero;
   final Edan? edanAEditar;
-  final UgrReporte? reporteOrigen;
 
-  const UgrEdanFormScreen({super.key, this.siguienteNumero, this.edanAEditar, this.reporteOrigen});
-
-  const UgrEdanFormScreen.desdeReporte({super.key, required UgrReporte reporte})
-      : siguienteNumero = null,
-        edanAEditar = null,
-        reporteOrigen = reporte;
+  const UgrEdanFormScreen({super.key, this.edanAEditar});
 
   @override
   State<UgrEdanFormScreen> createState() => _UgrEdanFormScreenState();
@@ -96,6 +95,11 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   String _tipoEventoNombre = '';
   int? _idUsuarioAlcalde;
   List<Usuario> _usuarios = [];
+  String _errorUsuarios = '';
+
+  // Código EDAN: {codigo_ine}/{año}/{secuencial del municipio}
+  String _codigoIne = '---';
+  int _siguienteNumero = 1;
 
   // 02 · Población
   final _poblacionController = TextEditingController();
@@ -122,52 +126,41 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
 
     if (widget.edanAEditar != null) {
       _cargarEdan(widget.edanAEditar!);
-    } else if (widget.reporteOrigen != null) {
-      _prellenarDesdeReporte(widget.reporteOrigen!);
     }
+
+    _recalcularNumeroEdan();
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final token = AuthService.instance.currentToken;
       if (token?.idMunicipio != null && token?.idProvincia != null && token?.idDepartamento != null) {
         context.read<ReporteProvider>().loadMunicipios(token!.idProvincia!, token.idDepartamento!);
       }
-      try {
-        final idMunicipio = AuthService.instance.currentToken?.idMunicipio;
-        final usuarios = await ApiService.instance.getUsuarios(
-          idMunicipio: idMunicipio,
-          idRol: 8,
-        );
-        if (mounted) setState(() => _usuarios = usuarios);
-      } catch (e) {
-        debugPrint('Error cargando usuarios: $e');
-      }
+      _cargarUsuariosAlcalde();
     });
   }
 
-  void _prellenarDesdeReporte(UgrReporte reporte) {
-    // Datos básicos desde el reporte
-    _edan.idDepartamento = null; // Se llenará con el token
-    _edan.idProvincia = null;
-    _edan.idMunicipio = AuthService.instance.currentToken?.idMunicipio;
-    _edan.municipioNombre = reporte.municipio;
-    
-    // Fecha y hora del evento
-    _fechaEvento = reporte.fechaEvento;
-    _fechaEventoController.text = _fmtFecha(_fechaEvento);
-    final hora = TimeOfDay.fromDateTime(reporte.fechaEvento);
-    _hora12 = ((hora.hour % 12 == 0 ? 12 : hora.hour % 12)).toString().padLeft(2, '0');
-    _ampm = hora.hour >= 12 ? 'PM' : 'AM';
-    
-    // Tipo de evento
-    _tipoEventoNombre = reporte.tipoEvento;
-    final index = _tiposEvento.indexWhere((t) => t == reporte.tipoEvento);
-    if (index != -1) _idTipoEvento = index + 1;
-    
-    // Descripción
-    // Se puede usar para notas adicionales
-    
-    // Coordenadas y comunidad se usarán en la sección 03
-    // Por ahora se deja placeholder que se completará en la sección de localidades
+  Future<void> _cargarUsuariosAlcalde() async {
+    final idMunicipio = AuthService.instance.currentToken?.idMunicipio;
+    if (!ConnectivityService().isConnected) {
+      if (mounted) setState(() => _errorUsuarios = 'Sin conexión a internet');
+      return;
+    }
+    try {
+      final usuarios = await ApiService.instance.getUsuarios(
+        idMunicipio: idMunicipio,
+        idRol: 8,
+      );
+      if (!mounted) return;
+      setState(() {
+        _usuarios = usuarios;
+        _errorUsuarios = '';
+      });
+    } catch (e) {
+      final url =
+          '${ApiConfig.usuariosEndpoint}?id_municipio=${idMunicipio ?? ''}&id_rol=8&skip=0&limit=50';
+      debugPrint('Error cargando usuarios alcalde [$url]: $e');
+      if (mounted) setState(() => _errorUsuarios = ApiService.traducirError(e));
+    }
   }
 
   void _cargarEdan(Edan edan) {
@@ -175,6 +168,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     _edan.idServer = edan.idServer;
     _edan.idEdan = edan.idEdan;
     _edan.codigoEdan = edan.codigoEdan;
+    _edan.idReporte = edan.idReporte;
+    _edan.idUsuario = edan.idUsuario;
+    _edan.esBorrador = edan.esBorrador;
     _edan.idDepartamento = edan.idDepartamento;
     _edan.idProvincia = edan.idProvincia;
     _edan.idMunicipio = edan.idMunicipio;
@@ -197,6 +193,22 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     _edan.idEstado = edan.idEstado;
     _edan.estado = edan.estado;
 
+    // Variables locales para los dropdowns
+    _idDepartamento = edan.idDepartamento;
+    _idProvincia = edan.idProvincia;
+    _idMunicipio = edan.idMunicipio;
+    _idTipoEvento = edan.idTipoEvento;
+    _tipoEventoNombre = edan.tipoEventoNombre ?? '';
+    _idUsuarioAlcalde = edan.idUsuario;
+
+    final rp = context.read<ReporteProvider>();
+    if (_idDepartamento != null) {
+      rp.loadProvincias(_idDepartamento!);
+      if (_idProvincia != null) {
+        rp.loadMunicipios(_idProvincia!, _idDepartamento!);
+      }
+    }
+
     _nombreAlcaldeController.text = edan.nombreAlcalde;
     _fonoAlcaldeController.text = edan.fonoAlcalde;
     if (edan.fechaLlenado.isNotEmpty) {
@@ -212,12 +224,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       } catch (_) {}
     }
     if (edan.horaEvento.isNotEmpty) {
-      final partes = edan.horaEvento.split(':');
-      if (partes.isNotEmpty) {
-        var hora = int.tryParse(partes.first) ?? 12;
-        _ampm = hora >= 12 ? 'PM' : 'AM';
-        _hora12 = (hora % 12 == 0 ? 12 : hora % 12).toString();
-      }
+      _aplicarHora24h(edan.horaEvento);
     }
     _poblacionController.text = edan.totalPoblacionAfectada > 0
         ? edan.totalPoblacionAfectada.toString()
@@ -281,13 +288,13 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       _intDe(_familiasDamnificadasController) > 0;
 
   bool get _s03Completada =>
-      _locConPoblacion.any((l) => l.impactoPoblacion.tieneDatosGlobales);
+      _locConPoblacion.any((l) => l.impactoPoblacion.any((i) => i.tieneDatosGlobales));
 
   bool get _s04Completada =>
       _locConSalud.any((l) =>
           l.establecimientosSalud.any((s) => s.nombreEstablecimiento.trim().isNotEmpty) ||
-          l.necesidadSalud.botiquines ||
-          l.necesidadSalud.numeroPersonas > 0);
+          (l.necesidadSalud?.botiquines ?? false) ||
+          (l.necesidadSalud?.numeroPersonas ?? 0) > 0);
 
   bool get _aplicaNecesidadesSalud {
     final t = _tipoEventoNombre
@@ -309,7 +316,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           l.danosInfraPublica.any((d) => d.tipoEstructura.trim().isNotEmpty));
 
   bool get _s06Completada =>
-      _locConServicios.any((l) => l.serviciosBasicos.algunaSeleccionada);
+      _locConServicios.any((l) => l.serviciosBasicos.any((s) => s.tieneDatos));
 
   bool get _s07Completada =>
       _locConEducacion.any((l) => l.unidadesEducativas.any((u) =>
@@ -328,10 +335,10 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           l.infraProductiva.any((i) => i.tipo.trim().isNotEmpty));
 
   bool get _s10Completada =>
-      _locConProteccion.any((l) => l.proteccion.vulnerables.algunoPositivo);
+      _locConProteccion.any((l) => l.proteccion.any((g) => g.tieneDatos));
 
   bool get _s11Completada =>
-      _locConNecesidades.any((l) => l.necesidadHumanitaria.algunaSeleccionada);
+      _locConNecesidades.any((l) => l.necesidadHumanitaria?.algunaSeleccionada ?? false);
 
   bool get _s13Completada =>
       _edan.responsable.nombre.trim().isNotEmpty &&
@@ -419,10 +426,35 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     }
   }
 
+  Future<void> _recalcularNumeroEdan() async {
+    final municipioId =
+        _idMunicipio ?? AuthService.instance.currentToken?.idMunicipio;
+    if (municipioId == null) return;
+    final db = DatabaseHelper.instance;
+    final rp = context.read<ReporteProvider>();
+    final count =
+        await db.countEdansPorMunicipioAnio(municipioId, DateTime.now().year);
+    var ine = '';
+    final municipio =
+        rp.municipios.where((m) => m.id == municipioId).firstOrNull;
+    if (municipio != null) {
+      ine = municipio.codigoIne;
+    } else {
+      ine = (await db.getCodigoIneMunicipio(municipioId)) ?? '';
+    }
+    if (!mounted) return;
+    setState(() {
+      _codigoIne = ine.isEmpty ? '---' : ine;
+      _siguienteNumero = count + 1;
+    });
+  }
+
   Edan _construirEdan() {
     final anio = DateTime.now().year;
-    _edan.codigoEdan =
-        'EDAN-$anio-${(widget.siguienteNumero ?? 1).toString().padLeft(3, '0')}';
+    if (_edan.codigoEdan.isEmpty && _idMunicipio != null) {
+      _edan.codigoEdan =
+          '$_codigoIne/$anio/${_siguienteNumero.toString().padLeft(3, '0')}';
+    }
     _edan.idTipoEvento = _idTipoEvento;
     _edan.tipoEventoNombre = _tipoEventoNombre.isEmpty ? 'Evento' : _tipoEventoNombre;
     _edan.idDepartamento = _idDepartamento;
@@ -442,32 +474,51 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
 
   Future<void> _revisar() async {
     final edan = _construirEdan();
-    final incompletos = edan.incompletosPorSeccion;
-    if (incompletos.isNotEmpty && mounted) {
-      setState(() => _expandidas.addAll(incompletos.keys));
-      final detalle = incompletos.values
-          .expand((v) => v)
-          .take(3)
-          .join(', ');
-      final restante = incompletos.values
-          .expand((v) => v)
-          .length > 3;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Falta información en: $detalle${restante ? ', …' : ''}. '
-            'La vista previa lo marca en rojo.',
-          ),
-        ),
-      );
-    }
     final confirmado = await Navigator.of(context).push<Edan>(
       MaterialPageRoute(
         builder: (_) => UgrEdanPreviewScreen(edan: edan),
       ),
     );
-    if (confirmado != null && mounted) {
-      Navigator.of(context).pop(confirmado);
+    if (confirmado == null || !mounted) return;
+    
+    // Guardar EDAN confirmado
+    final userId = AuthService.instance.userId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Error: usuario no autenticado'),
+          backgroundColor: AppColors.rechazado,
+        ),
+      );
+      return;
+    }
+    
+    try {
+      confirmado
+        ..estado = 'enviado'
+        ..idEstado = 2
+        ..esBorrador = false;
+      
+      if (confirmado.idLocal != null) {
+        await DatabaseHelper.instance.updateEdan(confirmado);
+      } else {
+        await DatabaseHelper.instance.insertEdan(confirmado, usuarioId: userId);
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('EDAN enviado correctamente'),
+          backgroundColor: AppColors.aprobado,
+        ),
+      );
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al guardar: $e'),
+          backgroundColor: AppColors.rechazado,
+        ),
+      );
     }
   }
 
@@ -573,12 +624,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
 
   Widget _buildHeader(Color primary) {
     final anio = DateTime.now().year;
-    final rp = context.read<ReporteProvider>();
-    final userIdMunicipio = AuthService.instance.currentToken?.idMunicipio;
-    final municipio = userIdMunicipio != null
-        ? rp.municipios.where((m) => m.id == userIdMunicipio).firstOrNull
-        : null;
-    final codigoIne = municipio?.codigoIne ?? '---';
+    final codigo = _edan.codigoEdan.isNotEmpty
+        ? _edan.codigoEdan
+        : '$_codigoIne/$anio/${_siguienteNumero.toString().padLeft(3, '0')}';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(16),
@@ -601,7 +649,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           ),
           const SizedBox(height: 4),
           Text(
-            'N° $codigoIne/$anio/${widget.siguienteNumero ?? 1}',
+            'N° $codigo',
             style: TextStyle(
               fontSize: 24,
               fontWeight: FontWeight.w800,
@@ -634,6 +682,11 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       children: [
         _subtitulo('Ubicación'),
         _buildUbicacion(),
+        if (_edan.idReporte != null) ...[
+          const SizedBox(height: 16),
+          _subtitulo('Reporte vinculado'),
+          _buildReporteVinculado(),
+        ],
         const SizedBox(height: 16),
         _subtitulo('Lugares afectados'),
         if (_edan.localidades.isEmpty)
@@ -727,13 +780,20 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
       builder: (context, rp, _) {
         final catalogo = rp.tiposEvento;
         final nombres = catalogo.isNotEmpty
-            ? catalogo.map((t) => t.nombre).toList()
+            ? (catalogo.map((t) => t.nombre).toList()..sort())
             : _tiposEvento;
+        String? valor = _tipoEventoNombre.isEmpty ? null : _tipoEventoNombre;
+        if (catalogo.isNotEmpty && _idTipoEvento != null) {
+          final porId = catalogo
+              .where((c) => c.idTipoEvento == _idTipoEvento)
+              .firstOrNull;
+          if (porId != null) valor = porId.nombre;
+        }
         return _buildDropdown<String>(
           context: context,
           key: ValueKey('tipoEvento-$_tipoEventoNombre'),
           label: 'Tipo de evento adverso *',
-          value: _tipoEventoNombre.isEmpty ? null : _tipoEventoNombre,
+          value: valor,
           items: nombres
               .map((n) => DropdownMenuItem(value: n, child: Text(n)))
               .toList(),
@@ -755,62 +815,86 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   }
 
   Widget _buildUsuarioAlcalde() {
-    return _buildDropdown<int>(
-      context: context,
-      key: ValueKey('usuarioAlcalde-$_idUsuarioAlcalde'),
-      label: 'Usuario alcalde *',
-      value: _idUsuarioAlcalde,
-      items: [
-        const DropdownMenuItem(value: -1, child: Text('+ Agregar nuevo')),
-        ..._usuarios.map((u) => DropdownMenuItem(
-              value: u.idUsuario,
-              child: Text(u.nombre, overflow: TextOverflow.ellipsis),
-            )),
-      ],
-      hint: _usuarios.isEmpty ? 'Cargando usuarios...' : 'Seleccione usuario',
-      onChanged: (v) async {
-        if (v == -1) {
-          final token = AuthService.instance.currentToken;
-          final nuevoId = await Navigator.push<int>(
-            context,
-            MaterialPageRoute(
-              builder: (_) => CrearUsuarioScreen(
-                idMunicipio: token?.idMunicipio,
-                idProvincia: token?.idProvincia,
-                idDepartamento: token?.idDepartamento,
-              ),
-            ),
-          );
-          if (nuevoId != null && mounted) {
-            try {
-              final usuarios = await ApiService.instance.getUsuarios(
-                idMunicipio: token?.idMunicipio,
-                idRol: 8,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildDropdown<int>(
+          context: context,
+          key: ValueKey('usuarioAlcalde-$_idUsuarioAlcalde'),
+          label: 'Usuario alcalde *',
+          value: _idUsuarioAlcalde,
+          items: [
+            const DropdownMenuItem(value: -1, child: Text('+ Agregar nuevo')),
+            ...(_usuarios.toList()..sort((a, b) => a.nombre.compareTo(b.nombre))).map((u) => DropdownMenuItem(
+                  value: u.idUsuario,
+                  child: Text(u.nombre, overflow: TextOverflow.ellipsis),
+                )),
+          ],
+          etiquetaValorGuardado: _nombreAlcaldeController.text.isNotEmpty
+              ? _nombreAlcaldeController.text
+              : null,
+          hint: _usuarios.isEmpty
+              ? (_errorUsuarios.isNotEmpty
+                  ? 'No se pudieron cargar los usuarios'
+                  : 'Cargando usuarios...')
+              : 'Seleccione usuario',
+          onChanged: (v) async {
+            if (v == -1) {
+              final token = AuthService.instance.currentToken;
+              final nuevoId = await Navigator.push<int>(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => CrearUsuarioScreen(
+                    idMunicipio: token?.idMunicipio,
+                    idProvincia: token?.idProvincia,
+                    idDepartamento: token?.idDepartamento,
+                  ),
+                ),
               );
-              setState(() {
-                _usuarios = usuarios;
-                _idUsuarioAlcalde = nuevoId;
-                final user = usuarios.where((u) => u.idUsuario == nuevoId).firstOrNull;
+              if (nuevoId != null && mounted) {
+                await _cargarUsuariosAlcalde();
+                if (!mounted) return;
+                setState(() {
+                  _idUsuarioAlcalde = nuevoId;
+                  final user = _usuarios.where((u) => u.idUsuario == nuevoId).firstOrNull;
+                  if (user != null) {
+                    _nombreAlcaldeController.text = user.nombre;
+                    _fonoAlcaldeController.text = user.celular ?? '';
+                  }
+                });
+              }
+            } else {
+              setState(() => _idUsuarioAlcalde = v);
+              if (v != null) {
+                final user = _usuarios.where((u) => u.idUsuario == v).firstOrNull;
                 if (user != null) {
                   _nombreAlcaldeController.text = user.nombre;
                   _fonoAlcaldeController.text = user.celular ?? '';
                 }
-              });
-            } catch (e) {
-              debugPrint('Error recargando usuarios: $e');
+              }
             }
-          }
-        } else {
-          setState(() => _idUsuarioAlcalde = v);
-          if (v != null) {
-            final user = _usuarios.where((u) => u.idUsuario == v).firstOrNull;
-            if (user != null) {
-              _nombreAlcaldeController.text = user.nombre;
-              _fonoAlcaldeController.text = user.celular ?? '';
-            }
-          }
-        }
-      },
+          },
+        ),
+        if (_errorUsuarios.isNotEmpty && _usuarios.isEmpty) ...[
+          const SizedBox(height: 8),
+          InkWell(
+            onTap: _cargarUsuariosAlcalde,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 4),
+              child: Text(
+                'No se pudo cargar la lista de alcaldes:\n$_errorUsuarios\n\nToca aquí para reintentar.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.error,
+                  decoration: TextDecoration.underline,
+                  decorationColor: AppColors.error,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
     );
   }
 
@@ -852,10 +936,17 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     borderSide: BorderSide(color: primary, width: 2),
                   ),
                 ),
-                items: List.generate(12, (i) {
-                  final v = (i + 1).toString().padLeft(2, '0');
-                  return DropdownMenuItem(value: v, child: Text('$v:00'));
-                }),
+                items: _itemsConValor<String>(
+                  List.generate(12, (i) {
+                    final v = (i + 1).toString().padLeft(2, '0');
+                    return DropdownMenuItem(value: v, child: Text('$v:00'));
+                  }),
+                  _hora12,
+                ),
+                hint: const Text(
+                  'Seleccione hora',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
                 onChanged: (v) => setState(() => _hora12 = v ?? _hora12),
               ),
             ),
@@ -906,9 +997,10 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               key: ValueKey('departamento-$_idDepartamento'),
               label: 'Departamento *',
               value: _idDepartamento,
-              items: rp.departamentos
+              items: (rp.departamentos.toList()..sort((a, b) => a.nombre.compareTo(b.nombre)))
                   .map((d) => DropdownMenuItem(value: d.id, child: Text(d.nombre)))
                   .toList(),
+              etiquetaValorGuardado: _edan.departamentoNombre,
               hint: 'Seleccione departamento',
               onChanged: (v) {
                 setState(() {
@@ -928,9 +1020,10 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                 key: ValueKey('provincia-$_idProvincia'),
                 label: 'Provincia *',
                 value: _idProvincia,
-                items: rp.provincias
+                items: (rp.provincias.toList()..sort((a, b) => a.nombre.compareTo(b.nombre)))
                     .map((p) => DropdownMenuItem(value: p.id, child: Text(p.nombre)))
                     .toList(),
+                etiquetaValorGuardado: _edan.provinciaNombre,
                 hint: 'Seleccione provincia',
                 onChanged: (v) {
                   setState(() {
@@ -951,11 +1044,15 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                 key: ValueKey('municipio-$_idMunicipio'),
                 label: 'Municipio *',
                 value: _idMunicipio,
-                items: rp.municipios
+                items: (rp.municipios.toList()..sort((a, b) => a.nombre.compareTo(b.nombre)))
                     .map((m) => DropdownMenuItem(value: m.id, child: Text(m.nombre)))
                     .toList(),
+                etiquetaValorGuardado: _edan.municipioNombre,
                 hint: 'Seleccione municipio',
-                onChanged: (v) => setState(() => _idMunicipio = v),
+                onChanged: (v) {
+                  setState(() => _idMunicipio = v);
+                  _recalcularNumeroEdan();
+                },
               ),
           ],
         );
@@ -978,6 +1075,10 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         ),
       ],
     );
+  }
+
+  Widget _buildReporteVinculado() {
+    return const SizedBox.shrink();
   }
 
   // ---------- 02 Población ----------
@@ -1023,9 +1124,9 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     final locs = _locConPoblacion;
     if (locs.isEmpty) return const SizedBox.shrink();
 
-    final totalF = locs.fold<int>(0, (acc, l) => acc + l.impactoPoblacion.fallecidos);
-    final totalH = locs.fold<int>(0, (acc, l) => acc + l.impactoPoblacion.heridos);
-    final totalD = locs.fold<int>(0, (acc, l) => acc + l.impactoPoblacion.desaparecidos);
+    final totalF = locs.fold<int>(0, (acc, l) => acc + (l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0].fallecidos : 0));
+    final totalH = locs.fold<int>(0, (acc, l) => acc + (l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0].heridos : 0));
+    final totalD = locs.fold<int>(0, (acc, l) => acc + (l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0].desaparecidos : 0));
 
     return _SeccionEdan(
       key: _sectionKeys['03'],
@@ -1045,7 +1146,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
             index: i,
             nombre: l.etiquetaLugar,
             children: [
-              ...l.impactoPoblacion.gruposEtarios.asMap().entries.map((ge) {
+              ...(l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0].gruposEtarios.asMap().entries : <MapEntry<int, EdanGrupoEtario>>[]).map((ge) {
                 return _FilaGrupoEtarioAutonomo(
                   titulo: ge.value.rango,
                   grupo: ge.value,
@@ -1075,31 +1176,38 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
             children: [
               _SiNoAutonomo(
                 label: 'Búsqueda y rescate',
-                valor: l.necesidadPrimeraRespuesta.busqueda,
-                onValor: (v) => setState(
-                    () => l.necesidadPrimeraRespuesta.busqueda = v),
+                valor: l.necesidadPrimeraRespuesta?.busqueda ?? false,
+                onValor: (v) => setState(() {
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta!.busqueda = v;
+                }),
               ),
               const SizedBox(height: 8),
               _SiNoAutonomo(
                 label: 'Salvamento',
-                valor: l.necesidadPrimeraRespuesta.salvamento,
-                onValor: (v) => setState(
-                    () => l.necesidadPrimeraRespuesta.salvamento = v),
+                valor: l.necesidadPrimeraRespuesta?.salvamento ?? false,
+                onValor: (v) => setState(() {
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta!.salvamento = v;
+                }),
               ),
               const SizedBox(height: 8),
               _SiNoAutonomo(
                 label: 'Evacuación',
-                valor: l.necesidadPrimeraRespuesta.evacuacion,
-                onValor: (v) => setState(
-                    () => l.necesidadPrimeraRespuesta.evacuacion = v),
+                valor: l.necesidadPrimeraRespuesta?.evacuacion ?? false,
+                onValor: (v) => setState(() {
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta!.evacuacion = v;
+                }),
               ),
               const SizedBox(height: 8),
               _CampoAutonomo(
                 label: 'Observaciones',
-                valor: l.necesidadPrimeraRespuesta.observaciones,
+                valor: l.necesidadPrimeraRespuesta?.observaciones ?? '',
                 maxLines: 2,
                 onChanged: (v) {
-                  l.necesidadPrimeraRespuesta.observaciones = v;
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta!.observaciones = v;
                   setState(() {});
                 },
               ),
@@ -1111,12 +1219,13 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   }
 
   void _sincronizarImpacto(EdanLocalidad l) {
-    final ip = l.impactoPoblacion;
-    ip.fallecidos =
-        ip.gruposEtarios.fold<int>(0, (acc, g) => acc + g.fallecidos);
+    if (l.impactoPoblacion.isEmpty) {
+      l.impactoPoblacion.add(EdanImpactoPoblacion());
+    }
+    final ip = l.impactoPoblacion[0];
+    ip.fallecidos = ip.gruposEtarios.fold<int>(0, (acc, g) => acc + g.fallecidos);
     ip.heridos = ip.gruposEtarios.fold<int>(0, (acc, g) => acc + g.heridos);
-    ip.desaparecidos =
-        ip.gruposEtarios.fold<int>(0, (acc, g) => acc + g.desaparecidos);
+    ip.desaparecidos = ip.gruposEtarios.fold<int>(0, (acc, g) => acc + g.desaparecidos);
     ip.grupoEtario = 'Total';
   }
 
@@ -1178,43 +1287,60 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                 const SizedBox(height: 12),
                 _subtitulo('4.2 Necesidades en salud'),
                 _GrupoDeCampos(
-                  titulo: 'Botiquín',
-                  subtitulo: 'número de personas que requieren atención inmediata',
+                  titulo: 'Necesidades en salud',
                   children: [
+                    const Text(
+                      'Botiquín',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Número de personas que requieren atención inmediata',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     _NumCampoAutonomo(
                       label: 'Número de personas',
-                      valor: l.necesidadSalud.numeroPersonas > 0
-                          ? '${l.necesidadSalud.numeroPersonas}'
+                      valor: l.necesidadSalud?.numeroPersonas != null && l.necesidadSalud!.numeroPersonas > 0
+                          ? '${l.necesidadSalud!.numeroPersonas}'
                           : '',
                       onChanged: (v) {
-                        l.necesidadSalud.numeroPersonas =
-                            int.tryParse(v.trim()) ?? 0;
-                        l.necesidadSalud.botiquines =
-                            l.necesidadSalud.numeroPersonas > 0;
+                        l.necesidadSalud ??= EdanNecesidadSalud();
+                        l.necesidadSalud!.numeroPersonas = int.tryParse(v.trim()) ?? 0;
+                        l.necesidadSalud!.botiquines = l.necesidadSalud!.numeroPersonas > 0;
+                        setState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _CampoAutonomo(
+                      label: 'Otras necesidades',
+                      valor: l.necesidadSalud?.otrasNecesidades ?? '',
+                      maxLines: 2,
+                      onChanged: (v) {
+                        l.necesidadSalud ??= EdanNecesidadSalud();
+                        l.necesidadSalud!.otrasNecesidades = v;
+                        setState(() {});
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    _CampoAutonomo(
+                      label: 'Observaciones',
+                      valor: l.necesidadSalud?.observaciones ?? '',
+                      maxLines: 2,
+                      onChanged: (v) {
+                        l.necesidadSalud ??= EdanNecesidadSalud();
+                        l.necesidadSalud!.observaciones = v;
                         setState(() {});
                       },
                     ),
                   ],
-                ),
-                const SizedBox(height: 12),
-                _CampoAutonomo(
-                  label: 'Otras necesidades',
-                  valor: l.necesidadSalud.otrasNecesidades,
-                  maxLines: 2,
-                  onChanged: (v) {
-                    l.necesidadSalud.otrasNecesidades = v;
-                    setState(() {});
-                  },
-                ),
-                const SizedBox(height: 12),
-                _CampoAutonomo(
-                  label: 'Observaciones',
-                  valor: l.necesidadSalud.observaciones,
-                  maxLines: 2,
-                  onChanged: (v) {
-                    l.necesidadSalud.observaciones = v;
-                    setState(() {});
-                  },
                 ),
               ],
             ],
@@ -1228,7 +1354,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
           if (_aplicaNecesidadesSalud)
             (
               'Número de personas',
-              '${locs.fold<int>(0, (a, l) => a + l.necesidadSalud.numeroPersonas)}'
+              '${locs.fold<int>(0, (a, l) => a + (l.necesidadSalud?.numeroPersonas ?? 0))}'
             ),
         ]),
       ],
@@ -1358,8 +1484,8 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
             nombre: l.etiquetaLugar,
             children: [
               _subtitulo('6.1 Servicios afectados'),
-              ...List.generate(l.serviciosBasicos.servicios.length, (j) {
-                final s = l.serviciosBasicos.servicios[j];
+              ...List.generate(l.serviciosBasicos.length, (j) {
+                final s = l.serviciosBasicos[j];
                 return Padding(
                   key: ObjectKey(s),
                   padding: const EdgeInsets.only(bottom: 10),
@@ -1376,7 +1502,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         _CajaTotales(valores: [
           (
             'Localidades',
-            '${locs.fold<int>(0, (a, l) => a + (l.serviciosBasicos.algunaSeleccionada ? 1 : 0))}'
+            '${locs.fold<int>(0, (a, l) => a + (l.serviciosBasicos.any((s) => s.tieneDatos) ? 1 : 0))}'
           ),
         ]),
       ],
@@ -1668,6 +1794,8 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   Widget _seccion10() {
     final locs = _locConProteccion;
     if (locs.isEmpty) return const SizedBox.shrink();
+    final rp = context.watch<ReporteProvider>();
+    final catalogo = rp.gruposVulnerables;
 
     return _SeccionEdan(
       key: _sectionKeys['10'],
@@ -1681,68 +1809,44 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
         ...locs.asMap().entries.map((entry) {
           final i = entry.key;
           final l = entry.value;
-          final v = l.proteccion.vulnerables;
           return _BloqueLocalidad(
             key: ObjectKey(l),
             index: i,
             nombre: l.etiquetaLugar,
             children: [
-              _FilaProteccionRow(
-                titulo: 'Niñas y niños',
-                valor: v.ninos,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _FilaProteccionRow(
-                titulo: 'Adolescentes',
-                valor: v.adolescentes,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _FilaProteccionRow(
-                titulo: 'Mujeres lactantes',
-                valor: v.mujeresLactantes,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _FilaProteccionRow(
-                titulo: 'Mujeres embarazadas',
-                valor: v.mujeresEmbarazadas,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _FilaProteccionRow(
-                titulo: 'Adultos mayores',
-                valor: v.adultosMayores,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _FilaProteccionRow(
-                titulo: 'Personas con discapacidad',
-                valor: v.personasDiscapacidad,
-                onChanged: () => setState(() {}),
-              ),
-              const SizedBox(height: 10),
-              _FilaProteccionRow(
-                titulo: 'Personas con enfermedad crónica',
-                valor: v.personasEnfermedad,
-                onChanged: () => setState(() {}),
-              ),
+              for (var j = 0; j < l.proteccion.length; j++)
+                if (j > 0) ...[
+                  const SizedBox(height: 10),
+                  _FilaProteccionRow(
+                    titulo: j < catalogo.length
+                        ? catalogo[j].nombre
+                        : 'Grupo ${j + 1}',
+                    valor: l.proteccion[j],
+                    onChanged: () => setState(() {}),
+                  ),
+                ] else
+                  _FilaProteccionRow(
+                    titulo: catalogo.isNotEmpty
+                        ? catalogo[0].nombre
+                        : 'Grupo 1',
+                    valor: l.proteccion[0],
+                    onChanged: () => setState(() {}),
+                  ),
             ],
           );
         }),
         _CajaTotales(valores: [
           (
             'Mujeres',
-            '${locs.fold<int>(0, (a, l) => a + l.proteccion.vulnerables.totalMujeres)}'
+            '${locs.fold<int>(0, (a, l) => a + l.proteccion.fold<int>(0, (x, g) => x + g.mujeres))}'
           ),
           (
             'Hombres',
-            '${locs.fold<int>(0, (a, l) => a + l.proteccion.vulnerables.totalHombres)}'
+            '${locs.fold<int>(0, (a, l) => a + l.proteccion.fold<int>(0, (x, g) => x + g.hombres))}'
           ),
           (
             'Total',
-            '${locs.fold<int>(0, (a, l) => a + l.proteccion.vulnerables.totalGeneral)}'
+            '${locs.fold<int>(0, (a, l) => a + l.proteccion.fold<int>(0, (x, g) => x + g.total))}'
           ),
         ]),
       ],
@@ -1773,7 +1877,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
               key: ObjectKey(l),
               index: i,
               nombre: l.etiquetaLugar,
-              necesidad: l.necesidadHumanitaria,
+              necesidad: l.necesidadHumanitaria ?? EdanNecesidadHumanitaria(),
               onChanged: () => setState(() {}),
             ),
           );
@@ -1912,7 +2016,8 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     final edan = _construirEdan();
     edan
       ..estado = 'borrador'
-      ..idEstado = 1;
+      ..idEstado = 1
+      ..esBorrador = true;
 
     final userId = AuthService.instance.userId;
     if (userId == null) {
@@ -1964,13 +2069,21 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
   }
 
   String _horaIso() {
-    var h = int.parse(_hora12);
+    var h = int.tryParse(_hora12) ?? 0;
     if (_ampm == 'PM') {
       if (h != 12) h += 12;
     } else if (h == 12) {
       h = 0;
     }
     return '${h.toString().padLeft(2, '0')}:00';
+  }
+
+  void _aplicarHora24h(String horaEvento) {
+    final partes = horaEvento.split(':');
+    if (partes.isEmpty) return;
+    final hora = int.tryParse(partes.first) ?? 12;
+    _ampm = hora >= 12 ? 'PM' : 'AM';
+    _hora12 = (hora % 12 == 0 ? 12 : hora % 12).toString().padLeft(2, '0');
   }
 }
 
@@ -1986,6 +2099,226 @@ Widget _subtitulo(String text) {
       ),
     ),
   );
+}
+
+class _BotonSacarFoto extends StatefulWidget {
+  final List<EdanFoto> fotos;
+  final VoidCallback onChanged;
+  final String? fotografia;
+  final double coordenadaLat;
+  final double coordenadaLon;
+
+  const _BotonSacarFoto({
+    required this.fotos,
+    required this.onChanged,
+    this.fotografia,
+    this.coordenadaLat = 0,
+    this.coordenadaLon = 0,
+  });
+
+  @override
+  State<_BotonSacarFoto> createState() => _BotonSacarFotoState();
+}
+
+class _BotonSacarFotoState extends State<_BotonSacarFoto> {
+  bool _cargando = false;
+  String? _advertencia;
+
+  Future<void> _sacarFoto() async {
+    if (_cargando) return;
+    setState(() {
+      _cargando = true;
+      _advertencia = null;
+    });
+
+    try {
+      final camOk = await Permission.camera.request().isGranted;
+      final locOk = await Permission.location.request().isGranted;
+      if (!camOk || !locOk) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Se necesitan permisos de cámara y ubicación.'),
+              backgroundColor: AppColors.error,
+            ),
+          );
+          setState(() => _cargando = false);
+        }
+        return;
+      }
+
+      Position posicionFinal;
+      try {
+        posicionFinal = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            timeLimit: Duration(seconds: 15),
+          ),
+        );
+      } catch (_) {
+        posicionFinal = await Geolocator.getLastKnownPosition() ??
+            (await Geolocator.getCurrentPosition());
+      }
+
+      if (posicionFinal.accuracy > 30) {
+        if (mounted) {
+          setState(() {
+            _advertencia = 'Precisión baja (${posicionFinal.accuracy.toStringAsFixed(0)}m). Intentando mejorar...';
+          });
+        }
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            distanceFilter: 0,
+          ),
+        ).listen((pos) {
+          if (pos.accuracy <= 30) {
+            posicionFinal = pos;
+            if (mounted) {
+              setState(() {
+                _advertencia = 'Precisión mejorada: ${pos.accuracy.toStringAsFixed(0)}m';
+              });
+            }
+          }
+        });
+      }
+
+      final picker = ImagePicker();
+      final imagen = await picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+        preferredCameraDevice: CameraDevice.rear,
+      );
+
+      if (imagen == null) {
+        if (mounted) setState(() => _cargando = false);
+        return;
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final nombreArchivo = 'edan_${DateTime.now().millisecondsSinceEpoch}.jpg';
+      final archivo = File('${dir.path}/$nombreArchivo');
+      await File(imagen.path).copy(archivo.path);
+
+      widget.fotos.clear();
+      widget.fotos.add(EdanFoto(
+        ruta: archivo.path,
+        latitud: posicionFinal.latitude,
+        longitud: posicionFinal.longitude,
+        precision: posicionFinal.accuracy,
+      ));
+
+      if (mounted) {
+        widget.onChanged();
+        setState(() {
+          _cargando = false;
+          _advertencia = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+        setState(() => _cargando = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primaria = PaletteScope.of(context).primary;
+    final foto = widget.fotos.isNotEmpty ? widget.fotos.first : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (_advertencia != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              _advertencia!,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.pending,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ),
+        if (foto != null)
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.surface,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: AppColors.divider),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.file(
+                    File(foto.ruta),
+                    height: 120,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(Icons.location_on, size: 12, color: AppColors.textSecondary),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        '${foto.latitud.toStringAsFixed(4)}, ${foto.longitud.toStringAsFixed(4)}',
+                        style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Text(
+                      '±${foto.precision.toStringAsFixed(0)}m',
+                      style: const TextStyle(fontSize: 10, color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () {
+                        widget.fotos.clear();
+                        widget.onChanged();
+                        setState(() => _advertencia = null);
+                      },
+                      child: const Icon(Icons.delete_outline, size: 16, color: AppColors.rechazado),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          )
+        else
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: _cargando ? null : _sacarFoto,
+              icon: _cargando
+                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.camera_alt_outlined, size: 18),
+              label: Text(_cargando ? 'Obteniendo GPS...' : 'Sacar foto'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: primaria,
+                side: BorderSide(color: primaria, width: 1.5),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class _GrupoDeCampos extends StatelessWidget {
@@ -2040,6 +2373,24 @@ class _GrupoDeCampos extends StatelessWidget {
   }
 }
 
+List<DropdownMenuItem<T>> _itemsConValor<T>(
+  List<DropdownMenuItem<T>> items,
+  T? value, {
+  String? etiqueta,
+}) {
+  if (value == null || items.any((i) => i.value == value)) return items;
+  return <DropdownMenuItem<T>>[
+    DropdownMenuItem<T>(
+      value: value,
+      child: Text(
+        etiqueta ?? '$value',
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
+    ),
+    ...items,
+  ];
+}
+
 Widget _buildDropdown<T>({
   required BuildContext context,
   required Key key,
@@ -2048,8 +2399,14 @@ Widget _buildDropdown<T>({
   required List<DropdownMenuItem<T>> items,
   required ValueChanged<T?> onChanged,
   String? hint,
+  String? etiquetaValorGuardado,
 }) {
   final primary = PaletteScope.of(context).primary;
+  final itemsFinal = _itemsConValor<T>(
+    items,
+    value,
+    etiqueta: etiquetaValorGuardado,
+  );
   return Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -2083,7 +2440,7 @@ Widget _buildDropdown<T>({
             borderSide: BorderSide(color: primary, width: 2),
           ),
         ),
-        items: items,
+        items: itemsFinal,
         onChanged: onChanged,
         hint: hint != null
             ? Text(
@@ -2556,13 +2913,6 @@ class _TarjetaLocalidad extends StatefulWidget {
 }
 
 class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
-  static const List<String> _tipos = [
-    'Comunidad',
-    'Ayllu',
-    'Capitania',
-    'Cabildo',
-  ];
-
   late final TextEditingController _nombre;
 
   @override
@@ -2612,20 +2962,46 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
             ],
           ),
           const SizedBox(height: 8),
-          _buildDropdown(
-            context: context,
-            key: ValueKey('tipoLocalidad-${widget.index}'),
-            label: 'Tipo de lugar',
-            value: localidad.tipoLocalidad.isEmpty
-                ? null
-                : localidad.tipoLocalidad,
-            items: _tipos
-                .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                .toList(),
-            hint: 'Seleccione tipo',
-            onChanged: (v) {
-              localidad.tipoLocalidad = v ?? '';
-              widget.onChanged();
+          Consumer<ReporteProvider>(
+            builder: (context, rp, _) {
+              final catalogo = rp.tiposLocalidad;
+              final items = <DropdownMenuItem<String>>[];
+              if (catalogo.isNotEmpty) {
+                final ordenado = catalogo.toList()..sort((a, b) => a.nombre.compareTo(b.nombre));
+                items.addAll(ordenado.map(
+                  (t) => DropdownMenuItem(value: t.nombre, child: Text(t.nombre)),
+                ));
+              } else {
+                final ordenado = kTiposLocalidadId.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
+                items.addAll(ordenado.map(
+                  (e) => DropdownMenuItem(value: e.key, child: Text(e.key)),
+                ));
+              }
+              String? valor =
+                  localidad.tipoLocalidad.isEmpty ? null : localidad.tipoLocalidad;
+              if (valor != null) {
+                final canon = tipoLocalidadNombreCanonico(valor);
+                if (canon != null && canon != valor) {
+                  valor = canon;
+                }
+                if (!items.any((m) => m.value == valor)) {
+                  items.add(
+                      DropdownMenuItem(value: valor, child: Text(valor)));
+                }
+              }
+              return _buildDropdown(
+                context: context,
+                key: ValueKey('tipoLocalidad-${widget.index}'),
+                label: 'Tipo de lugar',
+                value: valor,
+                items: items,
+                hint: 'Seleccione tipo',
+                onChanged: (v) {
+                  localidad.tipoLocalidad = v ?? '';
+                  localidad.idTipoLocalidad = tipoLocalidadIdPorNombre(v);
+                  widget.onChanged();
+                },
+              );
             },
           ),
           const SizedBox(height: 12),
@@ -2651,6 +3027,9 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
           const SizedBox(height: 6),
           _impactoCheck(localidad.impPoblacion, 'Población', (v) {
             localidad.impPoblacion = v;
+            if (v && localidad.impactoPoblacion.isEmpty) {
+              localidad.impactoPoblacion.add(EdanImpactoPoblacion());
+            }
             widget.onChanged();
           }),
           _impactoCheck(localidad.impSalud, 'Salud', (v) {
@@ -2679,6 +3058,11 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
           }),
           _impactoCheck(localidad.impProteccion, 'Protección', (v) {
             localidad.impProteccion = v;
+            if (v && localidad.proteccion.isEmpty) {
+              final catalogo = context.read<ReporteProvider>().gruposVulnerables;
+              localidad.proteccion = EdanLocalidad.proteccionDesdeCatalogo(
+                  catalogo.map((c) => {'id_grupo_vulnerable': c.idGrupoVulnerable, 'nombre': c.nombre}).toList());
+            }
             widget.onChanged();
           }),
           _impactoCheck(localidad.impNecesidades, 'Necesidades humanitarias', (v) {
@@ -3337,9 +3721,16 @@ class _FilaSaludRowState extends State<_FilaSaludRow> {
                       color: PaletteScope.of(context).primary, width: 2),
                 ),
               ),
-              items: _nivelesAtencion
-                  .map((n) => DropdownMenuItem(value: n, child: Text(n)))
-                  .toList(),
+              items: _itemsConValor<String>(
+                _nivelesAtencion
+                    .map((n) => DropdownMenuItem(value: n, child: Text(n)))
+                    .toList(),
+                valor.nivelAtencion.isEmpty ? null : valor.nivelAtencion,
+              ),
+              hint: const Text(
+                'Seleccione nivel',
+                style: TextStyle(color: AppColors.textSecondary),
+              ),
               onChanged: (v) {
                 valor.nivelAtencion = v ?? '';
                 widget.onChanged();
@@ -3415,6 +3806,11 @@ class _FilaSaludRowState extends State<_FilaSaludRow> {
             ),
           ],
         ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+        ),
       ],
     );
   }
@@ -3440,7 +3836,6 @@ class _FilaVialRow extends StatefulWidget {
 }
 
 class _FilaVialRowState extends State<_FilaVialRow> {
-  late final TextEditingController _viaPuente = TextEditingController(text: widget.valor.viaPuente);
   late final TextEditingController _tramo = TextEditingController(text: widget.valor.tramo);
   late final TextEditingController _km = TextEditingController(
       text: widget.valor.kmDanio > 0 ? '${widget.valor.kmDanio}' : '');
@@ -3449,7 +3844,6 @@ class _FilaVialRowState extends State<_FilaVialRow> {
 
   @override
   void dispose() {
-    _viaPuente.dispose();
     _tramo.dispose();
     _km.dispose();
     _necesidades.dispose();
@@ -3460,23 +3854,43 @@ class _FilaVialRowState extends State<_FilaVialRow> {
   @override
   Widget build(BuildContext context) {
     final valor = widget.valor;
+    final esVia = valor.viaPuente.trim().toLowerCase() == 'vía' ||
+        valor.viaPuente.trim().toLowerCase() == 'via';
+    final esPuente = valor.viaPuente.trim().toLowerCase() == 'puente';
     return _RowCard(
       titulo: widget.titulo,
       puedeEliminar: widget.puedeEliminar,
       onEliminar: widget.onEliminar,
       children: [
-        _campo(
-          label: 'Vía o puente',
-          controller: _viaPuente,
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) {
-            valor.viaPuente = v;
-            widget.onChanged();
-          },
+        Row(
+          children: [
+            Expanded(
+              child: _checkInline(
+                value: esVia,
+                label: 'Vía',
+                onChanged: (v) {
+                  if (!v) return;
+                  setState(() => valor.viaPuente = 'Vía');
+                  widget.onChanged();
+                },
+              ),
+            ),
+            Expanded(
+              child: _checkInline(
+                value: esPuente,
+                label: 'Puente',
+                onChanged: (v) {
+                  if (!v) return;
+                  setState(() => valor.viaPuente = 'Puente');
+                  widget.onChanged();
+                },
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
         _campo(
-          label: 'Tramo / km',
+          label: 'Tramo / Tramo',
           controller: _tramo,
           onChanged: (v) {
             valor.tramo = v;
@@ -3535,6 +3949,11 @@ class _FilaVialRowState extends State<_FilaVialRow> {
             valor.observaciones = v;
             widget.onChanged();
           },
+        ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
         ),
       ],
     );
@@ -3721,6 +4140,11 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
             valor.observaciones = v;
             widget.onChanged();
           },
+        ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
         ),
       ],
     );
@@ -3962,6 +4386,11 @@ class _FilaEduRowState extends State<_FilaEduRow> {
             widget.onChanged();
           },
         ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+        ),
       ],
     );
   }
@@ -4102,6 +4531,11 @@ class _FilaViviendaRowState extends State<_FilaViviendaRow> {
             widget.onChanged();
           },
         ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+        ),
       ],
     );
   }
@@ -4127,7 +4561,6 @@ class _FilaAgriculturaRow extends StatefulWidget {
 }
 
 class _FilaAgriculturaRowState extends State<_FilaAgriculturaRow> {
-  late final TextEditingController _tipo = TextEditingController(text: widget.valor.tipoCultivo);
   late final TextEditingController _afectadas = TextEditingController(text: widget.valor.hectareasAfectadas > 0 ? '${widget.valor.hectareasAfectadas}' : '');
   late final TextEditingController _perdidas = TextEditingController(text: widget.valor.hectareasPerdidas > 0 ? '${widget.valor.hectareasPerdidas}' : '');
   late final TextEditingController _necesidades = TextEditingController(text: widget.valor.necesidadesInmediatas);
@@ -4135,7 +4568,6 @@ class _FilaAgriculturaRowState extends State<_FilaAgriculturaRow> {
 
   @override
   void dispose() {
-    _tipo.dispose();
     _afectadas.dispose();
     _perdidas.dispose();
     _necesidades.dispose();
@@ -4146,20 +4578,42 @@ class _FilaAgriculturaRowState extends State<_FilaAgriculturaRow> {
   @override
   Widget build(BuildContext context) {
     final valor = widget.valor;
+    final rp = context.watch<ReporteProvider>();
+    final cultivos = rp.cultivos;
     return _RowCard(
       titulo: widget.titulo,
       puedeEliminar: widget.puedeEliminar,
       onEliminar: widget.onEliminar,
       children: [
-        _campo(
-          label: 'Tipo de cultivo',
-          controller: _tipo,
-          hint: 'Ej: Maíz, Papa, Quinua...',
-          textCapitalization: TextCapitalization.words,
-          onChanged: (v) {
-            valor.tipoCultivo = v;
-            widget.onChanged();
-          },
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Tipo de cultivo',
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<int>(
+              value: cultivos.any((c) => c.idCultivo == valor.idCultivo) ? valor.idCultivo : null,
+              isExpanded: true,
+              isDense: true,
+              hint: const Text('Seleccione cultivo'),
+              items: (cultivos.toList()..sort((a, b) => a.nombre.compareTo(b.nombre))).map((c) => DropdownMenuItem(
+                value: c.idCultivo,
+                child: Text(c.nombre),
+              )).toList(),
+              onChanged: (v) {
+                if (v != null) {
+                  final seleccion = cultivos.firstWhere((c) => c.idCultivo == v);
+                  valor.idCultivo = v;
+                  valor.tipoCultivo = seleccion.nombre;
+                } else {
+                  valor.idCultivo = null;
+                  valor.tipoCultivo = '';
+                }
+                widget.onChanged();
+              },
+            ),
+          ),
         ),
         const SizedBox(height: 12),
         Row(
@@ -4207,6 +4661,11 @@ class _FilaAgriculturaRowState extends State<_FilaAgriculturaRow> {
             widget.onChanged();
           },
         ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
+        ),
       ],
     );
   }
@@ -4232,7 +4691,6 @@ class _FilaPecuarioRow extends StatefulWidget {
 }
 
 class _FilaPecuarioRowState extends State<_FilaPecuarioRow> {
-  late final TextEditingController _especie = TextEditingController(text: widget.valor.especie);
   late final TextEditingController _raza = TextEditingController(text: widget.valor.raza);
   late final TextEditingController _afectados = TextEditingController(text: widget.valor.animalesAfectados > 0 ? '${widget.valor.animalesAfectados}' : '');
   late final TextEditingController _muertos = TextEditingController(text: widget.valor.animalesMuertos > 0 ? '${widget.valor.animalesMuertos}' : '');
@@ -4240,7 +4698,6 @@ class _FilaPecuarioRowState extends State<_FilaPecuarioRow> {
 
   @override
   void dispose() {
-    _especie.dispose();
     _raza.dispose();
     _afectados.dispose();
     _muertos.dispose();
@@ -4251,6 +4708,8 @@ class _FilaPecuarioRowState extends State<_FilaPecuarioRow> {
   @override
   Widget build(BuildContext context) {
     final valor = widget.valor;
+    final rp = context.watch<ReporteProvider>();
+    final grupos = rp.pecuarioGrupos;
     return _RowCard(
       titulo: widget.titulo,
       puedeEliminar: widget.puedeEliminar,
@@ -4259,15 +4718,35 @@ class _FilaPecuarioRowState extends State<_FilaPecuarioRow> {
         Row(
           children: [
             Expanded(
-              child: _campo(
-                label: 'Especie',
-                controller: _especie,
-                hint: 'Ej: Bovino, Ovino...',
-                textCapitalization: TextCapitalization.words,
-                onChanged: (v) {
-                  valor.especie = v;
-                  widget.onChanged();
-                },
+              child: InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Especie',
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<int>(
+                    value: grupos.any((g) => g.idPecuarioGrupo == valor.idEspecie) ? valor.idEspecie : null,
+                    isExpanded: true,
+                    isDense: true,
+                    hint: const Text('Seleccione especie'),
+                    items: (grupos.toList()..sort((a, b) => a.nombre.compareTo(b.nombre))).map((g) => DropdownMenuItem(
+                      value: g.idPecuarioGrupo,
+                      child: Text(g.nombre),
+                    )).toList(),
+                    onChanged: (v) {
+                      if (v != null) {
+                        final seleccion = grupos.firstWhere((g) => g.idPecuarioGrupo == v);
+                        valor.idEspecie = v;
+                        valor.especie = seleccion.nombre;
+                      } else {
+                        valor.idEspecie = null;
+                        valor.especie = '';
+                      }
+                      widget.onChanged();
+                    },
+                  ),
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -4319,6 +4798,11 @@ class _FilaPecuarioRowState extends State<_FilaPecuarioRow> {
             valor.necesidadesInmediatas = v;
             widget.onChanged();
           },
+        ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
         ),
       ],
     );
@@ -4431,6 +4915,11 @@ class _FilaInfraProdRowState extends State<_FilaInfraProdRow> {
             }
             widget.onChanged();
           },
+        ),
+        const SizedBox(height: 12),
+        _BotonSacarFoto(
+          fotos: valor.fotos,
+          onChanged: widget.onChanged,
         ),
       ],
     );

@@ -65,6 +65,9 @@ class MunicipioGeojson {
       if (lng.isNaN || lat.isNaN || lng.isInfinite || lat.isInfinite) {
         return null;
       }
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        return null;
+      }
       points.add(LatLng(lat, lng));
     }
     return points;

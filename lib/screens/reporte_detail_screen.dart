@@ -3,89 +3,46 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../config/api_config.dart';
 import '../config/theme.dart';
 import '../models/reporte.dart';
 import '../models/reporte_offline.dart';
-import '../models/ugr_models.dart';
 import '../providers/reporte_provider.dart';
-import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../widgets/reporte_documento.dart';
 import 'reporte_detalle_data.dart';
 import 'reporte_form_screen.dart';
-import 'role_screens/ugr/ugr_edan_form_screen.dart';
 import 'role_screens/ugr/ugr_evento.dart';
 
 class ReporteDetailScreen extends StatefulWidget {
   final ReporteOffline? reporte;
   final Reporte? reporteServer;
-  final UgrReporte? reporteUgr;
 
   const ReporteDetailScreen({super.key, required this.reporte})
-      : reporteServer = null,
-        reporteUgr = null;
+      : reporteServer = null;
 
   const ReporteDetailScreen.server({super.key, required Reporte reporte})
       : reporte = null,
-        reporteServer = reporte,
-        reporteUgr = null;
-
-  const ReporteDetailScreen.ugr({super.key, required UgrReporte reporte})
-      : reporte = null,
-        reporteServer = null,
-        reporteUgr = reporte;
+        reporteServer = reporte;
 
   @override
   State<ReporteDetailScreen> createState() => _ReporteDetailScreenState();
 }
 
 class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
-  bool _cambiandoEstado = false;
 
   @override
   void initState() {
     super.initState();
-    // Cambio automático de estado a "En revisión" cuando es UGR y está "Enviado"
-    if (widget.reporteUgr != null && widget.reporteUgr!.estado == UgrReporteEstado.enviado) {
-      _cambiarEstadoAutomatico();
-    }
-  }
-
-  Future<void> _cambiarEstadoAutomatico() async {
-    final reporte = widget.reporteUgr!;
-    final idServer = reporte.idReporte;
-    if (idServer == null) return;
-
-    setState(() => _cambiandoEstado = true);
-    try {
-      await ApiService.instance.cambiarEstadoReporte(idServer, 2); // 2 = En revisión
-      if (mounted) {
-        setState(() {
-          reporte.idEstado = 2;
-          reporte.estado = UgrReporteEstado.enRevision;
-        });
-      }
-    } catch (e) {
-      debugPrint('Error al cambiar estado automáticamente: $e');
-    } finally {
-      if (mounted) {
-        setState(() => _cambiandoEstado = false);
-      }
-    }
   }
 
   ReporteDetalle _buildDetalle(BuildContext context) {
     if (widget.reporteServer != null) {
       return ReporteDetalle.fromServer(widget.reporteServer!);
     }
-    if (widget.reporteUgr != null) {
-      return ReporteDetalle.fromUgr(widget.reporteUgr!);
-    }
     return ReporteDetalle.fromOffline(widget.reporte!, context);
   }
-
-  bool get _esUgr => widget.reporteUgr != null;
 
   @override
   Widget build(BuildContext context) {
@@ -133,7 +90,7 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
           ],
         ),
       ),
-      bottomNavigationBar: _esUgr ? _buildUgrActionsBar(context) : null,
+      bottomNavigationBar: null,
     );
   }
 
@@ -211,7 +168,8 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
         final fecha = detalle.fechaReporte;
         return 'Fecha de reporte: ${fecha != null ? _fmtFechaReporte(fecha) : detalle.fechaEvento}';
       case ReporteDetalleFuente.ugr:
-        return 'Fecha del evento: ${detalle.fechaEvento}';
+        final fecha = detalle.fechaReporte;
+        return 'Fecha de reporte: ${fecha != null ? _fmtFechaReporte(fecha) : detalle.fechaEvento}';
     }
   }
 
@@ -248,28 +206,35 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
           if (detalle.descripcion != null && detalle.descripcion!.isNotEmpty)
             ReporteDocCampo('Descripcion', detalle.descripcion!),
         ],
-        contenido: detalle.categoriaNombres.isNotEmpty
-            ? _buildCategorias(detalle.categoriaNombres)
-            : null,
+        contenido: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (detalle.categoriaNombres.isNotEmpty)
+              _buildCategorias(detalle.categoriaNombres),
+            if (esUgr &&
+                detalle.responsableCelular != null &&
+                detalle.responsableCelular!.isNotEmpty) ...[
+              if (detalle.categoriaNombres.isNotEmpty) const SizedBox(height: 12),
+              _buildContactActions(detalle),
+            ],
+          ],
+        ),
       ),
       ReporteDocSeccion(
         titulo: 'UBICACION',
         campos: [
-          if (!esUgr) ...[
-            ReporteDocCampo(
-              'Departamento',
-              detalle.departamentoNombre ?? detalle.departamentoId.toString(),
-            ),
-            ReporteDocCampo(
-              'Provincia',
-              detalle.provinciaNombre ?? detalle.provinciaId.toString(),
-            ),
-            ReporteDocCampo(
-              'Municipio',
-              detalle.municipioNombre ?? detalle.municipioId.toString(),
-            ),
-          ] else
-            ReporteDocCampo('Municipio', detalle.municipioNombre ?? ''),
+          ReporteDocCampo(
+            'Departamento',
+            detalle.departamentoNombre ?? detalle.departamentoId.toString(),
+          ),
+          ReporteDocCampo(
+            'Provincia',
+            detalle.provinciaNombre ?? detalle.provinciaId.toString(),
+          ),
+          ReporteDocCampo(
+            'Municipio',
+            detalle.municipioNombre ?? detalle.municipioId.toString(),
+          ),
           ReporteDocCampo('Comunidad', detalle.comunidad),
           if (detalle.lat != null)
             ReporteDocCampo('Latitud', detalle.lat!.toStringAsFixed(6)),
@@ -282,17 +247,7 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
       ),
     ];
 
-    if (esUgr) {
-      secciones.add(ReporteDocSeccion(
-        titulo: 'EVIDENCIA',
-        campos: [
-          ReporteDocCampo('Fotografias', '${detalle.fotos}'),
-          ReporteDocCampo('Videos', '${detalle.videos}'),
-          ReporteDocCampo('Documentos', '${detalle.documentos}'),
-        ],
-      ));
-    } else if (detalle.fotoLocalPath != null ||
-        detalle.fotoServerPath != null) {
+    if (detalle.fotoLocalPath != null || detalle.fotoServerPath != null) {
       secciones.add(ReporteDocSeccion(
         titulo: 'EVIDENCIA FOTOGRAFICA',
         contenido: _buildFotoEvidencia(detalle),
@@ -406,47 +361,269 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
     );
   }
 
+  Widget _buildContactActions(ReporteDetalle detalle) {
+    final celular = detalle.responsableCelular!.replaceAll(r'\s', '');
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(top: 4),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.primary),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: AppColors.divider.withValues(alpha: 0.5),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.verified_user_outlined,
+                    size: 18, color: AppColors.textSecondary),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'Acciones para verificar el reporte',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            'Contacte al reportador para verificar la información del evento.',
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.3,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.call, size: 18),
+                  label: const Text('Llamar'),
+                  onPressed: () => _launchUrl('tel:$celular'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.secondary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.message, size: 18),
+                  label: const Text('WhatsApp'),
+                  onPressed: () => _launchWhatsapp(detalle),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green.shade600,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _launchUrl(String url) async {
+    final uri = Uri.parse(url);
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo abrir la aplicación'),
+            backgroundColor: AppColors.rechazado,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _launchWhatsapp(ReporteDetalle detalle) async {
+    final celular = detalle.responsableCelular!.replaceAll(r'\s', '');
+    final mensaje = 'Hola ${detalle.responsable ?? 'reportador'}, soy de UGR. '
+        'Le contacto respecto al reporte de evento adverso.';
+    final url = 'https://wa.me/591$celular?text=${Uri.encodeComponent(mensaje)}';
+    await _launchUrl(url);
+  }
+
   Widget _buildFotoEvidencia(ReporteDetalle detalle) {
+    final Widget preview;
     if (detalle.fotoServerPath != null) {
-      return ClipRRect(
+      preview = ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: Image.network(
-          '${ApiConfig.baseUrl}/upload/descargar/${Uri.encodeComponent(detalle.fotoServerPath!)}',
-          headers: {
-            'Authorization':
-                'Bearer ${AuthService.instance.currentToken?.accessToken ?? ''}',
-          },
+          _fotoUrl(detalle.fotoServerPath!),
+          headers: _fotoHeaders,
           width: double.infinity,
           height: 200,
           cacheWidth: 800,
           fit: BoxFit.cover,
-          errorBuilder: (context, url, error) => Container(
-            width: double.infinity,
-            height: 200,
-            color: AppColors.background,
-            child: const Center(
-              child: Icon(Icons.broken_image,
-                  size: 48, color: AppColors.textSecondary),
-            ),
-          ),
+          errorBuilder: (context, error, stackTrace) =>
+              _buildFotoErrorPlaceholder(),
+        ),
+      );
+    } else {
+      preview = ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Image.file(
+          File(detalle.fotoLocalPath!),
+          width: double.infinity,
+          height: 200,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) =>
+              _buildFotoErrorPlaceholder(),
         ),
       );
     }
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(8),
-      child: Image.file(
-        File(detalle.fotoLocalPath!),
-        width: double.infinity,
-        height: 200,
-        fit: BoxFit.cover,
-        errorBuilder: (context, error, stackTrace) => Container(
-          height: 200,
-          color: AppColors.surface,
-          child: const Center(
-            child: Text('Error al cargar la imagen',
-              style: TextStyle(color: AppColors.textSecondary)),
+
+    return GestureDetector(
+      onTap: () => _openFotoFullscreen(detalle),
+      child: Stack(
+        children: [
+          preview,
+          Positioned(
+            bottom: 8,
+            right: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.fullscreen, size: 14, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text(
+                    'Ver foto',
+                    style: TextStyle(fontSize: 11, color: Colors.white),
+                  ),
+                ],
+              ),
+            ),
           ),
+        ],
+      ),
+    );
+  }
+
+  String _fotoUrl(String serverPath) =>
+      '${ApiConfig.baseUrl}/upload/descargar/${Uri.encodeComponent(serverPath)}';
+
+  Map<String, String> get _fotoHeaders => {
+        'Authorization':
+            'Bearer ${AuthService.instance.currentToken?.accessToken ?? ''}',
+      };
+
+  Widget _buildFotoErrorPlaceholder() {
+    return Container(
+      width: double.infinity,
+      height: 200,
+      color: AppColors.background,
+      child: const Center(
+        child: Icon(Icons.broken_image, size: 48, color: AppColors.textSecondary),
+      ),
+    );
+  }
+
+  void _openFotoFullscreen(ReporteDetalle detalle) {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.9),
+      builder: (dialogContext) => Dialog.fullscreen(
+        backgroundColor: Colors.black,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: InteractiveViewer(
+                maxScale: 5,
+                child: Center(
+                  child: detalle.fotoServerPath != null
+                      ? Image.network(
+                          _fotoUrl(detalle.fotoServerPath!),
+                          headers: _fotoHeaders,
+                          fit: BoxFit.contain,
+                          loadingBuilder: (context, child, progress) =>
+                              progress == null
+                                  ? child
+                                  : const Center(
+                                      child: CircularProgressIndicator(
+                                        color: Colors.white54,
+                                      ),
+                                    ),
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildFullscreenFotoError(),
+                        )
+                      : Image.file(
+                          File(detalle.fotoLocalPath!),
+                          fit: BoxFit.contain,
+                          errorBuilder: (context, error, stackTrace) =>
+                              _buildFullscreenFotoError(),
+                        ),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Align(
+                alignment: Alignment.topRight,
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Material(
+                    color: Colors.black.withValues(alpha: 0.4),
+                    shape: const CircleBorder(),
+                    child: IconButton(
+                      icon: const Icon(Icons.close,
+                          color: Colors.white, size: 28),
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildFullscreenFotoError() {
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.broken_image, size: 64, color: Colors.white54),
+          SizedBox(height: 8),
+          Text(
+            'No se pudo cargar la imagen',
+            style: TextStyle(color: Colors.white70, fontSize: 14),
+          ),
+        ],
       ),
     );
   }
@@ -527,45 +704,27 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
   }
 
   Color _getReportStatusColor(String estado) {
-    switch (estado.toLowerCase()) {
-      case 'enviado':
-        return AppColors.enviado;
-      case 'en revisión':
-        return AppColors.enRevision;
-      case 'aprobado':
-        return AppColors.aprobado;
-      case 'rechazado':
-        return AppColors.rechazado;
-      case 'cerrado':
-        return AppColors.cerrado;
-      case 'pendiente':
-        return AppColors.pending;
-      case 'confirmado':
-        return AppColors.aprobado;
-      default:
-        return AppColors.textSecondary;
-    }
+    final e = estado.toLowerCase();
+    if (e.contains('rechazad')) return AppColors.rechazado;
+    if (e.contains('aprobad')) return AppColors.aprobado;
+    if (e.contains('cerrad')) return AppColors.cerrado;
+    if (e.contains('revis')) return AppColors.enRevision;
+    if (e.contains('enviado')) return AppColors.enviado;
+    if (e.contains('pendient')) return AppColors.pending;
+    if (e.contains('confirmad')) return AppColors.aprobado;
+    return AppColors.textSecondary;
   }
 
   IconData _getReportStatusIcon(String estado) {
-    switch (estado.toLowerCase()) {
-      case 'enviado':
-        return Icons.send;
-      case 'en revisión':
-        return Icons.visibility;
-      case 'aprobado':
-        return Icons.check_circle;
-      case 'rechazado':
-        return Icons.cancel;
-      case 'cerrado':
-        return Icons.lock;
-      case 'pendiente':
-        return Icons.schedule;
-      case 'confirmado':
-        return Icons.check_circle;
-      default:
-        return Icons.info_outline;
-    }
+    final e = estado.toLowerCase();
+    if (e.contains('rechazad')) return Icons.cancel;
+    if (e.contains('aprobad')) return Icons.verified;
+    if (e.contains('cerrad')) return Icons.lock;
+    if (e.contains('revis')) return Icons.visibility;
+    if (e.contains('enviado')) return Icons.send;
+    if (e.contains('pendient')) return Icons.schedule;
+    if (e.contains('confirmad')) return Icons.check_circle;
+    return Icons.info_outline;
   }
 
   String _fmtFechaReporte(String fecha) {
@@ -574,285 +733,6 @@ class _ReporteDetailScreenState extends State<ReporteDetailScreen> {
       return '${dt.day.toString().padLeft(2, '0')}/${dt.month.toString().padLeft(2, '0')}/${dt.year} ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}';
     } catch (_) {
       return fecha;
-    }
-  }
-
-  Widget _buildUgrActionsBar(BuildContext context) {
-    final reporte = widget.reporteUgr!;
-    final primary = PaletteScope.of(context).primary;
-
-    return SafeArea(
-      top: false,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        color: AppColors.surface,
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(reporte.estado.icon, size: 16, color: reporte.estado.color),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          reporte.estado.label,
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: reporte.estado.color,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    reporte.estado.descripcion,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            if (reporte.estado != UgrReporteEstado.cerrado)
-              ElevatedButton.icon(
-                onPressed: _cambiandoEstado ? null : _mostrarSelectorEstado,
-                icon: const Icon(Icons.edit, size: 16),
-                label: const Text('Cambiar estado'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: primary,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _mostrarSelectorEstado() async {
-    final reporte = widget.reporteUgr!;
-    final idServer = reporte.idReporte;
-    if (idServer == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Reporte sin ID del servidor'),
-            backgroundColor: AppColors.rechazado,
-          ),
-        );
-      }
-      return;
-    }
-
-    final estadoSeleccionado = await showDialog<UgrReporteEstado>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cambiar estado del reporte'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Seleccione el nuevo estado:',
-              style: TextStyle(color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 12),
-            ...UgrReporteEstado.values
-                .where((e) => e != UgrReporteEstado.enviado && e != reporte.estado)
-                .map((estado) => ListTile(
-                      leading: Icon(estado.icon, color: estado.color),
-                      title: Text(estado.label),
-                      subtitle: Text(
-                        estado.descripcion,
-                        style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                      ),
-                      onTap: () => Navigator.of(ctx).pop(estado),
-                    )),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Cancelar'),
-          ),
-        ],
-      ),
-    );
-
-    if (estadoSeleccionado == null || !mounted) return;
-
-    setState(() => _cambiandoEstado = true);
-    try {
-      await ApiService.instance.cambiarEstadoReporte(idServer, estadoSeleccionado.id);
-      if (mounted) {
-        setState(() {
-          reporte.idEstado = estadoSeleccionado.id;
-          reporte.estado = estadoSeleccionado;
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Estado cambiado a "${estadoSeleccionado.label}"'),
-            backgroundColor: AppColors.aprobado,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error al cambiar estado: $e'),
-            backgroundColor: AppColors.rechazado,
-          ),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _cambiandoEstado = false);
-      }
-    }
-  }
-
-  Future<void> _confirmarReporte() async {
-    final crearEdan = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirmar reporte'),
-        content: const Text('¿Desea crear un EDAN a partir de este reporte?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Más tarde'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Sí, crear EDAN'),
-          ),
-        ],
-      ),
-    );
-    if (crearEdan == null || !mounted) return;
-
-    final reporte = widget.reporteUgr!;
-    final idServer = reporte.idReporte;
-
-    if (idServer == null) {
-      setState(() => reporte.estado = UgrReporteEstado.aprobado);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Reporte confirmado.'),
-          backgroundColor: AppColors.aprobado,
-        ),
-      );
-      _navegarACrearEdan(reporte);
-      return;
-    }
-
-    setState(() => _cambiandoEstado = true);
-    try {
-      await ApiService.instance.cambiarEstadoReporte(idServer, 3); // 3 = Aprobado para EDAN
-      if (!mounted) return;
-      setState(() {
-        reporte.idEstado = 3;
-        reporte.estado = UgrReporteEstado.aprobado;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Reporte confirmado. Creando EDAN...'),
-          backgroundColor: AppColors.aprobado,
-        ),
-      );
-      Navigator.of(context).pop();
-      _navegarACrearEdan(reporte);
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _cambiandoEstado = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo confirmar el reporte.'),
-          backgroundColor: AppColors.rechazado,
-        ),
-      );
-    }
-  }
-
-  void _navegarACrearEdan(UgrReporte reporte) async {
-    // Navegar al formulario de EDAN con datos pre-llenados
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => UgrEdanFormScreen.desdeReporte(reporte: reporte),
-      ),
-    );
-    // Regresar a la pantalla anterior después de crear EDAN
-    if (mounted) {
-      Navigator.of(context).pop();
-    }
-  }
-
-  Future<void> _confirmarRechazo() async {
-    final confirmar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Rechazar reporte'),
-        content: const Text('¿Está seguro de rechazar este reporte?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancelar'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.rechazado),
-            child: const Text('Rechazar'),
-          ),
-        ],
-      ),
-    );
-    if (confirmar != true || !mounted) return;
-
-    final reporte = widget.reporteUgr!;
-    final idServer = reporte.idReporte;
-
-    if (idServer == null) {
-      setState(() => reporte.estado = UgrReporteEstado.rechazado);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Reporte rechazado.'),
-          backgroundColor: AppColors.rechazado,
-        ),
-      );
-      Navigator.of(context).pop();
-      return;
-    }
-
-    setState(() => _cambiandoEstado = true);
-    try {
-      await ApiService.instance.cambiarEstadoReporte(idServer, 4);
-      if (!mounted) return;
-      setState(() => reporte.estado = UgrReporteEstado.rechazado);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Reporte rechazado.'),
-          backgroundColor: AppColors.rechazado,
-        ),
-      );
-      Navigator.of(context).pop();
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _cambiandoEstado = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No se pudo rechazar el reporte.'),
-          backgroundColor: AppColors.rechazado,
-        ),
-      );
     }
   }
 

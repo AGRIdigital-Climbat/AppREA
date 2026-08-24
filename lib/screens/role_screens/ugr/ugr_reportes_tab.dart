@@ -1,369 +1,329 @@
 import 'package:flutter/material.dart';
 import '../../../config/theme.dart';
-import '../../../models/ugr_models.dart';
+import '../../../models/edan.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
-import '../../../screens/reporte_detail_screen.dart';
-import 'ugr_evento.dart';
+import 'ugr_edan_preview_screen.dart';
+import 'ugr_route.dart';
 
-class UgrReportesTab extends StatefulWidget {
-  const UgrReportesTab({super.key});
+class UgrLocalidadesTab extends StatefulWidget {
+  const UgrLocalidadesTab({super.key});
 
   @override
-  State<UgrReportesTab> createState() => _UgrReportesTabState();
+  State<UgrLocalidadesTab> createState() => UgrLocalidadesTabState();
 }
 
-class _UgrReportesTabState extends State<UgrReportesTab> {
-  List<UgrReporte> _reportes = [];
-  UgrReporteEstado? _filtro;
+class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
+    with AutomaticKeepAliveClientMixin {
+  bool _cargando = true;
+  String? _error;
+  List<EdanLocalidad> _localidades = [];
+  String _filtroEstado = 'todos';
   String _query = '';
-  bool _isLoading = true;
-  bool _hasError = false;
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _cargarReportes();
+    _cargarLocalidades();
   }
 
-  Future<void> _cargarReportes() async {
-    setState(() {
-      _isLoading = true;
-      _hasError = false;
-    });
-    final municipioId = AuthService.instance.currentToken?.idMunicipio;
+  void refresh() {
+    _cargarLocalidades();
+  }
+
+  int? get _idMunicipio => AuthService.instance.currentToken?.idMunicipio;
+
+  Future<void> _cargarLocalidades() async {
+    final municipioId = _idMunicipio;
     if (municipioId == null) {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) setState(() { _cargando = false; _error = 'Municipio no disponible'; });
       return;
     }
+    setState(() { _cargando = true; _error = null; });
     try {
-      final reportes = await ApiService.instance.getReportes(
+      final data = await ApiService.instance.getConsolidarPendientes(
         idMunicipio: municipioId,
-        limit: 50,
+        estado: 'revision',
       );
-      reportes.sort((a, b) {
-        final fa = a.fechaReporte ?? '';
-        final fb = b.fechaReporte ?? '';
-        return fb.compareTo(fa);
+      final localidades = data.map((json) => EdanLocalidad.fromJson(json)).toList();
+      if (!mounted) return;
+      setState(() {
+        _localidades = localidades;
+        _cargando = false;
       });
-      if (mounted) {
-        setState(() {
-          _reportes = reportes.map(UgrReporte.fromServer).toList();
-          _isLoading = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _hasError = true;
-        });
-      }
+    } catch (e) {
+      if (mounted) setState(() { _cargando = false; _error = e.toString(); });
     }
   }
 
-  List<UgrReporte> get _filtered {
-    var list = _reportes;
-    if (_filtro != null) {
-      list = list.where((r) => r.estado == _filtro).toList();
+  List<EdanLocalidad> get _filtradas {
+    var list = _localidades;
+    if (_filtroEstado != 'todos') {
+      list = list.where((l) {
+        final estado = l.estadoLocalidad;
+        return switch (_filtroEstado) {
+          'borrador' => estado == UgrLocalidadEstado.borrador,
+          'revision' => estado == UgrLocalidadEstado.enviadoUgr,
+          'aprobado' => estado == UgrLocalidadEstado.aprobadoUgr,
+          'rechazado' => estado == UgrLocalidadEstado.rechazadoUgr,
+          _ => true,
+        };
+      }).toList();
     }
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
-      list = list
-          .where((r) =>
-              r.comunidad.toLowerCase().contains(q) ||
-              r.responsable.toLowerCase().contains(q) ||
-              r.tipoEvento.toLowerCase().contains(q))
-          .toList();
+      list = list.where((l) =>
+          l.nombre.toLowerCase().contains(q) ||
+          (l.tipoEventoNombre ?? '').toLowerCase().contains(q)
+      ).toList();
     }
     return list;
   }
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final primary = PaletteScope.of(context).primary;
-    if (_isLoading) {
-      return Center(
-        child: CircularProgressIndicator(color: primary),
-      );
-    }
-    if (_hasError) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.cloud_off_outlined,
-                size: 64, color: AppColors.textSecondary),
-            const SizedBox(height: 12),
-            const Text(
-              'No se pudieron cargar los reportes',
-              style: TextStyle(fontSize: 14, color: AppColors.textSecondary),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: _cargarReportes,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Reintentar'),
-              style: ElevatedButton.styleFrom(backgroundColor: primary),
-            ),
-          ],
-        ),
-      );
-    }
+
     return Column(
       children: [
-        _buildFilterBar(primary),
-        _buildSearchField(primary),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _cargarReportes,
-            child: _buildList(),
-          ),
-        ),
+        _buildHeader(primary),
+        _buildFiltros(primary),
+        Expanded(child: _buildContenido()),
       ],
     );
   }
 
-  Widget _buildFilterBar(Color primary) {
-    final filters = <(String, UgrReporteEstado?)>[
-      ('Todos', null),
-      ('Pendientes', UgrReporteEstado.enviado),
-      ('En Revisión', UgrReporteEstado.enRevision),
-      ('Confirmados', UgrReporteEstado.aprobado),
-      ('Rechazados', UgrReporteEstado.rechazado),
-    ];
+  Widget _buildHeader(Color primary) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      color: AppColors.surface,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
       child: Row(
-        children: filters.map((f) {
-          final (label, value) = f;
-          final isSelected = _filtro == value;
-          return Expanded(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 3),
-              child: FilterChip(
-                label: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: isSelected ? Colors.white : AppColors.textSecondary,
-                  ),
-                ),
-                selected: isSelected,
-                onSelected: (_) => setState(() => _filtro = value),
-                selectedColor: primary,
-                backgroundColor: AppColors.surface,
-                showCheckmark: false,
-                padding: const EdgeInsets.symmetric(horizontal: 6),
-                side: BorderSide(
-                  color: isSelected ? primary : AppColors.divider,
-                ),
+        children: [
+          Icon(Icons.location_on_outlined, color: primary, size: 22),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Localidades del Municipio',
+              style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
               ),
             ),
-          );
-        }).toList(),
+          ),
+          IconButton(
+            onPressed: _cargando ? null : _cargarLocalidades,
+            icon: _cargando
+                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.refresh_rounded, size: 20),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildSearchField(Color primary) {
+  Widget _buildFiltros(Color primary) {
     return Container(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-      color: AppColors.surface,
-      child: TextField(
-        onChanged: (value) => setState(() => _query = value),
-        style: const TextStyle(fontSize: 14),
-        decoration: InputDecoration(
-          hintText: 'Buscar comunidad, responsable o evento...',
-          prefixIcon: const Icon(Icons.search, size: 20),
-          isDense: true,
-          filled: true,
-          fillColor: PaletteScope.of(context).background,
-          contentPadding: const EdgeInsets.symmetric(vertical: 10),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: const BorderSide(color: AppColors.divider),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        children: [
+          TextField(
+            onChanged: (v) => setState(() => _query = v),
+            style: const TextStyle(fontSize: 13),
+            decoration: InputDecoration(
+              hintText: 'Buscar localidad o tipo de evento...',
+              hintStyle: const TextStyle(color: AppColors.textSecondary),
+              prefixIcon: const Icon(Icons.search, size: 18),
+              isDense: true,
+              filled: true,
+              fillColor: AppColors.surface,
+              contentPadding: const EdgeInsets.symmetric(vertical: 8),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: const BorderSide(color: AppColors.divider),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: primary, width: 1.5),
+              ),
+            ),
           ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: primary, width: 1.5),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 32,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                _filtroChip('Todas', 'todos', primary),
+                _filtroChip('Pendientes', 'revision', primary),
+                _filtroChip('Aprobadas', 'aprobado', primary),
+                _filtroChip('Rechazadas', 'rechazado', primary),
+              ],
+            ),
           ),
-        ),
+        ],
       ),
     );
   }
 
-  Widget _buildList() {
-    final list = _filtered;
-    if (list.isEmpty) {
-      final mensaje = _query.trim().isNotEmpty
-          ? 'Sin resultados para la búsqueda'
-          : _filtro != null
-              ? 'No hay reportes con este filtro'
-              : 'No hay reportes en su municipio';
-      return LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          child: SizedBox(
-            height: constraints.maxHeight,
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.inbox_outlined,
-                      size: 64, color: AppColors.textSecondary),
-                  const SizedBox(height: 12),
-                  Text(
-                    mensaje,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return ListView.separated(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.all(12),
-      itemCount: list.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 8),
-      itemBuilder: (context, index) {
-        final reporte = list[index];
-        return _UgrReporteCard(
-          reporte: reporte,
-          onTap: () async {
-            await Navigator.of(context)
-                .push(MaterialPageRoute(
-                  builder: (_) => ReporteDetailScreen.ugr(reporte: reporte),
-                ));
-            if (mounted) setState(() {});
-          },
-        );
-      },
+  Widget _filtroChip(String label, String valor, Color primary) {
+    final seleccionado = _filtroEstado == valor;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        label: Text(label, style: TextStyle(fontSize: 11, color: seleccionado ? Colors.white : AppColors.textPrimary)),
+        selected: seleccionado,
+        onSelected: (_) => setState(() => _filtroEstado = valor),
+        selectedColor: primary,
+        backgroundColor: AppColors.surface,
+        side: BorderSide(color: seleccionado ? primary : AppColors.divider),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        visualDensity: VisualDensity.compact,
+      ),
     );
   }
-}
 
-class _UgrReporteCard extends StatelessWidget {
-  final UgrReporte reporte;
-  final VoidCallback onTap;
-
-  const _UgrReporteCard({required this.reporte, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = PaletteScope.of(context).primary;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Row(
+  Widget _buildContenido() {
+    if (_cargando) {
+      return const Center(child: CircularProgressIndicator(strokeWidth: 2));
+    }
+    if (_error != null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: ugrEventoColor(reporte.tipoEvento, primary).withValues(alpha: 0.1),
-              ),
-              child: Icon(
-                ugrEventoIcon(reporte.tipoEvento),
-                size: 22,
-                color: ugrEventoColor(reporte.tipoEvento, primary),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    reporte.tipoEvento,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${reporte.comunidad} · ${reporte.municipio}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppColors.textSecondary,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      const Icon(Icons.person_outline,
-                          size: 12, color: AppColors.textSecondary),
-                      const SizedBox(width: 4),
-                      Text(
-                        reporte.responsable,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.schedule,
-                          size: 12, color: AppColors.textSecondary),
-                      const SizedBox(width: 4),
-                      Text(
-                        reporte.tiempoRelativo,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: reporte.estado.color.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(
-                  color: reporte.estado.color.withValues(alpha: 0.4),
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(reporte.estado.icon, size: 13, color: reporte.estado.color),
-                  const SizedBox(width: 4),
-                  Text(
-                    reporte.estado.label,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: reporte.estado.color,
-                    ),
-                  ),
-                ],
-              ),
+            const Icon(Icons.cloud_off_outlined, size: 48, color: AppColors.textSecondary),
+            const SizedBox(height: 12),
+            Text('Error: $_error', style: const TextStyle(fontSize: 13, color: AppColors.textSecondary)),
+            const SizedBox(height: 12),
+            ElevatedButton.icon(
+              onPressed: _cargarLocalidades,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Reintentar'),
             ),
           ],
         ),
+      );
+    }
+    final filtradas = _filtradas;
+    if (filtradas.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.inbox_outlined, size: 48, color: AppColors.textSecondary.withValues(alpha: 0.4)),
+            const SizedBox(height: 12),
+            Text(
+              _query.isNotEmpty ? 'Sin resultados para la búsqueda' : 'No hay localidades pendientes',
+              style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _cargarLocalidades,
+      child: ListView.separated(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(12),
+        itemCount: filtradas.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 8),
+        itemBuilder: (context, index) => _LocalidadCard(localidad: filtradas[index]),
       ),
     );
   }
 }
 
+class _LocalidadCard extends StatelessWidget {
+  final EdanLocalidad localidad;
+  const _LocalidadCard({required this.localidad});
+
+  @override
+  Widget build(BuildContext context) {
+    final estado = localidad.estadoLocalidad;
+    final estadoColor = estado?.color ?? AppColors.textSecondary;
+    final estadoLabel = estado?.label ?? 'Desconocido';
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _verDetalle(context),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      localidad.nombre.isNotEmpty ? localidad.nombre : 'Sin nombre',
+                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: AppColors.textPrimary),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: estadoColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: estadoColor.withValues(alpha: 0.4)),
+                    ),
+                    child: Text(estadoLabel, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: estadoColor)),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  if (localidad.tipoEventoNombre != null) ...[
+                    Icon(Icons.warning_amber_rounded, size: 13, color: AppColors.pending),
+                    const SizedBox(width: 4),
+                    Text(localidad.tipoEventoNombre!, style: const TextStyle(fontSize: 12, color: AppColors.textSecondary)),
+                    const SizedBox(width: 12),
+                  ],
+                  Icon(Icons.people_outline, size: 13, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${localidad.totalPoblacionAfectada} personas',
+                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(width: 12),
+                  Icon(Icons.home_outlined, size: 13, color: AppColors.textSecondary),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${localidad.totalFamiliasAfectadas} familias',
+                    style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+              if ((localidad.fechaEvento ?? '').isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    const Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
+                    const SizedBox(width: 4),
+                    Text(localidad.fechaEvento ?? '', style: const TextStyle(fontSize: 11, color: AppColors.textSecondary)),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _verDetalle(BuildContext context) {
+    final edan = Edan.desdeLocalidad(localidad);
+    Navigator.of(context).push(
+      ugrRoute(UgrEdanPreviewScreen(edan: edan, soloLectura: true, esConsolidado: true)),
+    );
+  }
+}

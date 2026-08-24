@@ -143,6 +143,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                const SizedBox(height: 16),
                 const Text(
                   'Crear Cuenta',
                   style: TextStyle(
@@ -153,10 +154,34 @@ class _RegisterScreenState extends State<RegisterScreen> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'Complete los datos para registrarse',
+                  'Registro de Responsable Local — encargado de reportar el EDAN de su localidad o comunidad',
                   style: TextStyle(
                     fontSize: 14,
                     color: AppColors.textSecondary,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.error.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: const Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 20),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Si es UGR u otro cargo público, solicite su registro por otro canal.',
+                          style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
                 const SizedBox(height: 32),
@@ -416,7 +441,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Importante: Toda la información proporcionada debe ser correcta y será verificada por las autoridades correspondientes.',
+                          'Importante: El reporte será validado por la Unidad de Gestión de Riesgos (UGR) antes de su envio oficial con los documentos de respaldo.',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppColors.textSecondary,

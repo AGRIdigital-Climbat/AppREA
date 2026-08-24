@@ -133,6 +133,98 @@ class TipoEvento {
   }
 }
 
+class Cultivo {
+  final int idCultivo;
+  final String nombre;
+  final String? grupo;
+
+  Cultivo({
+    required this.idCultivo,
+    required this.nombre,
+    this.grupo,
+  });
+
+  factory Cultivo.fromJson(Map<String, dynamic> json) {
+    return Cultivo(
+      idCultivo: json['id_cultivo'] ?? json['id'] ?? 0,
+      nombre: json['nombre'] ?? '',
+      grupo: json['grupo'],
+    );
+  }
+}
+
+class PecuarioGrupo {
+  final int idPecuarioGrupo;
+  final String nombre;
+  final String? grupo;
+
+  PecuarioGrupo({
+    required this.idPecuarioGrupo,
+    required this.nombre,
+    this.grupo,
+  });
+
+  factory PecuarioGrupo.fromJson(Map<String, dynamic> json) {
+    return PecuarioGrupo(
+      idPecuarioGrupo: json['id_pecuario_grupo'] ?? json['id'] ?? 0,
+      nombre: json['nombre'] ?? '',
+      grupo: json['grupo'],
+    );
+  }
+}
+
+class GrupoVulnerableCatalogo {
+  final int idGrupoVulnerable;
+  final String codigo;
+  final String nombre;
+  final String? descripcion;
+  final int? orden;
+  final bool activo;
+
+  GrupoVulnerableCatalogo({
+    required this.idGrupoVulnerable,
+    required this.codigo,
+    required this.nombre,
+    this.descripcion,
+    this.orden,
+    this.activo = true,
+  });
+
+  factory GrupoVulnerableCatalogo.fromJson(Map<String, dynamic> json) {
+    return GrupoVulnerableCatalogo(
+      idGrupoVulnerable: json['id_grupo_vulnerable'] ?? json['id'] ?? 0,
+      codigo: json['codigo'] ?? '',
+      nombre: json['nombre'] ?? '',
+      descripcion: json['descripcion'],
+      orden: json['orden'],
+      activo: json['activo'] ?? true,
+    );
+  }
+}
+
+class TipoLocalidad {
+  final int idTipoLocalidad;
+  final String nombre;
+  final String? descripcion;
+  final int? orden;
+
+  TipoLocalidad({
+    required this.idTipoLocalidad,
+    required this.nombre,
+    this.descripcion,
+    this.orden,
+  });
+
+  factory TipoLocalidad.fromJson(Map<String, dynamic> json) {
+    return TipoLocalidad(
+      idTipoLocalidad: json['id_tipo_localidad'],
+      nombre: json['nombre'],
+      descripcion: json['descripcion'],
+      orden: json['orden'],
+    );
+  }
+}
+
 class Estado {
   final int idEstado;
   final String nombre;

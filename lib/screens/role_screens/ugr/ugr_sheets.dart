@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../../config/theme.dart';
 import '../../../models/ugr_models.dart';
-import '../../../screens/reporte_detail_screen.dart';
-import 'ugr_edan_detalle.dart';
+import '../../../services/database_helper.dart';
+import 'ugr_edan_preview_screen.dart';
 import 'ugr_evento.dart';
 import 'ugr_route.dart';
 
@@ -30,7 +30,6 @@ class _UgrGlobalSearchSheet extends StatefulWidget {
 
 class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
   final _controller = TextEditingController();
-  late final List<UgrReporte> _reportes = [];
   late final List<UgrEdan> _edanes = [];
   String _query = '';
 
@@ -38,17 +37,6 @@ class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
   void dispose() {
     _controller.dispose();
     super.dispose();
-  }
-
-  List<UgrReporte> get _reportesFiltrados {
-    final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return const [];
-    return _reportes
-        .where((r) =>
-            r.comunidad.toLowerCase().contains(q) ||
-            r.responsable.toLowerCase().contains(q) ||
-            r.tipoEvento.toLowerCase().contains(q))
-        .toList();
   }
 
   List<UgrEdan> get _edanesFiltrados {
@@ -99,7 +87,7 @@ class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
               autofocus: true,
               onChanged: (value) => setState(() => _query = value),
               decoration: InputDecoration(
-                hintText: 'Comunidad, responsable o código EDAN...',
+                hintText: 'Código EDAN, localidad o municipio...',
                 prefixIcon: const Icon(Icons.search, size: 20),
                 isDense: true,
                 focusedBorder: OutlineInputBorder(
@@ -119,13 +107,12 @@ class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
   }
 
   Widget _buildResultados(Color primary) {
-    final reportes = _reportesFiltrados;
     final edanes = _edanesFiltrados;
 
-    if (_query.trim().isEmpty || (reportes.isEmpty && edanes.isEmpty)) {
+    if (_query.trim().isEmpty || edanes.isEmpty) {
       return const Center(
         child: Text(
-          'Escriba para buscar reportes y EDAN',
+          'Escriba para buscar EDAN',
           style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
         ),
       );
@@ -134,38 +121,11 @@ class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: 8),
       children: [
-        if (reportes.isNotEmpty) ...[
-          const _ResultHeader('Reportes'),
-          ...reportes.map((r) => _buildReporteRow(r, primary)),
-        ],
         if (edanes.isNotEmpty) ...[
           const _ResultHeader('EDAN'),
           ...edanes.map((e) => _buildEdanRow(e, primary)),
         ],
       ],
-    );
-  }
-
-  Widget _buildReporteRow(UgrReporte reporte, Color primary) {
-    return ListTile(
-      leading: Icon(ugrEventoIcon(reporte.tipoEvento), color: primary),
-      title: Text(
-        reporte.tipoEvento,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-      ),
-      subtitle: Text(
-        '${reporte.comunidad} · ${reporte.responsable}',
-        style: const TextStyle(fontSize: 12),
-      ),
-      trailing: Icon(reporte.estado.icon, size: 18, color: reporte.estado.color),
-      onTap: () {
-        Navigator.of(context).pop();
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => ReporteDetailScreen.ugr(reporte: reporte),
-          ),
-        );
-      },
     );
   }
 
@@ -181,10 +141,15 @@ class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
         style: const TextStyle(fontSize: 12),
       ),
       trailing: Icon(edan.estado.icon, size: 18, color: edan.estado.color),
-      onTap: () {
+      onTap: () async {
         Navigator.of(context).pop();
+        final edanBd = await DatabaseHelper.instance
+            .getEdanByIdLocal(edan.idLocal ?? 0);
+        if (edanBd == null || !mounted) return;
         Navigator.of(context).push(
-          ugrRoute(UgrEdanDetalle(edan: edan)),
+          ugrRoute(
+            UgrEdanPreviewScreen(edan: edanBd, soloLectura: true, esConsolidado: true),
+          ),
         );
       },
     );
