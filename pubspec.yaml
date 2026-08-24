@@ -1,7 +1,7 @@
 ﻿name: rea
 description: "Sistema de Reporte de Eventos Adversos - VIDECI"
 publish_to: 'none'
-version: 1.0.5+5
+version: 1.0.6+6
 
 environment:
   sdk: ^3.12.2
