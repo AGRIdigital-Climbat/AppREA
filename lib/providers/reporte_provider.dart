@@ -404,7 +404,16 @@ class ReporteProvider extends ChangeNotifier {
             'orden': g.orden,
             'activo': g.activo ? 1 : 0,
           }).toList());
-    } catch (_) {}
+    } catch (_) {
+      try {
+        final gruposData = await _db.getGruposVulnerablesLocal();
+        _gruposVulnerables = gruposData
+            .map((g) => GrupoVulnerableCatalogo.fromJson(g))
+            .toList();
+      } catch (_) {
+        _gruposVulnerables = [];
+      }
+    }
 
     try {
       final tiposRepositorio = await _api.listarTiposRepositorio();
@@ -426,6 +435,36 @@ class ReporteProvider extends ChangeNotifier {
 
     notifyListeners();
     return {'estados': estadosCount, 'categorias': categoriasCount, 'tipos': tiposCount};
+  }
+
+  /// Descarga SOLO gruposVulnerables si está vacío
+  Future<void> fetchGruposVulnerablesIfNeeded() async {
+    if (_gruposVulnerables.isNotEmpty) return;
+
+    try {
+      final gruposVulnerables = await _api.getGruposVulnerables();
+      _gruposVulnerables = gruposVulnerables;
+      await _db.saveGruposVulnerables(
+          gruposVulnerables.map((g) => {
+            'id_grupo_vulnerable': g.idGrupoVulnerable,
+            'codigo': g.codigo,
+            'nombre': g.nombre,
+            'descripcion': g.descripcion,
+            'orden': g.orden,
+            'activo': g.activo ? 1 : 0,
+          }).toList());
+      notifyListeners();
+    } catch (_) {
+      try {
+        final gruposData = await _db.getGruposVulnerablesLocal();
+        _gruposVulnerables = gruposData
+            .map((g) => GrupoVulnerableCatalogo.fromJson(g))
+            .toList();
+        notifyListeners();
+      } catch (_) {
+        _gruposVulnerables = [];
+      }
+    }
   }
 
   Future<Map<String, int>> fetchAndCacheCatalogsEdan() async {
@@ -481,6 +520,29 @@ class ReporteProvider extends ChangeNotifier {
     } catch (_) {}
 
     await _downloadAndCacheMunicipioGeojson();
+
+    try {
+      final gruposVulnerables = await _api.getGruposVulnerables();
+      _gruposVulnerables = gruposVulnerables;
+      await _db.saveGruposVulnerables(
+          gruposVulnerables.map((g) => {
+            'id_grupo_vulnerable': g.idGrupoVulnerable,
+            'codigo': g.codigo,
+            'nombre': g.nombre,
+            'descripcion': g.descripcion,
+            'orden': g.orden,
+            'activo': g.activo ? 1 : 0,
+          }).toList());
+    } catch (_) {
+      try {
+        final gruposData = await _db.getGruposVulnerablesLocal();
+        _gruposVulnerables = gruposData
+            .map((g) => GrupoVulnerableCatalogo.fromJson(g))
+            .toList();
+      } catch (_) {
+        _gruposVulnerables = [];
+      }
+    }
 
     notifyListeners();
     return {'estados': estadosCount, 'tipos': tiposCount};

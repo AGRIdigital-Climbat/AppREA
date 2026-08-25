@@ -19,6 +19,7 @@ class CustomTextField extends StatelessWidget {
   final VoidCallback? onTap;
   final ValueChanged<String>? onChanged;
   final List<TextInputFormatter>? inputFormatters;
+  final bool autofocus;
 
   const CustomTextField({
     super.key,
@@ -38,6 +39,7 @@ class CustomTextField extends StatelessWidget {
     this.onTap,
     this.onChanged,
     this.inputFormatters,
+    this.autofocus = false,
   });
 
   @override
@@ -70,6 +72,7 @@ class CustomTextField extends StatelessWidget {
           onTap: onTap,
           onChanged: onChanged,
           inputFormatters: inputFormatters,
+          autofocus: autofocus,
           style: const TextStyle(
             fontSize: 16,
             color: AppColors.textPrimary,

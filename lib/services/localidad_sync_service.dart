@@ -120,76 +120,55 @@ class LocalidadSyncService {
         _fusionarSeccion(local.danosPecuarios, server.danosPecuarios);
     server.infraProductiva =
         _fusionarSeccion(local.infraProductiva, server.infraProductiva);
+    server.serviciosBasicos =
+        _fusionarSeccion(local.serviciosBasicos, server.serviciosBasicos);
+    server.proteccion =
+        _fusionarSeccion(local.proteccion, server.proteccion);
+    server.impactoPoblacion =
+        _fusionarSeccion(local.impactoPoblacion, server.impactoPoblacion);
   }
 
-  /// Fusiona una sección 1:N: conserva los ítems locales (con sus fotos) y
-  /// copia de vuelta datos del servidor (fotografia server, coordenadas) que
-  /// a la fila local le falten. Descarta los ítems del servidor que sean eco
-  /// de un registro local con foto (duplicado por subida de fotos) y deja
-  /// pasar los que no tienen contraparte local (adición real en servidor).
+  /// Fusiona una sección 1:N usando idSeccion (v2.9.0+) como clave primaria.
+  /// Los ítems locales SIEMPRE sobreviven. Los del servidor se emparejan
+  /// por idSeccion; si no hay idSeccion, se usa fallback por contenido.
   List<T> _fusionarSeccion<T>(List<T> local, List<T> server) {
     if (server.isEmpty) return List<T>.of(local);
     if (local.isEmpty) return List<T>.of(server);
 
-    final porClave = <String, List<int>>{};
-    for (var i = 0; i < server.length; i++) {
-      final clave = _claveItem(server[i]);
-      if (clave.isEmpty) continue;
-      porClave.putIfAbsent(clave, () => <int>[]).add(i);
+    final serverPorId = <String, T>{};
+    final serverSinId = <T>[];
+    for (final item in server) {
+      final id = idSeccionDe(item);
+      if (id != null && id.isNotEmpty) {
+        serverPorId[id] = item;
+      } else {
+        serverSinId.add(item);
+      }
     }
 
-    final usados = <int>{};
     final resultado = <T>[];
+
+    // Fase 1: todos los ítems locales sobreviven.
     for (final itemLocal in local) {
-      final clave = _claveItem(itemLocal);
-      var emparejado = -1;
-      if (clave.isNotEmpty) {
-        for (final i in porClave[clave] ?? const <int>[]) {
-          if (usados.add(i)) {
-            emparejado = i;
-            break;
-          }
-        }
+      final id = idSeccionDe(itemLocal);
+      T? itemServer;
+      if (id != null && id.isNotEmpty) {
+        itemServer = serverPorId.remove(id);
       }
-      if (emparejado >= 0) {
-        _copiarDatosServer(itemLocal, server[emparejado]);
+      if (itemServer != null) {
+        _copiarDatosServer(itemLocal, itemServer);
       }
       resultado.add(itemLocal);
     }
 
-    for (final entry in porClave.entries) {
-      for (final i in entry.value) {
-        if (usados.contains(i)) continue;
-        final extra = server[i];
-        final localesMismaClave =
-            local.where((l) => _claveItem(l) == entry.key).toList();
-        if (localesMismaClave.isNotEmpty &&
-            localesMismaClave.any((l) => _obtenerFotos(l).isNotEmpty)) {
-          // Eco de un registro local con foto: no se importa, pero se
-          // aprovecha su fotografia/coordenadas para que la fila local quede
-          // sincronizada y no se vuelva a subir.
-          _copiarDatosServer(localesMismaClave.first, extra);
-        } else {
-          resultado.add(extra);
-        }
-      }
-    }
+    // Fase 2: ítems del servidor sin match local son genuinamente nuevos.
+    resultado.addAll(serverPorId.values);
+    resultado.addAll(serverSinId);
+
     return resultado;
   }
 
   bool _falta(String? valor) => valor == null || valor.isEmpty;
-
-  List<EdanFoto> _obtenerFotos(dynamic item) {
-    if (item is EdanEstablecimientoSalud) return item.fotos;
-    if (item is EdanDanoVial) return item.fotos;
-    if (item is EdanDanoInfraPublica) return item.fotos;
-    if (item is EdanDanoUnidadEducativa) return item.fotos;
-    if (item is EdanDanoVivienda) return item.fotos;
-    if (item is EdanDanoAgricultura) return item.fotos;
-    if (item is EdanDanoPecuario) return item.fotos;
-    if (item is EdanInfraProductiva) return item.fotos;
-    return <EdanFoto>[];
-  }
 
   void _copiarDatosServer(dynamic local, dynamic server) {
     if (local is EdanEstablecimientoSalud &&
@@ -217,6 +196,10 @@ class LocalidadSyncService {
       _aplicarServer(local, server.fotografia, server.coordenadaLat,
           server.coordenadaLon);
     } else if (local is EdanInfraProductiva && server is EdanInfraProductiva) {
+      _aplicarServer(local, server.fotografia, server.coordenadaLat,
+          server.coordenadaLon);
+    } else if (local is EdanServicioBasicoDetalle &&
+        server is EdanServicioBasicoDetalle) {
       _aplicarServer(local, server.fotografia, server.coordenadaLat,
           server.coordenadaLon);
     }
@@ -263,37 +246,11 @@ class LocalidadSyncService {
       if (_falta(local.fotografia)) local.fotografia = fotografia;
       if (local.coordenadaLat == 0) local.coordenadaLat = coordenadaLat;
       if (local.coordenadaLon == 0) local.coordenadaLon = coordenadaLon;
+    } else if (local is EdanServicioBasicoDetalle) {
+      if (_falta(local.fotografia)) local.fotografia = fotografia;
+      if (local.coordenadaLat == 0) local.coordenadaLat = coordenadaLat;
+      if (local.coordenadaLon == 0) local.coordenadaLon = coordenadaLon;
     }
-  }
-
-  /// Clave de emparejamiento por campos base para detectar ecos duplicados
-  /// que el servidor crea al subir fotos. Devuelve '' si no es reconocible.
-  String _claveItem(dynamic item) {
-    if (item is EdanEstablecimientoSalud) {
-      return 'salud|${item.nombreEstablecimiento}|${item.comunidad}';
-    }
-    if (item is EdanDanoVial) {
-      return 'vial|${item.viaPuente}|${item.tramo}';
-    }
-    if (item is EdanDanoInfraPublica) {
-      return 'infra|${item.tipoEstructura}|${item.comunidad}';
-    }
-    if (item is EdanDanoUnidadEducativa) {
-      return 'educacion|${item.nombreEstablecimiento}|${item.comunidad}';
-    }
-    if (item is EdanDanoVivienda) {
-      return 'vivienda|${item.comunidad}';
-    }
-    if (item is EdanDanoAgricultura) {
-      return 'agricultura|${item.tipoCultivo}';
-    }
-    if (item is EdanDanoPecuario) {
-      return 'pecuario|${item.especie}|${item.raza}';
-    }
-    if (item is EdanInfraProductiva) {
-      return 'productiva|${item.tipo}';
-    }
-    return '';
   }
 
   Future<SyncResult> sincronizar() async {
@@ -433,6 +390,8 @@ class LocalidadSyncService {
 
       final respuesta = await ApiService.instance.syncLocalidades(localidadesJson);
 
+      debugPrint('[SYNC] Response completo: ${respuesta.toString()}');
+
       final datos = respuesta['data'];
       final items = datos is List ? datos : <dynamic>[];
 
@@ -443,6 +402,10 @@ class LocalidadSyncService {
         final aplicado = m['aplicado'] == true;
         final conflicto = m['conflicto'] == true;
         final tombstone = m['tombstone'] == true;
+        final idServer = _parseId(m['id_edan_localidad']);
+        
+        debugPrint('[SYNC ITEM] id_local: $idLocal, aplicado: $aplicado, conflicto: $conflicto, id_server: $idServer');
+        debugPrint('[SYNC ITEM] data: ${m['data']}');
 
         // Tombstone: server deleted the localidad → delete from SQLite
         if (tombstone && idLocal != null) {
@@ -494,6 +457,11 @@ class LocalidadSyncService {
                   errorTexto.contains('duplic') ||
                   errorTexto.contains('ya existe'));
           final localidad = porIdLocal[idLocal];
+          
+          debugPrint('[SYNC ERROR] id_local: $idLocal');
+          debugPrint('[SYNC ERROR] Mensaje: $error');
+          debugPrint('[SYNC ERROR] Response completo: ${m.toString()}');
+          
           if (esColisionCodigo && localidad != null) {
             final reintentado = await _regenerarIdLocalYReintentar(localidad, userId);
             if (reintentado) {
@@ -595,6 +563,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -605,6 +574,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -615,6 +585,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -625,6 +596,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -635,6 +607,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -645,6 +618,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -655,6 +629,7 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
     ok = await _subirFotosSeccion(
@@ -665,6 +640,18 @@ class LocalidadSyncService {
           fotografiaDe: (item) => item.fotografia,
           marcarSubida: (item, path) => item.fotografia = path,
           buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
+        ) &&
+        ok;
+    ok = await _subirFotosSeccion(
+          idServer: idServer,
+          seccionRuta: 'servicios-basicos',
+          items: localidad.serviciosBasicos,
+          fotosDe: (item) => item.fotos,
+          fotografiaDe: (item) => item.fotografia,
+          marcarSubida: (item, path) => item.fotografia = path,
+          buildData: (item, foto) => item.toFotoData(foto),
+          capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
 
@@ -675,7 +662,8 @@ class LocalidadSyncService {
         localidad.danosVivienda.any((i) => i.fotos.isNotEmpty) ||
         localidad.danosAgricultura.any((i) => i.fotos.isNotEmpty) ||
         localidad.danosPecuarios.any((i) => i.fotos.isNotEmpty) ||
-        localidad.infraProductiva.any((i) => i.fotos.isNotEmpty);
+        localidad.infraProductiva.any((i) => i.fotos.isNotEmpty) ||
+        localidad.serviciosBasicos.any((i) => i.fotos.isNotEmpty);
     if (huboFotos) {
       await DatabaseHelper.instance.updateLocalidad(localidad);
     }
@@ -697,6 +685,7 @@ class LocalidadSyncService {
     required String? Function(T item) fotografiaDe,
     required void Function(T item, String path) marcarSubida,
     required Map<String, dynamic> Function(T item, EdanFoto foto) buildData,
+    void Function(T item, String idSeccion)? capturarIdSeccion,
   }) async {
     var ok = true;
     for (final item in items) {
@@ -719,6 +708,12 @@ class LocalidadSyncService {
         );
         final path = resp['fotografia'];
         marcarSubida(item, path is String && path.isNotEmpty ? path : 'subida');
+        if (capturarIdSeccion != null) {
+          final serverId = resp['id_seccion']?.toString();
+          if (serverId != null && serverId.isNotEmpty) {
+            capturarIdSeccion(item, serverId);
+          }
+        }
       } catch (e) {
         debugPrint('Error subiendo foto en $seccionRuta (${foto.ruta}): $e');
         ok = false;

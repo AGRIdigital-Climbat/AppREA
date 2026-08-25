@@ -149,7 +149,8 @@ class PerfilTabState extends State<PerfilTab> {
           idProvincia: _selectedProvincia,
           idMunicipio: _selectedMunicipio,
         );
-      } catch (_) {
+      } catch (e) {
+        debugPrint('[PerfilTab] Error actualizando perfil: $e');
         serverOk = false;
       }
     }

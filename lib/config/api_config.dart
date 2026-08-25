@@ -6,7 +6,7 @@ class ApiConfig {
   static const String reaEndpoint = '$baseUrl/rea';
   static const String edanEndpoint = '$baseUrl/edan';
   static const String edanLocalidadesEndpoint = '$baseUrl/edan/localidades';
-  static const String usuariosEndpoint = '$baseUrl/usuarios/';
+  static const String usuariosEndpoint = '$baseUrl/usuarios';
   static const String repositorioEndpoint = '$baseUrl/repositorio';
 
   // MotorIA - Asistente (túnel TryCloudflare, la URL cambia con el tiempo).

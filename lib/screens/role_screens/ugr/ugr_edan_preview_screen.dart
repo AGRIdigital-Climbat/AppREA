@@ -131,9 +131,11 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _cargarDocumentosEdan();
-    });
+    if (esConsolidado) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _cargarDocumentosEdan();
+      });
+    }
   }
 
   @override
@@ -196,9 +198,11 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           const SizedBox(height: 12),
           _buildDeclaracion(),
           const SizedBox(height: 16),
-          _buildLocalidadesExpandible(primary),
-          const SizedBox(height: 12),
-          _buildDocumentosVinculados(primary),
+          if (esConsolidado) ...[
+            _buildLocalidadesExpandible(primary),
+            const SizedBox(height: 12),
+            _buildDocumentosVinculados(primary),
+          ],
           const SizedBox(height: 24),
         ],
       ),
