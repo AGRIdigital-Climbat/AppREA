@@ -6,6 +6,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:provider/provider.dart';
 import '../../../config/theme.dart';
 import '../../../models/edan.dart';
+import '../../../models/id_seccion_helper.dart';
 import '../../../models/usuario.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../config/api_config.dart';
@@ -573,6 +574,43 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
       ..totalFamiliasAfectadas = _intDe(_familiasAfectadasController)
       ..totalFamiliasDamnificadas = _intDe(_familiasDamnificadasController);
     _normalizarLocalidad(localidad);
+    // Fallback: asegurar que TODAS las secciones tengan idSeccion
+    for (final item in localidad.impactoPoblacion) {
+      item.idSeccion ??= generarIdSeccion('im');
+    }
+    localidad.necesidadPrimeraRespuesta?.idSeccion ??= generarIdSeccion('pr');
+    for (final item in localidad.establecimientosSalud) {
+      item.idSeccion ??= generarIdSeccion('sv');
+    }
+    localidad.necesidadSalud?.idSeccion ??= generarIdSeccion('sn');
+    for (final item in localidad.danosViales) {
+      item.idSeccion ??= generarIdSeccion('dv');
+    }
+    for (final item in localidad.danosInfraPublica) {
+      item.idSeccion ??= generarIdSeccion('di');
+    }
+    for (final item in localidad.serviciosBasicos) {
+      item.idSeccion ??= generarIdSeccion('sb');
+    }
+    for (final item in localidad.unidadesEducativas) {
+      item.idSeccion ??= generarIdSeccion('ue');
+    }
+    for (final item in localidad.danosVivienda) {
+      item.idSeccion ??= generarIdSeccion('vv');
+    }
+    for (final item in localidad.danosAgricultura) {
+      item.idSeccion ??= generarIdSeccion('da');
+    }
+    for (final item in localidad.danosPecuarios) {
+      item.idSeccion ??= generarIdSeccion('dp');
+    }
+    for (final item in localidad.infraProductiva) {
+      item.idSeccion ??= generarIdSeccion('ip');
+    }
+    for (final item in localidad.proteccion) {
+      item.idSeccion ??= generarIdSeccion('po');
+    }
+    localidad.necesidadHumanitaria?.idSeccion ??= generarIdSeccion('nh');
     return localidad;
   }
 
@@ -1129,7 +1167,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                 label: 'Búsqueda y rescate',
                 valor: l.necesidadPrimeraRespuesta?.busqueda ?? false,
                 onValor: (v) => setState(() {
-                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta()
+                    ..idSeccion = generarIdSeccion('pr');
                   l.necesidadPrimeraRespuesta!.busqueda = v;
                 }),
               ),
@@ -1138,7 +1177,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                 label: 'Salvamento',
                 valor: l.necesidadPrimeraRespuesta?.salvamento ?? false,
                 onValor: (v) => setState(() {
-                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta()
+                    ..idSeccion = generarIdSeccion('pr');
                   l.necesidadPrimeraRespuesta!.salvamento = v;
                 }),
               ),
@@ -1147,7 +1187,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                 label: 'Evacuación',
                 valor: l.necesidadPrimeraRespuesta?.evacuacion ?? false,
                 onValor: (v) => setState(() {
-                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta()
+                    ..idSeccion = generarIdSeccion('pr');
                   l.necesidadPrimeraRespuesta!.evacuacion = v;
                 }),
               ),
@@ -1157,7 +1198,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                 valor: l.necesidadPrimeraRespuesta?.observaciones ?? '',
                 maxLines: 2,
                 onChanged: (v) {
-                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
+                  l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta()
+                    ..idSeccion = generarIdSeccion('pr');
                   l.necesidadPrimeraRespuesta!.observaciones = v;
                   setState(() {});
                 },
@@ -1172,7 +1214,7 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
   void _sincronizarImpacto(EdanLocalidad l) {
     if (l.impactoPoblacion.isEmpty) {
       l.impactoPoblacion.add(EdanImpactoPoblacion()
-        ..idSeccion = generarIdSeccion());
+        ..idSeccion = generarIdSeccion('im'));
     }
     final ip = l.impactoPoblacion[0];
     ip.fallecidos = ip.gruposEtarios.fold<int>(0, (acc, g) => acc + g.fallecidos);
@@ -1232,9 +1274,9 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otro',
                   cantidad: l.establecimientosSalud.length,
                    onAgregar: () => setState(() {
-                       final item = EdanEstablecimientoSalud()
-                         ..idSeccion = generarIdSeccion()
-                         ..comunidad = l.etiquetaLugar;
+                        final item = EdanEstablecimientoSalud()
+                          ..idSeccion = generarIdSeccion('sv')
+                          ..comunidad = l.etiquetaLugar;
                        l.establecimientosSalud.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1269,7 +1311,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                           ? '${l.necesidadSalud!.numeroPersonas}'
                           : '',
                       onChanged: (v) {
-                        l.necesidadSalud ??= EdanNecesidadSalud();
+                        l.necesidadSalud ??= EdanNecesidadSalud()
+                          ..idSeccion = generarIdSeccion('sn');
                         l.necesidadSalud!.numeroPersonas = int.tryParse(v.trim()) ?? 0;
                         l.necesidadSalud!.botiquines = l.necesidadSalud!.numeroPersonas > 0;
                         setState(() {});
@@ -1281,7 +1324,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                       valor: l.necesidadSalud?.otrasNecesidades ?? '',
                       maxLines: 2,
                       onChanged: (v) {
-                        l.necesidadSalud ??= EdanNecesidadSalud();
+                        l.necesidadSalud ??= EdanNecesidadSalud()
+                          ..idSeccion = generarIdSeccion('sn');
                         l.necesidadSalud!.otrasNecesidades = v;
                         setState(() {});
                       },
@@ -1292,7 +1336,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                       valor: l.necesidadSalud?.observaciones ?? '',
                       maxLines: 2,
                       onChanged: (v) {
-                        l.necesidadSalud ??= EdanNecesidadSalud();
+                        l.necesidadSalud ??= EdanNecesidadSalud()
+                          ..idSeccion = generarIdSeccion('sn');
                         l.necesidadSalud!.observaciones = v;
                         setState(() {});
                       },
@@ -1367,8 +1412,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otra',
                   cantidad: l.danosViales.length,
                    onAgregar: () => setState(() {
-                       final item = EdanDanoVial()
-                         ..idSeccion = generarIdSeccion();
+                        final item = EdanDanoVial()
+                          ..idSeccion = generarIdSeccion('dv');
                        l.danosViales.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1402,9 +1447,9 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otra',
                   cantidad: l.danosInfraPublica.length,
                    onAgregar: () => setState(() {
-                       final item = EdanDanoInfraPublica()
-                         ..idSeccion = generarIdSeccion()
-                         ..comunidad = l.etiquetaLugar;
+                        final item = EdanDanoInfraPublica()
+                          ..idSeccion = generarIdSeccion('di')
+                          ..comunidad = l.etiquetaLugar;
                        l.danosInfraPublica.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1526,9 +1571,9 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otra',
                   cantidad: l.unidadesEducativas.length,
                    onAgregar: () => setState(() {
-                       final item = EdanDanoUnidadEducativa()
-                         ..idSeccion = generarIdSeccion()
-                         ..comunidad = l.etiquetaLugar;
+                        final item = EdanDanoUnidadEducativa()
+                          ..idSeccion = generarIdSeccion('ue')
+                          ..comunidad = l.etiquetaLugar;
                        l.unidadesEducativas.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1612,9 +1657,9 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otra',
                   cantidad: l.danosVivienda.length,
                    onAgregar: () => setState(() {
-                       final item = EdanDanoVivienda()
-                         ..idSeccion = generarIdSeccion()
-                         ..comunidad = l.etiquetaLugar;
+                        final item = EdanDanoVivienda()
+                          ..idSeccion = generarIdSeccion('vv')
+                          ..comunidad = l.etiquetaLugar;
                        l.danosVivienda.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1686,8 +1731,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otro',
                   cantidad: l.danosAgricultura.length,
                    onAgregar: () => setState(() {
-                       final item = EdanDanoAgricultura()
-                         ..idSeccion = generarIdSeccion();
+                        final item = EdanDanoAgricultura()
+                          ..idSeccion = generarIdSeccion('da');
                        l.danosAgricultura.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1720,8 +1765,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otra',
                   cantidad: l.danosPecuarios.length,
                    onAgregar: () => setState(() {
-                       final item = EdanDanoPecuario()
-                         ..idSeccion = generarIdSeccion();
+                        final item = EdanDanoPecuario()
+                          ..idSeccion = generarIdSeccion('dp');
                        l.danosPecuarios.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1754,8 +1799,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   articuloOtro: 'otra',
                   cantidad: l.infraProductiva.length,
                    onAgregar: () => setState(() {
-                       final item = EdanInfraProductiva()
-                         ..idSeccion = generarIdSeccion();
+                        final item = EdanInfraProductiva()
+                          ..idSeccion = generarIdSeccion('ip');
                        l.infraProductiva.add(item);
                        _focusNodeId = item.idSeccion;
                      }),
@@ -1876,7 +1921,8 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
               key: ObjectKey(l),
               index: i,
               nombre: l.etiquetaLugar,
-              necesidad: l.necesidadHumanitaria ?? EdanNecesidadHumanitaria(),
+              necesidad: l.necesidadHumanitaria ?? EdanNecesidadHumanitaria()
+                ..idSeccion = generarIdSeccion('nh'),
               onChanged: () => setState(() {}),
             ),
           );
@@ -2110,7 +2156,10 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
       final localidad = _construirLocalidad()
         ..idUsuario = userId
         ..idEdanLocalidadEstado = UgrLocalidadEstado.borrador.id
-        ..estadoLocalidad = UgrLocalidadEstado.borrador;
+        ..estadoLocalidad = UgrLocalidadEstado.borrador
+        ..sincronizado = false
+        ..pendienteActualizacion = true;
+      _normalizarLocalidad(localidad);
 
       final db = DatabaseHelper.instance;
       if (localidad.idLocal != null) {
@@ -2329,9 +2378,8 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
       precision: pos.accuracy,
     ));
 
-    widget.onCoordenadasCapturadas?.call(pos.latitude, pos.longitude);
-
     if (mounted) {
+      widget.onCoordenadasCapturadas?.call(pos.latitude, pos.longitude);
       widget.onChanged();
       setState(() => _advertencia = null);
     }
@@ -2952,12 +3000,10 @@ class _FotoRemotaNoDisponible extends StatelessWidget {
 
 class _GrupoDeCampos extends StatelessWidget {
   final String titulo;
-  final String? subtitulo;
   final List<Widget> children;
 
   const _GrupoDeCampos({
     required this.titulo,
-    this.subtitulo,
     required this.children,
   });
 
@@ -2982,19 +3028,7 @@ class _GrupoDeCampos extends StatelessWidget {
               color: AppColors.textPrimary,
             ),
           ),
-          if (subtitulo != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 2, bottom: 10),
-              child: Text(
-                subtitulo!,
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            )
-          else
-            const SizedBox(height: 10),
+          const SizedBox(height: 10),
           ...children,
         ],
       ),
@@ -3681,10 +3715,10 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
             const SizedBox(height: 6),
             _impactoCheck(localidad.impPoblacion, 'Población', (v) {
               localidad.impPoblacion = v;
-               if (v && localidad.impactoPoblacion.isEmpty) {
-                localidad.impactoPoblacion.add(EdanImpactoPoblacion()
-                  ..idSeccion = generarIdSeccion());
-              }
+                if (v && localidad.impactoPoblacion.isEmpty) {
+                 localidad.impactoPoblacion.add(EdanImpactoPoblacion()
+                   ..idSeccion = generarIdSeccion('im'));
+               }
               widget.onChanged();
             }),
             if (localidad.impPoblacion && !localidad.impProteccion)
@@ -3708,15 +3742,15 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
             }),
             _impactoCheck(localidad.impServicios, 'Servicios básicos', (v) {
               localidad.impServicios = v;
-               if (v && localidad.serviciosBasicos.isEmpty) {
-                localidad.serviciosBasicos = [
-                  EdanServicioBasicoDetalle(idSeccion: generarIdSeccion(), tipo: 'energia_electrica'),
-                  EdanServicioBasicoDetalle(idSeccion: generarIdSeccion(), tipo: 'agua_potable'),
-                  EdanServicioBasicoDetalle(idSeccion: generarIdSeccion(), tipo: 'alcantarillado'),
-                  EdanServicioBasicoDetalle(idSeccion: generarIdSeccion(), tipo: 'gas_domiciliario'),
-                  EdanServicioBasicoDetalle(idSeccion: generarIdSeccion(), tipo: 'telecomunicaciones'),
-                ];
-              }
+                if (v && localidad.serviciosBasicos.isEmpty) {
+                 localidad.serviciosBasicos = [
+                   EdanServicioBasicoDetalle(idSeccion: generarIdSeccion('sb'), tipo: 'energia_electrica'),
+                   EdanServicioBasicoDetalle(idSeccion: generarIdSeccion('sb'), tipo: 'agua_potable'),
+                   EdanServicioBasicoDetalle(idSeccion: generarIdSeccion('sb'), tipo: 'alcantarillado'),
+                   EdanServicioBasicoDetalle(idSeccion: generarIdSeccion('sb'), tipo: 'gas_domiciliario'),
+                   EdanServicioBasicoDetalle(idSeccion: generarIdSeccion('sb'), tipo: 'telecomunicaciones'),
+                 ];
+               }
               widget.onChanged();
             }),
             _impactoCheck(localidad.impEducacion, 'Educación', (v) {
@@ -4662,14 +4696,12 @@ class _FilaServicioRow extends StatefulWidget {
   final String titulo;
   final EdanServicioBasicoDetalle valor;
   final VoidCallback onChanged;
-  final void Function(double lat, double lon)? onCoordenadasCapturadas;
   final bool autoFocus;
 
   const _FilaServicioRow({
     required this.titulo,
     required this.valor,
     required this.onChanged,
-    this.onCoordenadasCapturadas,
     this.autoFocus = false,
   });
 
@@ -4752,7 +4784,6 @@ class _FilaServicioRowState extends State<_FilaServicioRow> {
           onCoordenadasCapturadas: (lat, lon) {
             valor.coordenadaLat = lat;
             valor.coordenadaLon = lon;
-            widget.onCoordenadasCapturadas?.call(lat, lon);
           },
         ),
       ],
@@ -4767,7 +4798,6 @@ class _FilaInfraRow extends StatefulWidget {
   final bool puedeEliminar;
   final VoidCallback onEliminar;
   final VoidCallback onChanged;
-  final void Function(double lat, double lon)? onCoordenadasCapturadas;
   final bool autoFocus;
 
   const _FilaInfraRow({
@@ -4777,7 +4807,6 @@ class _FilaInfraRow extends StatefulWidget {
     required this.puedeEliminar,
     required this.onEliminar,
     required this.onChanged,
-    this.onCoordenadasCapturadas,
     this.autoFocus = false,
   });
 
@@ -4874,7 +4903,6 @@ class _FilaInfraRowState extends State<_FilaInfraRow> {
           onCoordenadasCapturadas: (lat, lon) {
             valor.coordenadaLat = lat;
             valor.coordenadaLon = lon;
-            widget.onCoordenadasCapturadas?.call(lat, lon);
           },
         ),
       ],

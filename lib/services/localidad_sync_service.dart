@@ -554,6 +554,20 @@ class LocalidadSyncService {
   /// localidad recién aplicada (una fila por item con foto). Devuelve true si
   /// no quedan fotos pendientes.
   Future<bool> _pushFotos(EdanLocalidad localidad, int idServer) async {
+    debugPrint('[FOTOS] _pushFotos idServer=$idServer '
+        'sb=${localidad.serviciosBasicos.length} '
+        'ue=${localidad.unidadesEducativas.length} '
+        'sv=${localidad.establecimientosSalud.length} '
+        'dv=${localidad.danosViales.length} '
+        'di=${localidad.danosInfraPublica.length} '
+        'vv=${localidad.danosVivienda.length} '
+        'da=${localidad.danosAgricultura.length} '
+        'dp=${localidad.danosPecuarios.length} '
+        'ip=${localidad.infraProductiva.length}');
+    for (final item in localidad.serviciosBasicos) {
+      debugPrint('[FOTOS] sb item tipo=${item.tipo} '
+          'fotos=${item.fotos.length} fotografia=${item.fotografia}');
+    }
     var ok = true;
     ok = await _subirFotosSeccion(
           idServer: idServer,
@@ -687,11 +701,21 @@ class LocalidadSyncService {
     required Map<String, dynamic> Function(T item, EdanFoto foto) buildData,
     void Function(T item, String idSeccion)? capturarIdSeccion,
   }) async {
+    debugPrint('[FOTOS] _subirFotosSeccion $seccionRuta items=${items.length}');
     var ok = true;
     for (final item in items) {
       final fotos = fotosDe(item);
-      if (fotos.isEmpty || fotografiaDe(item) != null) continue;
+      final fotografia = fotografiaDe(item);
+      if (fotos.isEmpty) {
+        debugPrint('[FOTOS] $seccionRuta SKIP ${item.runtimeType} fotos.isEmpty');
+        continue;
+      }
+      if (fotografia != null) {
+        debugPrint('[FOTOS] $seccionRuta SKIP ${item.runtimeType} fotografia=$fotografia');
+        continue;
+      }
       final foto = fotos.first;
+      debugPrint('[FOTOS] $seccionRuta UPLOAD ${item.runtimeType} ruta=${foto.ruta}');
       final file = File(foto.ruta);
       if (!await file.exists()) {
         debugPrint('Foto no encontrada en $seccionRuta: ${foto.ruta}');

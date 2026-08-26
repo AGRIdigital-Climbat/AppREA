@@ -1,20 +1,10 @@
 import 'dart:convert';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
 import 'usuario.dart';
-
-/// Genera un id_seccion único para secciones 1:N.
-/// Formato: {timestamp_base32}-{random_hex} (~24 chars).
-/// Coincide con el formato esperado por el backend v2.9.0.
-String generarIdSeccion() {
-  final ts = DateTime.now().millisecondsSinceEpoch.toRadixString(32);
-  final rand = Random.secure();
-  final hex = List.generate(13, (_) => rand.nextInt(16).toRadixString(16)).join();
-  return '$ts-$hex';
-}
+import 'id_seccion_helper.dart';
 
 /// Devuelve el idSeccion de un ítem de sección 1:N (genérico).
 String? idSeccionDe(dynamic item) {
@@ -207,10 +197,10 @@ class EdanImpactoPoblacion {
     this.observaciones = '',
     List<EdanGrupoEtario>? gruposEtarios,
   }) : gruposEtarios = gruposEtarios ?? [
-          EdanGrupoEtario(idSeccion: generarIdSeccion(), rango: 'Niño (a) 0-5 años'),
-          EdanGrupoEtario(idSeccion: generarIdSeccion(), rango: 'Escolar de 6-18 años'),
-          EdanGrupoEtario(idSeccion: generarIdSeccion(), rango: 'Adulto de 19-60 años'),
-          EdanGrupoEtario(idSeccion: generarIdSeccion(), rango: 'Adulto mayor de 60 años adelante'),
+          EdanGrupoEtario(idSeccion: generarIdSeccion('im'), rango: 'Niño (a) 0-5 años'),
+          EdanGrupoEtario(idSeccion: generarIdSeccion('im'), rango: 'Escolar de 6-18 años'),
+          EdanGrupoEtario(idSeccion: generarIdSeccion('im'), rango: 'Adulto de 19-60 años'),
+          EdanGrupoEtario(idSeccion: generarIdSeccion('im'), rango: 'Adulto mayor de 60 años adelante'),
         ];
 
   factory EdanImpactoPoblacion.fromJson(Map<String, dynamic> json) {
@@ -250,12 +240,14 @@ class EdanNecesidadPrimeraRespuesta {
   bool salvamento;
   bool evacuacion;
   String observaciones;
+  String? idSeccion;
 
   EdanNecesidadPrimeraRespuesta({
     this.busqueda = false,
     this.salvamento = false,
     this.evacuacion = false,
     this.observaciones = '',
+    this.idSeccion,
   });
 
   factory EdanNecesidadPrimeraRespuesta.fromJson(Map<String, dynamic> json) {
@@ -264,6 +256,7 @@ class EdanNecesidadPrimeraRespuesta {
       salvamento: _toBool(json['salvamento']),
       evacuacion: _toBool(json['evacuacion']),
       observaciones: _str(json['observaciones']),
+      idSeccion: _str(json['id_seccion']),
     );
   }
 
@@ -272,6 +265,7 @@ class EdanNecesidadPrimeraRespuesta {
         'salvamento': salvamento,
         'evacuacion': evacuacion,
         'observaciones': observaciones,
+        if (idSeccion != null) 'id_seccion': idSeccion,
       };
 
   bool get algunaSeleccionada => busqueda || salvamento || evacuacion;
@@ -409,12 +403,14 @@ class EdanNecesidadSalud {
   int numeroPersonas;
   String otrasNecesidades;
   String observaciones;
+  String? idSeccion;
 
   EdanNecesidadSalud({
     this.botiquines = false,
     this.numeroPersonas = 0,
     this.otrasNecesidades = '',
     this.observaciones = '',
+    this.idSeccion,
   });
 
   factory EdanNecesidadSalud.fromJson(Map<String, dynamic> json) {
@@ -426,6 +422,7 @@ class EdanNecesidadSalud {
           json['atencionInmediata']),
       otrasNecesidades: _str(json['otras_necesidades'] ?? json['otrasNecesidades']),
       observaciones: _str(json['observaciones']),
+      idSeccion: _str(json['id_seccion']),
     );
   }
 
@@ -434,12 +431,15 @@ class EdanNecesidadSalud {
         'numero_personas': numeroPersonas,
         'otras_necesidades': otrasNecesidades,
         'observaciones': observaciones,
+        if (idSeccion != null) 'id_seccion': idSeccion,
       };
 
   Map<String, dynamic> toApiJson() => {
+        'botiquines': botiquines,
         'numero_personas': numeroPersonas,
         'otras_necesidades': otrasNecesidades,
         'observaciones': observaciones,
+        if (idSeccion != null) 'id_seccion': idSeccion,
       };
 }
 
@@ -674,6 +674,7 @@ class EdanServicioBasicoDetalle {
   Map<String, dynamic> toApiJson() => {
         if (idSeccion != null) 'id_seccion': idSeccion,
         'tipo': tipo,
+        'afectado': afectado,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
@@ -1394,6 +1395,7 @@ class EdanNecesidadHumanitaria {
   String obsHerramientas;
   String obsAlmacenamientoAgua;
   String obsBanos;
+  String? idSeccion;
 
   EdanNecesidadHumanitaria({
     this.alimentos = false,
@@ -1414,6 +1416,7 @@ class EdanNecesidadHumanitaria {
     this.obsHerramientas = '',
     this.obsAlmacenamientoAgua = '',
     this.obsBanos = '',
+    this.idSeccion,
   });
 
   factory EdanNecesidadHumanitaria.fromJson(Map<String, dynamic> json) {
@@ -1436,6 +1439,7 @@ class EdanNecesidadHumanitaria {
       obsHerramientas: _str(json['obs_herramientas']),
       obsAlmacenamientoAgua: _str(json['obs_almacenamiento_agua'] ?? json['obsAlmacenamientoAgua']),
       obsBanos: _str(json['obs_banos']),
+      idSeccion: _str(json['id_seccion']),
     );
   }
 
@@ -1458,6 +1462,7 @@ class EdanNecesidadHumanitaria {
         'obs_herramientas': obsHerramientas,
         'obs_almacenamiento_agua': obsAlmacenamientoAgua,
         'obs_banos': obsBanos,
+        if (idSeccion != null) 'id_seccion': idSeccion,
       };
 
   bool get algunaSeleccionada =>
@@ -1538,14 +1543,14 @@ class EdanLocalidad {
   EdanNecesidadHumanitaria? necesidadHumanitaria;
 
   static List<EdanGrupoVulnerable> _proteccionPorDefecto() => [
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 0: Niñas y niños 0-5
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 1: Niñas y niños 6-12
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 2: Adolescentes
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 3: Mujeres lactantes
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 4: Mujeres embarazadas
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 5: Adultos mayores
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 6: Personas con discapacidad
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion()), // 7: Personas con enfermedad crónica
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 0: Niñas y niños 0-5
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 1: Niñas y niños 6-12
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 2: Adolescentes
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 3: Mujeres lactantes
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 4: Mujeres embarazadas
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 5: Adultos mayores
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 6: Personas con discapacidad
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 7: Personas con enfermedad crónica
       ];
 
   static List<EdanGrupoVulnerable> proteccionDesdeCatalogo(
@@ -1554,7 +1559,7 @@ class EdanLocalidad {
     return catalogo.map<EdanGrupoVulnerable>((c) {
       final id = c is Map ? (c['id_grupo_vulnerable'] ?? c['id']) : null;
       return EdanGrupoVulnerable(
-        idSeccion: generarIdSeccion(),
+        idSeccion: generarIdSeccion('po'),
         idGrupoVulnerableCatalogo: id is int ? id : int.tryParse('$id'),
       );
     }).toList();

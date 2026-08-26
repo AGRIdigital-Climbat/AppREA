@@ -156,7 +156,7 @@ void main() {
       print('\n=== proteccion JSON ===');
       print(proteccionApi);
 
-      final item = proteccionApi[0] as Map<String, dynamic>;
+      final item = proteccionApi[0];
       print('\nProteccion item:');
       print(item);
 

@@ -1408,7 +1408,7 @@ class DatabaseHelper {
       'datos_json': jsonEncode(localidad.toJson()),
       'sincronizado': 0,
       'pendiente_eliminacion': 0,
-      'pendiente_actualizacion': 0,
+      'pendiente_actualizacion': localidad.pendienteActualizacion ? 1 : 0,
       'fecha_creacion': now,
       'fecha_modificacion': now,
       'intentos_sync': 0,
