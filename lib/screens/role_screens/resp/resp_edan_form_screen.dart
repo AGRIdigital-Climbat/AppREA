@@ -12,10 +12,11 @@ import '../../../providers/reporte_provider.dart';
 import '../../../config/api_config.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
-import '../../../services/connectivity_service.dart';
 import '../../../services/image_service.dart';
 import '../../../services/location_service.dart';
+import '../../../services/api_service.dart';
 import '../../../services/localidad_sync_service.dart';
+import '../../../services/debug_log.dart';
 import '../../../services/permission_service.dart';
 import '../../../widgets/custom_text_field.dart';
 import '../ugr/ugr_edan_preview_screen.dart';
@@ -467,7 +468,6 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
     );
     if (confirmado == null || !mounted) return;
     
-    // Guardar localidad confirmada (rol 7: un reporte por punto, sin consolidar)
     final userId = AuthService.instance.userId;
     if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -500,12 +500,13 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
         ..totalPoblacionAfectada = _intDe(_poblacionController)
         ..totalFamiliasAfectadas = _intDe(_familiasAfectadasController)
         ..totalFamiliasDamnificadas = _intDe(_familiasDamnificadasController)
-        ..idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id
-        ..estadoLocalidad = UgrLocalidadEstado.enviadoUgr
+        ..idEdanLocalidadEstado = UgrLocalidadEstado.borrador.id
+        ..estadoLocalidad = UgrLocalidadEstado.borrador
         ..fechaModificacion = DateTime.now().toIso8601String()
         ..sincronizado = false
         ..pendienteActualizacion = true;
       _normalizarLocalidad(localidad);
+      _reconciliarCatalogoProteccion(localidad);
 
       final db = DatabaseHelper.instance;
       if (localidad.idLocal != null) {
@@ -515,16 +516,75 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
             '${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
         await db.insertLocalidad(localidad, usuarioId: userId);
       }
-      LocalidadSyncService.instance.recargarPendientes();
 
-      final sincronizada = await _sincronizarTrasConfirmar();
+      bool sincronizada = false;
+      try {
+        final json = localidad.toApiJson();
+        json['id_usuario'] = userId;
+        json['id_edan_localidad_estado'] = UgrLocalidadEstado.enviadoUgr.id;
+
+        DebugLog.instance.paso('Inicio envío localidad idLocal=${localidad.idLocal} '
+            'idServer previo=${localidad.idServer} '
+            'gruposProteccion=${localidad.proteccionParaEndpointDedicado().length} '
+            'proteccionTotal=${localidad.proteccion.length}');
+
+        Map<String, dynamic> respuesta;
+        final idServerExistente = localidad.idServer;
+
+        if (idServerExistente != null) {
+          respuesta = await ApiService.instance.editarLocalidadDirecta(idServerExistente, json);
+          DebugLog.instance.i('Usó editarLocalidadDirecta idServer=$idServerExistente');
+        } else {
+          respuesta = await ApiService.instance.enviarLocalidadDirecta(json);
+          DebugLog.instance.i('Usó enviarLocalidadDirecta (nueva)');
+        }
+
+        final idServerRaw = respuesta['id_edan_localidad'];
+        final serverId = idServerRaw is int
+            ? idServerRaw
+            : int.tryParse('${idServerRaw ?? ''}');
+        // En la ruta de EDICIÓN (PUT) la respuesta es el objeto de la localidad
+        // actualizado, sin la clave 'aplicado'. Se considera aplicado si devuelve
+        // un id_edan_localidad válido. En la ruta de creación (/sync) la respuesta
+        // trae 'aplicado: true'.
+        final aplicado = idServerExistente != null
+            ? (serverId != null || respuesta['aplicado'] == true)
+            : respuesta['aplicado'] == true;
+        DebugLog.instance.i('Respuesta envío: aplicado=$aplicado id_edan_localidad=$idServerRaw '
+            'serverId=$serverId fueEdicion=${idServerExistente != null} '
+            'respuestaKeys=${respuesta.keys}');
+
+        if (aplicado) {
+          final int? fotoServerId = serverId ?? idServerExistente;
+          if (fotoServerId != null) {
+            await LocalidadSyncService.instance.pushFotos(localidad, fotoServerId);
+          } else {
+            DebugLog.instance.e('aplicado=true pero sin idServer para push de fotos/protección');
+          }
+          localidad
+            ..idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id
+            ..estadoLocalidad = UgrLocalidadEstado.enviadoUgr
+            ..idServer = fotoServerId ?? idServerExistente
+            ..sincronizado = true
+            ..pendienteActualizacion = false;
+          await db.updateLocalidad(localidad);
+          sincronizada = true;
+          DebugLog.instance.paso('Localidad marcada como ENVIADA');
+        } else {
+          DebugLog.instance.e('aplicado != true. Respuesta completa: $respuesta');
+        }
+      } catch (e, st) {
+        debugPrint('[ENVIO] Error enviando directo: $e');
+        DebugLog.instance.e('Error enviando directo', e, st);
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
             sincronizada
                 ? 'Localidad enviada correctamente'
-                : 'Localidad guardada; pendiente de sincronización',
+                : 'Localidad guardada; pendiente de envío',
           ),
           backgroundColor: sincronizada
               ? AppColors.aprobado
@@ -539,17 +599,6 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
           backgroundColor: AppColors.rechazado,
         ),
       );
-    }
-  }
-
-  Future<bool> _sincronizarTrasConfirmar() async {
-    try {
-      if (LocalidadSyncService.instance.isSyncing) return false;
-      if (!ConnectivityService().isConnected) return false;
-      final result = await LocalidadSyncService.instance.sincronizar();
-      return result.exito && result.fallidos == 0;
-    } catch (_) {
-      return false;
     }
   }
 
@@ -641,6 +690,29 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
       loc.idTipoLocalidad = tipoLocalidadIdPorNombre(loc.tipoLocalidad);
     }
     if (loc.idTipoEvento == 0) loc.idTipoEvento = null;
+  }
+
+  /// Garantiza que cada grupo de protección tenga su id_grupo_vulnerable_catalogo.
+  ///
+  /// Al recuperar una localidad (SQLite/servidor) donde la protección venía
+  /// vacía, fromJson la rellena con _proteccionPorDefecto(), que NO setea el
+  /// catálogo. Si el usuario llena ese grupo, se enviaría sin
+  /// id_grupo_vulnerable_catalogo y el servidor lo rechaza ("Field required").
+  /// Aquí se asigna el catálogo por posición (el catálogo tiene 8 items en el
+  /// mismo orden) siempre que falte.
+  void _reconciliarCatalogoProteccion(EdanLocalidad loc) {
+    if (loc.proteccion.isEmpty) return;
+    final catalogo = context.read<ReporteProvider>().gruposVulnerables;
+    if (catalogo.isEmpty) return;
+    for (var i = 0; i < loc.proteccion.length; i++) {
+      final g = loc.proteccion[i];
+      if (g.idGrupoVulnerableCatalogo == null && i < catalogo.length) {
+        g.idGrupoVulnerableCatalogo = catalogo[i].idGrupoVulnerable;
+        DebugLog.instance.i('Reconciliado catálogo protección índice $i -> '
+            'idGrupoVulnerableCatalogo=${g.idGrupoVulnerableCatalogo} '
+            '(grupo "${catalogo[i].nombre}")');
+      }
+    }
   }
 
   void _toggle(String num) {

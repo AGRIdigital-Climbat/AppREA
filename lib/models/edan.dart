@@ -374,8 +374,8 @@ class EdanEstablecimientoSalud {
         'coordenada_lon': coordenadaLon,
       };
 
-  /// Serialización alineada al schema EstablecimientoSalud de la API
-  /// (columna BD: enfermeras_afectadas; sin fotos locales).
+  /// Serialización alineada al schema EstablecimientoSalud de la API.
+  /// NO incluye fotografia: las fotos se suben vía con-foto (POST dedicado).
   Map<String, dynamic> toApiJson() => {
         if (idSeccion != null) 'id_seccion': idSeccion,
         'nombre_establecimiento': nombreEstablecimiento,
@@ -386,7 +386,6 @@ class EdanEstablecimientoSalud {
         'medicos_afectados': medicosAfectados,
         'enfermeras_afectadas': enfermerasAfectados,
         'otros_afectados': otrosAfectados,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -510,6 +509,7 @@ class EdanDanoVial {
 
   /// Serialización alineada al schema DanoVial de la API: la UI guarda
   /// viaPuente ('Vía'/'Puente') y la API espera dos booleanos via/puente.
+  /// NO incluye fotografia: las fotos se suben vía con-foto (POST dedicado).
   Map<String, dynamic> toApiJson() {
     final vp = viaPuente.trim().toLowerCase();
     return {
@@ -522,7 +522,6 @@ class EdanDanoVial {
       'km_danio': kmDanio,
       'necesidades_inmediatas': necesidadesInmediatas,
       'observaciones': observaciones,
-      'fotografia': fotografia,
       'coordenada_lat': coordenadaLat,
       'coordenada_lon': coordenadaLon,
     };
@@ -598,7 +597,6 @@ class EdanDanoInfraPublica {
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
         'observaciones': observaciones,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -679,7 +677,6 @@ class EdanServicioBasicoDetalle {
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -708,6 +705,7 @@ class EdanServicioBasicoDetalle {
   }
 
   bool get tieneDatos =>
+      afectado ||
       danoParcial ||
       danoTotal ||
       necesidadesInmediatas.trim().isNotEmpty ||
@@ -884,7 +882,6 @@ class EdanDanoUnidadEducativa {
         'profesores': profesores,
         'administrativos': administrativos,
         'observaciones': observaciones,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -962,7 +959,6 @@ class EdanDanoVivienda {
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -1044,7 +1040,6 @@ class EdanDanoAgricultura {
         'hectareas_perdidas': hectareasPerdidas,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -1128,7 +1123,6 @@ class EdanDanoPecuario {
         'animales_afectados': animalesAfectados,
         'animales_muertos': animalesMuertos,
         'necesidades_inmediatas': necesidadesInmediatas,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -1194,7 +1188,6 @@ class EdanInfraProductiva {
         'tipo': tipo,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
-        'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
       };
@@ -1242,6 +1235,7 @@ class EdanGrupoVulnerable {
     if (grupoRaw is Map) {
       nombreGrupo = grupoRaw['nombre']?.toString();
     }
+    nombreGrupo ??= json['nombre_grupo']?.toString();
     return EdanGrupoVulnerable(
       idSeccion: json['id_seccion']?.toString(),
       idGrupoVulnerableCatalogo: _jsonIntFk(json['id_grupo_vulnerable_catalogo']) ??
@@ -1249,18 +1243,21 @@ class EdanGrupoVulnerable {
       nombreGrupo: nombreGrupo,
       mujeres: _toInt(json['mujeres']),
       hombres: _toInt(json['hombres']),
-      apoyoPsicologico: json['apoyo_psicologico'] ?? json['apoyoPsicologico'] == null
-          ? null
-          : _toBool(json['apoyo_psicologico'] ?? json['apoyoPsicologico']),
-      reposicionDocumentos: json['reposicion_documentos'] ?? json['reposicionDocumentos'] == null
-          ? null
-          : _toBool(json['reposicion_documentos'] ?? json['reposicionDocumentos']),
+      apoyoPsicologico: (() {
+        final raw = json['apoyo_psicologico'] ?? json['apoyoPsicologico'];
+        return raw == null ? null : _toBool(raw);
+      })(),
+      reposicionDocumentos: (() {
+        final raw = json['reposicion_documentos'] ?? json['reposicionDocumentos'];
+        return raw == null ? null : _toBool(raw);
+      })(),
       observaciones: _str(json['observaciones']),
     );
   }
 
   Map<String, dynamic> toJson() => {
         if (idSeccion != null) 'id_seccion': idSeccion,
+        if (nombreGrupo != null) 'nombre_grupo': nombreGrupo,
         'id_grupo_vulnerable_catalogo': idGrupoVulnerableCatalogo,
         'mujeres': mujeres,
         'hombres': hombres,
@@ -1278,6 +1275,7 @@ class EdanGrupoVulnerable {
         if (grupoCatalogo != null) 'grupo': grupoCatalogo,
         'mujeres': mujeres,
         'hombres': hombres,
+        'total': total,
         'apoyo_psicologico': apoyoPsicologico,
         'reposicion_documentos': reposicionDocumentos,
         'observaciones': observaciones,
@@ -1543,14 +1541,14 @@ class EdanLocalidad {
   EdanNecesidadHumanitaria? necesidadHumanitaria;
 
   static List<EdanGrupoVulnerable> _proteccionPorDefecto() => [
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 0: Niñas y niños 0-5
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 1: Niñas y niños 6-12
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 2: Adolescentes
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 3: Mujeres lactantes
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 4: Mujeres embarazadas
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 5: Adultos mayores
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 6: Personas con discapacidad
-        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')), // 7: Personas con enfermedad crónica
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Niñas y niños 0-5 años'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Niñas y niños 6-12 años'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Adolescentes'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Mujeres lactantes'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Mujeres embarazadas'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Adultos mayores'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Personas con discapacidad'),
+        EdanGrupoVulnerable(idSeccion: generarIdSeccion('po'), nombreGrupo: 'Personas con enfermedad crónica'),
       ];
 
   static List<EdanGrupoVulnerable> proteccionDesdeCatalogo(
@@ -1558,9 +1556,11 @@ class EdanLocalidad {
     if (catalogo.isEmpty) return _proteccionPorDefecto();
     return catalogo.map<EdanGrupoVulnerable>((c) {
       final id = c is Map ? (c['id_grupo_vulnerable'] ?? c['id']) : null;
+      final nombre = c is Map ? (c['nombre'] ?? '') : '';
       return EdanGrupoVulnerable(
         idSeccion: generarIdSeccion('po'),
         idGrupoVulnerableCatalogo: id is int ? id : int.tryParse('$id'),
+        nombreGrupo: nombre.toString(),
       );
     }).toList();
   }
@@ -1978,10 +1978,15 @@ class EdanLocalidad {
     'Personas con enfermedad crónica',
   ];
 
-  List<Map<String, dynamic>> _proteccionApi() => [
-        for (var i = 0; i < proteccion.length; i++)
-          if (proteccion[i].tieneDatos)
-            proteccion[i].toApiJson(null),
+  /// La protección se envía por endpoints dedicados (POST /proteccion),
+  /// NO dentro del JSON principal de la localidad.
+  List<Map<String, dynamic>> _proteccionApi() => [];
+
+  /// Grupos vulnerables con datos, listos para enviar por endpoints dedicados.
+  /// Cada item se envía individualmente via POST /edan/localidades/{id}/proteccion.
+  List<Map<String, dynamic>> proteccionParaEndpointDedicado() => [
+        for (final g in proteccion)
+          if (g.tieneDatos) g.toApiJson(null),
       ];
 
   /// Resuelve el id_tipo_localidad desde el catálogo usando el nombre cuando

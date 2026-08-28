@@ -3,8 +3,8 @@ import 'package:provider/provider.dart';
 import '../../../config/theme.dart';
 import '../../../models/edan.dart';
 import '../../../providers/reporte_provider.dart';
+import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
-import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
 import '../../../services/localidad_sync_service.dart';
 import 'resp_edan_form_screen.dart';
@@ -197,15 +197,24 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
       );
       return;
     }
+    final esReenvio = localidad.idServer != null;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        icon: const Icon(Icons.send_rounded, size: 40, color: AppColors.aprobado),
-        title: const Text('Enviar al UGR'),
-        content: const Text(
-          'El formulario está completo y listo para enviar.\n\n'
-          'Una vez enviado, el UGR revisará su reporte y '
-          'no podrá editarlo hasta que sea aprobado o rechazado.',
+        icon: Icon(
+          esReenvio ? Icons.cloud_upload_outlined : Icons.send_rounded,
+          size: 40,
+          color: AppColors.aprobado,
+        ),
+        title: Text(esReenvio ? 'Reenviar al UGR' : 'Enviar al UGR'),
+        content: Text(
+          esReenvio
+              ? 'Este formulario ya fue enviado anteriormente pero no se sincronizó.\n\n'
+                  'Se reenviará al UGR para su revisión. '
+                  'Una vez enviado, no podrá editarlo hasta que sea aprobado o rechazado.'
+              : 'El formulario está completo y listo para enviar.\n\n'
+                  'Una vez enviado, el UGR revisará su reporte y '
+                  'no podrá editarlo hasta que sea aprobado o rechazado.',
         ),
         actions: [
           TextButton(
@@ -215,7 +224,7 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
             style: FilledButton.styleFrom(backgroundColor: AppColors.aprobado),
-            child: const Text('Confirmar Envío'),
+            child: Text(esReenvio ? 'Reenviar' : 'Confirmar Envío'),
           ),
         ],
       ),
@@ -233,29 +242,81 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
   }
 
   Future<void> _marcarEnviada(EdanLocalidad localidad) async {
-    localidad.estadoLocalidad = UgrLocalidadEstado.enviadoUgr;
-    localidad.idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id;
+    localidad.estadoLocalidad = UgrLocalidadEstado.borrador;
+    localidad.idEdanLocalidadEstado = UgrLocalidadEstado.borrador.id;
     localidad.pendienteActualizacion = true;
     localidad.sincronizado = false;
     await DatabaseHelper.instance.updateLocalidad(localidad);
+
+    final userId = AuthService.instance.userId;
+    if (userId == null) return;
+
+    bool sincronizada = false;
+    try {
+      if (localidad.proteccion.isNotEmpty) {
+        final catalogo = context.read<ReporteProvider>().gruposVulnerables;
+        if (catalogo.isNotEmpty) {
+          for (var i = 0; i < localidad.proteccion.length; i++) {
+            if (localidad.proteccion[i].idGrupoVulnerableCatalogo == null &&
+                i < catalogo.length) {
+              localidad.proteccion[i].idGrupoVulnerableCatalogo =
+                  catalogo[i].idGrupoVulnerable;
+            }
+          }
+        }
+      }
+      final json = localidad.toApiJson();
+      json['id_usuario'] = userId;
+      json['id_edan_localidad_estado'] = UgrLocalidadEstado.enviadoUgr.id;
+
+      Map<String, dynamic> respuesta;
+      final idServerExistente = localidad.idServer;
+
+      if (idServerExistente != null) {
+        respuesta = await ApiService.instance.editarLocalidadDirecta(idServerExistente, json);
+      } else {
+        respuesta = await ApiService.instance.enviarLocalidadDirecta(json);
+      }
+
+      final idServerRaw = respuesta['id_edan_localidad'];
+      final serverId = idServerRaw is int
+          ? idServerRaw
+          : int.tryParse('${idServerRaw ?? ''}');
+      // Ruta edición (PUT): respuesta sin clave 'aplicado'; se considera
+      // aplicado si devuelve id_edan_localidad válido.
+      final aplicado = idServerExistente != null
+          ? (serverId != null || respuesta['aplicado'] == true)
+          : respuesta['aplicado'] == true;
+
+      if (aplicado) {
+        final int? fotoServerId = serverId ?? idServerExistente;
+        if (fotoServerId != null) {
+          await LocalidadSyncService.instance.pushFotos(localidad, fotoServerId);
+        }
+        localidad.estadoLocalidad = UgrLocalidadEstado.enviadoUgr;
+        localidad.idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id;
+        localidad.idServer = fotoServerId ?? idServerExistente;
+        localidad.sincronizado = true;
+        localidad.pendienteActualizacion = false;
+        await DatabaseHelper.instance.updateLocalidad(localidad);
+        sincronizada = true;
+      }
+    } catch (e) {
+      debugPrint('[ENVIO] Error enviando directo: $e');
+    }
+
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Localidad enviada al UGR'),
-          backgroundColor: AppColors.aprobado,
+        SnackBar(
+          content: Text(
+            sincronizada
+                ? 'Localidad enviada al UGR'
+                : 'Localidad guardada; pendiente de envío',
+          ),
+          backgroundColor: sincronizada ? AppColors.aprobado : AppColors.pending,
         ),
       );
       await _cargarLocalidades();
-      _sincronizarServidor();
-    }
-  }
-
-  Future<void> _sincronizarServidor() async {
-    if (LocalidadSyncService.instance.isSyncing) return;
-    if (!ConnectivityService().isConnected) return;
-    final result = await LocalidadSyncService.instance.sincronizar();
-    if (mounted && result.exito) {
-      _cargarLocalidades();
     }
   }
 
@@ -644,11 +705,18 @@ class _RespLocalidadCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
     final estado = localidad.estadoLocalidad ?? UgrLocalidadEstado.borrador;
+    final esPendienteEnvio = estado == UgrLocalidadEstado.borrador && !localidad.sincronizado;
     final reporterName = AuthService.instance.userName ??
         AuthService.instance.currentToken?.nombre ??
         '';
     return Card(
       margin: EdgeInsets.zero,
+      shape: esPendienteEnvio
+          ? RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+              side: BorderSide(color: AppColors.pending.withValues(alpha: 0.6), width: 1.5),
+            )
+          : null,
       child: InkWell(
         onTap: onTap,
         borderRadius: BorderRadius.circular(16),
@@ -719,22 +787,48 @@ class _RespLocalidadCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 14, color: AppColors.primary),
-                  SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'La información debe ser enviada cuando esté completa desde la vista previa.',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: AppColors.textSecondary,
+              if (esPendienteEnvio)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.pending.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppColors.pending.withValues(alpha: 0.3)),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.cloud_upload_outlined, size: 16, color: AppColors.pending),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Pendiente de envío. Presione "Enviar" para sincronizar con el UGR.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.pending,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: AppColors.primary),
+                    SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'La información debe ser enviada cuando esté completa desde la vista previa.',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                        ),
                       ),
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
               const SizedBox(height: 10),
               Row(
                 children: [

@@ -120,7 +120,8 @@ void main() {
       expect(item['id_seccion'], equals('1a035a2b4cd-659d1a8f9c3d1'));
       expect(item['tipo'], equals('energia_electrica'));
       expect(item['observaciones'], equals('3 postes en calle principal'));
-      expect(item['fotografia'], equals('/uploads/test.jpg'));
+      expect(item.containsKey('fotografia'), isFalse,
+          reason: 'toApiJson() NO debe incluir fotografia (se sube vía con-foto)');
       expect(item['coordenada_lat'], equals(-16.5045));
       expect(item['coordenada_lon'], equals(-68.1532));
     });

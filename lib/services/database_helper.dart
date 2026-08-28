@@ -1514,8 +1514,8 @@ class DatabaseHelper {
         'id_edan_localidad_estado': localidad.idEdanLocalidadEstado,
         'estado_localidad': localidad.estadoLocalidad?.label,
         'datos_json': jsonEncode(localidad.toJson()),
-        'sincronizado': 0,
-        'pendiente_actualizacion': 1,
+        'sincronizado': localidad.sincronizado ? 1 : 0,
+        'pendiente_actualizacion': localidad.pendienteActualizacion ? 1 : 0,
         'pendiente_eliminacion': localidad.pendienteEliminacion ? 1 : 0,
         'fecha_modificacion': now,
       },
@@ -1589,6 +1589,24 @@ class DatabaseHelper {
     );
     if (maps.isEmpty) return null;
     return _localidadFromRow(maps.first);
+  }
+
+  Future<int> updateLocalidadEstado(String idLocal, int idEstado) async {
+    final db = await database;
+    UgrLocalidadEstado? estado;
+    for (final e in UgrLocalidadEstado.values) {
+      if (e.id == idEstado) { estado = e; break; }
+    }
+    return await db.update(
+      'localidades_offline',
+      {
+        'id_edan_localidad_estado': idEstado,
+        'estado_localidad': estado?.label,
+        'fecha_modificacion': DateTime.now().toIso8601String(),
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
   }
 
   Future<List<EdanLocalidad>> getLocalidadesPendingDeletion() async {

@@ -211,10 +211,10 @@ void main() {
       print('VERIFICACIÓN DE PROTECCIÓN');
       print('${'='*80}');
       
-      final proteccionList = (apiJson['proteccion'] as List);
+      final proteccionList = localidad.proteccionParaEndpointDedicado();
       print('Total grupos vulnerables: ${proteccionList.length}');
-      
-      final grupo1 = proteccionList[0] as Map<String, dynamic>;
+
+      final grupo1 = proteccionList[0];
       print('Grupo 1:');
       print('  id_seccion: ${grupo1['id_seccion']}');
       print('  id_grupo_vulnerable_catalogo: ${grupo1['id_grupo_vulnerable_catalogo']}');

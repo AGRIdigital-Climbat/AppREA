@@ -9,6 +9,7 @@ import '../models/departamento.dart';
 import '../models/provincia.dart';
 import '../models/municipio.dart';
 import '../models/usuario.dart';
+import '../services/debug_log.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._();
@@ -882,15 +883,62 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> syncLocalidades(List<Map<String, dynamic>> localidades) async {
+    try {
+      final response = await _requestWithRetry(() =>
+        http.post(
+          Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync'),
+          headers: _headers,
+          body: jsonEncode({'localidades': localidades}),
+        ).timeout(const Duration(seconds: 120))
+      );
+      final body = await _handleResponse(response);
+      DebugLog.instance.i('syncLocalidades status=${response.statusCode} '
+          'localidades=${localidades.length} keyCount=${localidades.isEmpty ? 0 : localidades.first.keys.length}');
+      return Map<String, dynamic>.from(body);
+    } catch (e, st) {
+      DebugLog.instance.e('syncLocalidades ERROR', e, st);
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> enviarLocalidadDirecta(Map<String, dynamic> localidadJson) async {
+    final respuesta = await syncLocalidades([localidadJson]);
+    final datos = respuesta['data'];
+    final items = datos is List ? datos : <dynamic>[];
+    if (items.isNotEmpty && items.first is Map) {
+      return Map<String, dynamic>.from(items.first);
+    }
+    return <String, dynamic>{};
+  }
+
+  Future<Map<String, dynamic>> editarLocalidadDirecta(int idServer, Map<String, dynamic> json) async {
     final response = await _requestWithRetry(() =>
-      http.post(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync'),
+      http.put(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idServer'),
         headers: _headers,
-        body: jsonEncode({'localidades': localidades}),
-      ).timeout(const Duration(seconds: 60))
+        body: jsonEncode(json),
+      ).timeout(const Duration(seconds: 30))
     );
     final body = await _handleResponse(response);
+    final data = body['data'];
+    if (data is Map) return Map<String, dynamic>.from(data);
     return Map<String, dynamic>.from(body);
+  }
+
+  Future<List<Map<String, dynamic>>> pullEstados({int? idUsuario, String? fechaDesde}) async {
+    final params = <String, String>{};
+    if (idUsuario != null) params['id_usuario'] = idUsuario.toString();
+    if (fechaDesde != null) params['fecha_desde'] = fechaDesde;
+    params['limit'] = '1000';
+    final uri = Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync/pull')
+        .replace(queryParameters: params);
+    final response = await _requestWithRetry(() =>
+      http.get(uri, headers: _headers).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    final data = body['data'];
+    if (data is List) return data.cast<Map<String, dynamic>>();
+    return [];
   }
 
   Future<Map<String, dynamic>> cambiarEstadoLocalidad(int idLocalidad, int idEstado) async {
@@ -903,6 +951,60 @@ class ApiService {
     );
     final body = await _handleResponse(response);
     return Map<String, dynamic>.from(body['data']);
+  }
+
+  /// Endpoints dedicados de protección (grupos vulnerables).
+
+  Future<List<Map<String, dynamic>>> listarProteccion(int idLocalidad) async {
+    try {
+      final response = await _requestWithRetry(() =>
+        http.get(
+          Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion'),
+          headers: _headers,
+        ).timeout(const Duration(seconds: 15))
+      );
+      final body = await _handleResponse(response);
+      final data = body['data'];
+      final lista = data is List ? data.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
+      DebugLog.instance.i('listarProteccion idServer=$idLocalidad -> ${lista.length} grupos');
+      return lista;
+    } catch (e, st) {
+      DebugLog.instance.e('listarProteccion ERROR idServer=$idLocalidad', e, st);
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> crearProteccion(int idLocalidad, Map<String, dynamic> json) async {
+    try {
+      final response = await _requestWithRetry(() =>
+        http.post(
+          Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion'),
+          headers: _headers,
+          body: jsonEncode(json),
+        ).timeout(const Duration(seconds: 15))
+      );
+      final body = await _handleResponse(response);
+      DebugLog.instance.i('crearProteccion OK idServer=$idLocalidad '
+          'cat=${json['id_grupo_vulnerable_catalogo']} status=${response.statusCode}');
+      final data = body['data'];
+      if (data is Map) return Map<String, dynamic>.from(data);
+      return Map<String, dynamic>.from(body);
+    } catch (e, st) {
+      DebugLog.instance.e('crearProteccion ERROR idServer=$idLocalidad '
+          'cat=${json['id_grupo_vulnerable_catalogo']} '
+          'id_seccion=${json['id_seccion']} '
+          'payload=${jsonEncode(json)}', e, st);
+      rethrow;
+    }
+  }
+
+  Future<void> eliminarProteccion(int idLocalidad, int idGrupo) async {
+    await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion/$idGrupo'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
   }
 
   Future<List<Map<String, dynamic>>> getConsolidarPendientes({
@@ -1109,7 +1211,7 @@ class ApiService {
     data.forEach((key, value) {
       if (value != null) request.fields[key] = value.toString();
     });
-    final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+    final streamedResponse = await request.send().timeout(const Duration(seconds: 90));
     final response = await http.Response.fromStream(streamedResponse);
     final body = await _handleResponse(response);
     final creado = body['data'];

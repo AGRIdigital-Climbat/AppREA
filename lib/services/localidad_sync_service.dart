@@ -5,6 +5,7 @@ import '../models/edan.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
+import '../services/debug_log.dart';
 
 class LocalidadSyncService {
   static final LocalidadSyncService _instance = LocalidadSyncService._();
@@ -27,15 +28,21 @@ class LocalidadSyncService {
     sincronizandoMunicipio.value = true;
     try {
       debugPrint('[recargarLocalidadesUsuario] Descargando localidades del usuario $idUsuario...');
+      DebugLog.instance.paso('recargarLocalidadesUsuario idUsuario=$idUsuario');
       final lista = await ApiService.instance.getLocalidadesMisReportes(
         idUsuario: idUsuario,
         soloHuerfanas: true,
         limit: 500,
       );
       debugPrint('[recargarLocalidadesUsuario] Recibidas ${lista.length} localidades del servidor');
+      DebugLog.instance.i('Recibidas ${lista.length} localidades del servidor');
       for (final item in lista) {
         try {
           final localidad = EdanLocalidad.fromJson(item);
+          DebugLog.instance.i('Recuperada localidad="${item['localidad']}" '
+              'proteccionDesdeServer=${localidad.proteccion.length} '
+              'withData=${localidad.proteccionParaEndpointDedicado().length} '
+              'impProteccion=${localidad.impProteccion}');
           final idLocal = localidad.idLocal;
           if (idLocal == null) {
             debugPrint('[recargarLocalidadesUsuario] Saltando localidad sin id_local: ${item['localidad']}');
@@ -272,12 +279,7 @@ class LocalidadSyncService {
         );
       }
 
-      final result = SyncResult(exito: true);
-
-      await _pullLocalidades(userId, result);
-      await _pushDeletions(result);
-      await _pushLocalidades(userId, result);
-
+      final result = SyncResult(exito: true, mensaje: 'Sincronización deshabilitada por ahora');
       return result;
     } catch (e) {
       debugPrint('Error en sincronización de localidades: $e');
@@ -300,276 +302,39 @@ class LocalidadSyncService {
     }
   }
 
-  Future<void> _pullLocalidades(int userId, SyncResult result) async {
-    try {
-      final prefs = await DatabaseHelper.instance.getLastSyncDate();
-      final fechaDesde = prefs != null ? DateTime.fromMillisecondsSinceEpoch(prefs) : null;
-
-      final localidadesRemotas = await ApiService.instance.getLocalidadesSyncPull(
-        idUsuario: userId,
-        fechaDesde: fechaDesde,
-        skip: 0,
-        limit: 100,
-      );
-
-      for (final locJson in localidadesRemotas) {
-        final localidad = EdanLocalidad.fromJson(locJson);
-        final idLocal = localidad.idLocal;
-        if (idLocal == null) continue;
-
-        final existente = await DatabaseHelper.instance.getLocalidadByIdLocal(idLocal);
-        if (existente != null) {
-          if (!existente.pendienteActualizacion && existente.sincronizado) {
-            _preservarEncabezado(localidad, existente);
-            _mergeSecciones(existente, localidad);
-            await DatabaseHelper.instance.updateLocalidad(localidad);
-            if (localidad.idServer != null) {
-              await DatabaseHelper.instance.markLocalidadAsSynced(idLocal, localidad.idServer!);
-            }
-          }
-          result.actualizados++;
-        } else {
-          await DatabaseHelper.instance.insertLocalidad(localidad, usuarioId: userId);
-          if (localidad.idServer != null) {
-            await DatabaseHelper.instance.markLocalidadAsSynced(idLocal, localidad.idServer!);
-          }
-          result.creados++;
-        }
-      }
-
-      if (localidadesRemotas.isNotEmpty) {
-        await DatabaseHelper.instance.saveLastSyncDate(DateTime.now().millisecondsSinceEpoch);
-      }
-    } catch (e) {
-      debugPrint('Error en pull de localidades: $e');
-      result.mensaje = 'Error al recibir localidades: ${e.toString()}';
-      result.exito = false;
-    }
-  }
-
-  Future<void> _pushDeletions(SyncResult result) async {
-    try {
-      final pendientes = await DatabaseHelper.instance.getLocalidadesPendingDeletion();
-
-      for (final localidad in pendientes) {
-        try {
-          if (localidad.idServer != null) {
-            await ApiService.instance.deleteLocalidad(localidad.idServer!);
-          }
-          await DatabaseHelper.instance.deleteLocalidad(localidad.idLocal!);
-          result.eliminados++;
-        } catch (e) {
-          debugPrint('Error eliminando localidad ${localidad.idLocal}: $e');
-          result.fallidos++;
-        }
-      }
-    } catch (e) {
-      debugPrint('Error en push de eliminaciones de localidades: $e');
-      result.mensaje = 'Error al eliminar localidades: ${e.toString()}';
-      result.exito = false;
-    }
-  }
-
-  Future<void> _pushLocalidades(int userId, SyncResult result) async {
-    try {
-      final localidadesPendientes = await DatabaseHelper.instance.getUnsyncedLocalidades();
-      
-      if (localidadesPendientes.isEmpty) {
-        return;
-      }
-
-      final localidadesJson = localidadesPendientes.map((loc) {
-        final json = loc.toApiJson();
-        json['id_usuario'] = userId;
-        return json;
-      }).toList();
-      final porIdLocal = <String, EdanLocalidad>{
-        for (final loc in localidadesPendientes)
-          if (loc.idLocal != null) loc.idLocal!: loc,
-      };
-
-      final respuesta = await ApiService.instance.syncLocalidades(localidadesJson);
-
-      debugPrint('[SYNC] Response completo: ${respuesta.toString()}');
-
-      final datos = respuesta['data'];
-      final items = datos is List ? datos : <dynamic>[];
-
-      for (final item in items) {
-        if (item is! Map) continue;
-        final m = Map<String, dynamic>.from(item);
-        final idLocal = m['id_local']?.toString();
-        final aplicado = m['aplicado'] == true;
-        final conflicto = m['conflicto'] == true;
-        final tombstone = m['tombstone'] == true;
-        final idServer = _parseId(m['id_edan_localidad']);
-        
-        debugPrint('[SYNC ITEM] id_local: $idLocal, aplicado: $aplicado, conflicto: $conflicto, id_server: $idServer');
-        debugPrint('[SYNC ITEM] data: ${m['data']}');
-
-        // Tombstone: server deleted the localidad → delete from SQLite
-        if (tombstone && idLocal != null) {
-          await DatabaseHelper.instance.deleteLocalidad(idLocal);
-          result.enviados++;
-          continue;
-        }
-
-        // Conflicto LWW: server version is newer → adopt server version
-        if (conflicto && idLocal != null) {
-          final serverData = m['data'];
-          if (serverData is Map) {
-            await _adoptServerVersion(idLocal, Map<String, dynamic>.from(serverData), userId);
-          }
-          result.enviados++;
-          continue;
-        }
-
-        if (aplicado && idLocal != null) {
-          final idServer = _parseId(m['id_edan_localidad']);
-          final localidad = porIdLocal[idLocal];
-
-          // Adopt server's convergent localidad if provided
-          final serverData = m['data'];
-          if (serverData is Map && idServer != null) {
-            await _adoptServerVersion(idLocal, Map<String, dynamic>.from(serverData), userId);
-          }
-
-          if (idServer != null) {
-            final fotosOk = localidad == null ||
-                await _pushFotos(localidad, idServer);
-            if (fotosOk) {
-              await DatabaseHelper.instance.markLocalidadAsSynced(idLocal, idServer);
-              result.enviados++;
-            } else {
-              result.fallidos++;
-            }
-          } else {
-            result.fallidos++;
-          }
-          continue;
-        }
-
-        if (idLocal != null) {
-          final error = _extractError(m);
-          final errorTexto = error.toLowerCase();
-          final esColisionCodigo = errorTexto.contains('codigo') &&
-              (errorTexto.contains('unique') ||
-                  errorTexto.contains('duplic') ||
-                  errorTexto.contains('ya existe'));
-          final localidad = porIdLocal[idLocal];
-          
-          debugPrint('[SYNC ERROR] id_local: $idLocal');
-          debugPrint('[SYNC ERROR] Mensaje: $error');
-          debugPrint('[SYNC ERROR] Response completo: ${m.toString()}');
-          
-          if (esColisionCodigo && localidad != null) {
-            final reintentado = await _regenerarIdLocalYReintentar(localidad, userId);
-            if (reintentado) {
-              result.enviados++;
-            } else {
-              result.fallidos++;
-            }
-          } else {
-            final intentos = _parseId(m['intentos']) ?? 0;
-            await DatabaseHelper.instance.updateLocalidadSyncAttempts(
-              idLocal,
-              intentos + 1,
-              error,
-            );
-            result.fallidos++;
-          }
-        } else {
-          result.fallidos++;
-        }
-      }
-    } catch (e) {
-      debugPrint('Error en push de localidades: $e');
-      result.mensaje = 'Error al enviar localidades: ${e.toString()}';
-      result.exito = false;
-    }
-  }
-
-  /// Adopta la versión convergente del servidor para una localidad.
-  /// Reemplaza los datos locales con los del servidor y marca como sincronizado.
-  Future<void> _adoptServerVersion(
-    String idLocal,
-    Map<String, dynamic> serverData,
-    int userId,
-  ) async {
-    try {
-      final serverLoc = EdanLocalidad.fromJson(Map<String, dynamic>.from(serverData));
-      serverLoc.idLocal = idLocal;
-      final existente = await DatabaseHelper.instance.getLocalidadByIdLocal(idLocal);
-      if (existente != null) {
-        _preservarEncabezado(serverLoc, existente);
-        _mergeSecciones(existente, serverLoc);
-      }
-      await DatabaseHelper.instance.updateLocalidad(serverLoc);
-      final idServer = serverLoc.idServer;
-      if (idServer != null) {
-        await DatabaseHelper.instance.markLocalidadAsSynced(idLocal, idServer);
-      }
-    } catch (e) {
-      debugPrint('Error adoptando versión del servidor para $idLocal: $e');
-    }
-  }
-
-  Future<bool> _regenerarIdLocalYReintentar(EdanLocalidad localidad, int userId) async {
-    try {
-      final nuevoIdLocal = '${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
-      localidad.idLocal = nuevoIdLocal;
-      await DatabaseHelper.instance.updateLocalidad(localidad);
-
-      final json = localidad.toApiJson();
-      json['id_usuario'] = userId;
-      final respuesta = await ApiService.instance.syncLocalidades([json]);
-      final datos = respuesta['data'];
-      final items = datos is List ? datos : <dynamic>[];
-      var aplicado = false;
-      for (final item in items) {
-        if (item is! Map) continue;
-        final m = Map<String, dynamic>.from(item);
-        if (m['aplicado'] == true) {
-          aplicado = true;
-          final idLocal = m['id_local']?.toString();
-          final idServer = _parseId(m['id_edan_localidad']);
-          if (idLocal != null && idServer != null) {
-            final fotosOk = await _pushFotos(localidad, idServer);
-            if (fotosOk) {
-              await DatabaseHelper.instance.markLocalidadAsSynced(idLocal, idServer);
-            } else {
-              aplicado = false;
-            }
-          }
-        }
-      }
-      return aplicado;
-    } catch (e) {
-      debugPrint('Error reintentando localidad tras colisión: $e');
-      return false;
-    }
-  }
-
   /// Sube al servidor las fotos pendientes de las secciones 1:N de una
   /// localidad recién aplicada (una fila por item con foto). Devuelve true si
   /// no quedan fotos pendientes.
-  Future<bool> _pushFotos(EdanLocalidad localidad, int idServer) async {
-    debugPrint('[FOTOS] _pushFotos idServer=$idServer '
-        'sb=${localidad.serviciosBasicos.length} '
-        'ue=${localidad.unidadesEducativas.length} '
-        'sv=${localidad.establecimientosSalud.length} '
-        'dv=${localidad.danosViales.length} '
-        'di=${localidad.danosInfraPublica.length} '
-        'vv=${localidad.danosVivienda.length} '
-        'da=${localidad.danosAgricultura.length} '
-        'dp=${localidad.danosPecuarios.length} '
-        'ip=${localidad.infraProductiva.length}');
-    for (final item in localidad.serviciosBasicos) {
-      debugPrint('[FOTOS] sb item tipo=${item.tipo} '
-          'fotos=${item.fotos.length} fotografia=${item.fotografia}');
+  Future<bool> pushFotos(EdanLocalidad localidad, int idServer) async {
+    final totalItems = localidad.establecimientosSalud.length +
+        localidad.danosViales.length +
+        localidad.danosInfraPublica.length +
+        localidad.unidadesEducativas.length +
+        localidad.danosVivienda.length +
+        localidad.danosAgricultura.length +
+        localidad.danosPecuarios.length +
+        localidad.infraProductiva.length +
+        localidad.serviciosBasicos.length;
+    final conFotos = localidad.establecimientosSalud.any((i) => i.fotos.isNotEmpty) ||
+        localidad.danosViales.any((i) => i.fotos.isNotEmpty) ||
+        localidad.danosInfraPublica.any((i) => i.fotos.isNotEmpty) ||
+        localidad.unidadesEducativas.any((i) => i.fotos.isNotEmpty) ||
+        localidad.danosVivienda.any((i) => i.fotos.isNotEmpty) ||
+        localidad.danosAgricultura.any((i) => i.fotos.isNotEmpty) ||
+        localidad.danosPecuarios.any((i) => i.fotos.isNotEmpty) ||
+        localidad.infraProductiva.any((i) => i.fotos.isNotEmpty) ||
+        localidad.serviciosBasicos.any((i) => i.fotos.isNotEmpty);
+    DebugLog.instance.i('[FOTOS] pushFotos idServer=$idServer '
+        'items=$totalItems conFotos=$conFotos');
+
+    if (!conFotos) {
+      DebugLog.instance.i('[FOTOS] pushFotos sin fotos -> solo push proteccion');
+      final proteccionOk = await pushProteccion(localidad, idServer);
+      return proteccionOk;
     }
+
     var ok = true;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'salud-establecimientos',
           items: localidad.establecimientosSalud,
@@ -580,7 +345,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'danos-viales',
           items: localidad.danosViales,
@@ -591,7 +356,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'danos-infra-publica',
           items: localidad.danosInfraPublica,
@@ -602,7 +367,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'unidades-educativas',
           items: localidad.unidadesEducativas,
@@ -613,7 +378,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'danos-vivienda',
           items: localidad.danosVivienda,
@@ -624,7 +389,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'danos-agricultura',
           items: localidad.danosAgricultura,
@@ -635,7 +400,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'danos-pecuarios',
           items: localidad.danosPecuarios,
@@ -646,7 +411,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'infra-productiva',
           items: localidad.infraProductiva,
@@ -657,7 +422,7 @@ class LocalidadSyncService {
           capturarIdSeccion: (item, id) => item.idSeccion = id,
         ) &&
         ok;
-    ok = await _subirFotosSeccion(
+    ok = await subirFotosSeccion(
           idServer: idServer,
           seccionRuta: 'servicios-basicos',
           items: localidad.serviciosBasicos,
@@ -669,16 +434,7 @@ class LocalidadSyncService {
         ) &&
         ok;
 
-    final huboFotos = localidad.establecimientosSalud.any((i) => i.fotos.isNotEmpty) ||
-        localidad.danosViales.any((i) => i.fotos.isNotEmpty) ||
-        localidad.danosInfraPublica.any((i) => i.fotos.isNotEmpty) ||
-        localidad.unidadesEducativas.any((i) => i.fotos.isNotEmpty) ||
-        localidad.danosVivienda.any((i) => i.fotos.isNotEmpty) ||
-        localidad.danosAgricultura.any((i) => i.fotos.isNotEmpty) ||
-        localidad.danosPecuarios.any((i) => i.fotos.isNotEmpty) ||
-        localidad.infraProductiva.any((i) => i.fotos.isNotEmpty) ||
-        localidad.serviciosBasicos.any((i) => i.fotos.isNotEmpty);
-    if (huboFotos) {
+    if (conFotos) {
       await DatabaseHelper.instance.updateLocalidad(localidad);
     }
     if (!ok) {
@@ -688,10 +444,15 @@ class LocalidadSyncService {
         'Error subiendo fotos de ${localidad.nombre}',
       );
     }
+
+    final proteccionOk = await pushProteccion(localidad, idServer);
+    if (!proteccionOk) ok = false;
+    DebugLog.instance.i('pushFotos final ok=$ok (proteccionOk=$proteccionOk)');
+
     return ok;
   }
 
-  Future<bool> _subirFotosSeccion<T>({
+  Future<bool> subirFotosSeccion<T>({
     required int idServer,
     required String seccionRuta,
     required List<T> items,
@@ -701,27 +462,27 @@ class LocalidadSyncService {
     required Map<String, dynamic> Function(T item, EdanFoto foto) buildData,
     void Function(T item, String idSeccion)? capturarIdSeccion,
   }) async {
-    debugPrint('[FOTOS] _subirFotosSeccion $seccionRuta items=${items.length}');
+    DebugLog.instance.i('[FOTOS] subirFotosSeccion $seccionRuta items=${items.length}');
     var ok = true;
     for (final item in items) {
       final fotos = fotosDe(item);
       final fotografia = fotografiaDe(item);
       if (fotos.isEmpty) {
-        debugPrint('[FOTOS] $seccionRuta SKIP ${item.runtimeType} fotos.isEmpty');
+        DebugLog.instance.i('[FOTOS] $seccionRuta SKIP sin fotos');
         continue;
       }
-      if (fotografia != null) {
-        debugPrint('[FOTOS] $seccionRuta SKIP ${item.runtimeType} fotografia=$fotografia');
+      if (fotografia != null && fotografia.isNotEmpty) {
+        DebugLog.instance.i('[FOTOS] $seccionRuta SKIP ya tiene path="$fotografia"');
         continue;
       }
       final foto = fotos.first;
-      debugPrint('[FOTOS] $seccionRuta UPLOAD ${item.runtimeType} ruta=${foto.ruta}');
       final file = File(foto.ruta);
       if (!await file.exists()) {
-        debugPrint('Foto no encontrada en $seccionRuta: ${foto.ruta}');
+        DebugLog.instance.e('[FOTOS] $seccionRuta ARCHIVO NO EXISTE: ${foto.ruta}');
         ok = false;
         continue;
       }
+      DebugLog.instance.i('[FOTOS] $seccionRuta UPLOAD ruta=${foto.ruta}');
       try {
         final data = buildData(item, foto);
         final resp = await ApiService.instance.createLocalidadSeccionConFoto(
@@ -732,6 +493,7 @@ class LocalidadSyncService {
         );
         final path = resp['fotografia'];
         marcarSubida(item, path is String && path.isNotEmpty ? path : 'subida');
+        DebugLog.instance.i('[FOTOS] $seccionRuta OK path=$path');
         if (capturarIdSeccion != null) {
           final serverId = resp['id_seccion']?.toString();
           if (serverId != null && serverId.isNotEmpty) {
@@ -739,10 +501,45 @@ class LocalidadSyncService {
           }
         }
       } catch (e) {
-        debugPrint('Error subiendo foto en $seccionRuta (${foto.ruta}): $e');
+        DebugLog.instance.e('[FOTOS] $seccionRuta ERROR (${foto.ruta})', e);
         ok = false;
       }
     }
+    return ok;
+  }
+
+  /// Envía los grupos vulnerables con datos por los endpoints dedicados
+  /// POST /edan/localidades/{idServer}/proteccion (1 POST por grupo).
+  Future<bool> pushProteccion(EdanLocalidad localidad, int idServer) async {
+    final grupos = localidad.proteccionParaEndpointDedicado();
+    DebugLog.instance.paso('pushProteccion idServer=$idServer '
+        'gruposConDatos=${grupos.length} '
+        'totalGrupos=${localidad.proteccion.length} '
+        'impProteccion=${localidad.impProteccion}');
+    debugPrint('[PROTECCION] pushProteccion idServer=$idServer '
+        'gruposConDatos=${grupos.length} '
+        'totalGrupos=${localidad.proteccion.length}');
+    if (grupos.isEmpty) {
+      DebugLog.instance.i('pushProteccion: sin grupos con datos -> no se envía nada '
+          '(si el usuario llenó protección, esto indica un BUG de datos vacíos aquí)');
+      return true;
+    }
+    var ok = true;
+    for (final grupo in grupos) {
+      try {
+        await ApiService.instance.crearProteccion(idServer, grupo);
+        debugPrint('[PROTECCION] OK grupo catalogo=${grupo['id_grupo_vulnerable_catalogo']}');
+        DebugLog.instance.i('proteccion OK cat=${grupo['id_grupo_vulnerable_catalogo']} '
+            'mujeres=${grupo['mujeres']} hombres=${grupo['hombres']}');
+      } catch (e) {
+        debugPrint('[PROTECCION] Error enviando grupo '
+            'catalogo=${grupo['id_grupo_vulnerable_catalogo']}: $e');
+        DebugLog.instance.e('proteccion ERROR cat=${grupo['id_grupo_vulnerable_catalogo']} '
+            'idServer=$idServer', e);
+        ok = false;
+      }
+    }
+    DebugLog.instance.i('pushProteccion terminó ok=$ok');
     return ok;
   }
 }
@@ -774,21 +571,4 @@ class SyncResult {
     if (partes.isEmpty) return 'Sin cambios';
     return 'Sincronización completada: ${partes.join(', ')}';
   }
-}
-
-int? _parseId(dynamic value) {
-  if (value == null) return null;
-  if (value is int) return value;
-  return int.tryParse(value.toString());
-}
-
-String _extractError(Map<String, dynamic> m) {
-  final directo = m['error'];
-  if (directo is String && directo.isNotEmpty) return directo;
-  final data = m['data'];
-  if (data is Map) {
-    final ultimo = data['ultimo_error'];
-    if (ultimo is String && ultimo.isNotEmpty) return ultimo;
-  }
-  return 'Error de sincronización';
 }

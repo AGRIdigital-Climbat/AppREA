@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -8,30 +9,43 @@ import 'providers/reporte_provider.dart';
 import 'providers/connectivity_provider.dart';
 import 'screens/splash_screen.dart';
 import 'services/connectivity_service.dart';
+import 'services/debug_log.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  final rutaLog = await DebugLog.instance.inicializar();
+  if (rutaLog != null) {
+    // ignore: avoid_print
+    print('[EDAN-LOG] Shabira depuración en: $rutaLog');
+  }
+
   FlutterError.onError = (details) {
+    DebugLog.instance.e('FlutterError: ${details.exception}', details.exception, details.stack);
     FlutterError.presentError(details);
   };
 
   PlatformDispatcher.instance.onError = (error, stack) {
+    DebugLog.instance.e('Error no capturado: $error', error, stack);
     return true;
   };
 
-  ConnectivityService().initialize();
+  runZonedGuarded(() {
+    ConnectivityService().initialize();
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
-        ChangeNotifierProvider(create: (_) => ReporteProvider()),
-        ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
-      ],
-      child: const MyApp(),
-    ),
-  );
+    runApp(
+      MultiProvider(
+        providers: [
+          ChangeNotifierProvider(create: (_) => AuthProvider()),
+          ChangeNotifierProvider(create: (_) => ReporteProvider()),
+          ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
+        ],
+        child: const MyApp(),
+      ),
+    );
+  }, (error, stack) {
+    DebugLog.instance.e('Error asíncrono global: $error', error, stack);
+  });
 }
 
 class MyApp extends StatelessWidget {
