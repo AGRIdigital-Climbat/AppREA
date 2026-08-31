@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -444,12 +445,21 @@ class EdanLocalidadesSyncV2Service {
       return false;
     }
     try {
+      final payload = jsonEncode(filas);
+      debugPrint('[SyncV2] POST /$seccion (${filas.length} filas, '
+          '${payload.length} chars)');
       final resp = await _api.enviarLocalidadSeccionV2(
         idLocalidad: idEdan,
         seccion: seccion,
         payload: filas,
       );
-      _logErroresPorFila(seccion, resp);
+      final huboErrores = _logErroresPorFila(seccion, resp);
+      if (huboErrores) {
+        debugPrint('[SyncV2] $seccion: servidor reportó errores, '
+            'sección NO sincronizada');
+        return false;
+      }
+      debugPrint('[SyncV2] $seccion: OK (${filas.length} filas enviadas)');
       return true;
     } catch (e) {
       debugPrint('[SyncV2] Error sección $seccion: $e');
@@ -464,12 +474,18 @@ class EdanLocalidadesSyncV2Service {
   ) async {
     if (fila == null || fila.isEmpty) return true;
     try {
+      debugPrint('[SyncV2] POST 1:1 /$seccion');
       final resp = await _api.enviarLocalidadSeccionV2(
         idLocalidad: idEdan,
         seccion: seccion,
         payload: fila,
       );
-      _logErroresPorFila(seccion, resp);
+      final huboErrores = _logErroresPorFila(seccion, resp);
+      if (huboErrores) {
+        debugPrint('[SyncV2] $seccion: servidor reportó errores');
+        return false;
+      }
+      debugPrint('[SyncV2] $seccion: OK');
       return true;
     } catch (e) {
       debugPrint('[SyncV2] Error sección 1:1 $seccion: $e');
@@ -477,17 +493,20 @@ class EdanLocalidadesSyncV2Service {
     }
   }
 
-  void _logErroresPorFila(String seccion, Map<String, dynamic> resp) {
+  /// Retorna true si hubo errores por fila en la respuesta del servidor.
+  bool _logErroresPorFila(String seccion, Map<String, dynamic> resp) {
     final data = resp['data'];
     final errores = data is Map && data['errors'] is List
         ? data['errors']
         : resp['errors'];
     if (errores is List && errores.isNotEmpty) {
-      debugPrint('[SyncV2] $seccion tiene ${errores.length} errores por fila:');
+      debugPrint('[SyncV2] $seccion TIENE ${errores.length} ERRORES POR FILA:');
       for (final err in errores) {
-        debugPrint('  - $err');
+        debugPrint('  - ERROR $seccion: $err');
       }
+      return true;
     }
+    return false;
   }
 
   int? _intId(dynamic value) {

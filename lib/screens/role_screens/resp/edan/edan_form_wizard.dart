@@ -439,6 +439,25 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         for (final ruta in rutas) {
           await _db.marcarSeccionSincronizada(idLocal, ruta);
         }
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Secciones enviadas: ${rutas.join(", ")}'),
+              backgroundColor: const Color(0xFF059669),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Falló envío: ${rutas.join(", ")} (pendiente reintento)'),
+              backgroundColor: const Color(0xFFD97706),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+        }
       }
     } catch (e) {
       debugPrint('EdanFormWizard._enviarSeccion error: $e');
