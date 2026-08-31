@@ -147,6 +147,14 @@ class EdanGrupoEtario {
   int desaparecidos;
   String observaciones;
 
+  /// Marca de selección explícita del usuario en el formulario. Si el usuario
+  /// marcó el check, se conserva aunque los campos numéricos queden vacíos.
+  bool marcado;
+
+  /// id_grupo_etario explícito (catálogo `edan.grupo_etario` de la API v2).
+  /// Si es nulo, se resuelve por el nombre del rango (compatibilidad v1).
+  int? idGrupoEtarioCatalogo;
+
   EdanGrupoEtario({
     this.idSeccion,
     this.rango = '',
@@ -154,21 +162,61 @@ class EdanGrupoEtario {
     this.heridos = 0,
     this.desaparecidos = 0,
     this.observaciones = '',
+    this.marcado = false,
+    this.idGrupoEtarioCatalogo,
   });
 
   factory EdanGrupoEtario.fromJson(Map<String, dynamic> json) {
+    final fallecidos = _toInt(json['fallecidos']);
+    final heridos = _toInt(json['heridos']);
+    final desaparecidos = _toInt(json['desaparecidos']);
+    final marcadoJson = json['marcado'];
     return EdanGrupoEtario(
       idSeccion: json['id_seccion']?.toString(),
       rango: _str(json['rango'] ?? json['grupo']),
-      fallecidos: _toInt(json['fallecidos']),
-      heridos: _toInt(json['heridos']),
-      desaparecidos: _toInt(json['desaparecidos']),
+      fallecidos: fallecidos,
+      heridos: heridos,
+      desaparecidos: desaparecidos,
       observaciones: _str(json['observaciones']),
+      marcado: marcadoJson is bool
+          ? marcadoJson
+          : fallecidos > 0 || heridos > 0 || desaparecidos > 0,
+      idGrupoEtarioCatalogo: _jsonIntFk(json['id_grupo_etario']),
     );
+  }
+
+  /// Catálogo `edan.grupo_etario` de la API v2 (fuente de verdad).
+  /// Si el grupo vino del catálogo se usa su id; si no, se resuelve por el
+  /// nombre del rango (mapeo canónico v1:
+  /// 1 = 0-5 años, 2 = escolar 6-18, 3 = adulto 19-60, 4 = adulto mayor 60+).
+  int? get idGrupoEtario =>
+      idGrupoEtarioCatalogo ?? EdanGrupoEtario.resolverIdGrupoEtario(rango);
+
+  static int? resolverIdGrupoEtario(String rango) {
+    final r = rango.toLowerCase();
+    if (r.contains('0-5') || r.contains('niña')) return 1;
+    if (r.contains('6-18') || r.contains('escolar')) return 2;
+    if (r.contains('19-60') || r.contains('adulto de')) return 3;
+    if (r.contains('60') || r.contains('mayor')) return 4;
+    return null;
   }
 
   Map<String, dynamic> toJson() => {
         if (idSeccion != null) 'id_seccion': idSeccion,
+        if (idGrupoEtario != null) 'id_grupo_etario': idGrupoEtario,
+        'rango': rango,
+        'fallecidos': fallecidos,
+        'heridos': heridos,
+        'desaparecidos': desaparecidos,
+        'observaciones': observaciones,
+        'marcado': marcado,
+      };
+
+  /// JSON para la API: igual que [toJson] pero SIN `marcado` (campo interno
+  /// de la UI que no debe enviarse al servidor).
+  Map<String, dynamic> toApiJson() => {
+        if (idSeccion != null) 'id_seccion': idSeccion,
+        if (idGrupoEtario != null) 'id_grupo_etario': idGrupoEtario,
         'rango': rango,
         'fallecidos': fallecidos,
         'heridos': heridos,
@@ -219,6 +267,22 @@ class EdanImpactoPoblacion {
               .toList()
           : null,
     );
+  }
+
+  /// Construye la lista de grupos etarios desde el catálogo v2
+  /// (`edan/grupo-etario`). Cada grupo arrastra su `id_grupo_etario` real.
+  /// Si el catálogo está vacío, usa los rangos por defecto v1.
+  static List<EdanGrupoEtario> gruposDesdeCatalogo(List<dynamic> catalogo) {
+    if (catalogo.isEmpty) return EdanImpactoPoblacion().gruposEtarios;
+    return catalogo.map<EdanGrupoEtario>((c) {
+      final id = c is Map ? (c['id_grupo_etario'] ?? c['id']) : null;
+      final nombre = c is Map ? (c['nombre'] ?? '') : '';
+      return EdanGrupoEtario(
+        idSeccion: generarIdSeccion('im'),
+        rango: nombre.toString(),
+        idGrupoEtarioCatalogo: id is int ? id : int.tryParse('$id'),
+      );
+    }).toList();
   }
 
   Map<String, dynamic> toJson() => {
@@ -305,7 +369,7 @@ class EdanFoto {
       };
 }
 
-class EdanEstablecimientoSalud {
+class EdanEstablecimientoSalud with EdanFotoHolder {
   String? idSeccion;
   String nombreEstablecimiento;
   String comunidad;
@@ -316,8 +380,11 @@ class EdanEstablecimientoSalud {
   int enfermerasAfectados;
   int otrosAfectados;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanEstablecimientoSalud({
@@ -442,7 +509,7 @@ class EdanNecesidadSalud {
       };
 }
 
-class EdanDanoVial {
+class EdanDanoVial with EdanFotoHolder {
   String? idSeccion;
   String viaPuente;
   String tramo;
@@ -452,8 +519,11 @@ class EdanDanoVial {
   String necesidadesInmediatas;
   String observaciones;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanDanoVial({
@@ -534,7 +604,7 @@ class EdanDanoVial {
       };
 }
 
-class EdanDanoInfraPublica {
+class EdanDanoInfraPublica with EdanFotoHolder {
   String? idSeccion;
   String comunidad;
   String tipoEstructura;
@@ -542,8 +612,11 @@ class EdanDanoInfraPublica {
   bool danoTotal;
   String observaciones;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanDanoInfraPublica({
@@ -608,7 +681,7 @@ class EdanDanoInfraPublica {
       };
 }
 
-class EdanServicioBasicoDetalle {
+class EdanServicioBasicoDetalle with EdanFotoHolder {
   String? idSeccion;
   String tipo;
   bool afectado;
@@ -617,8 +690,11 @@ class EdanServicioBasicoDetalle {
   String necesidadesInmediatas;
   String observaciones;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanServicioBasicoDetalle({
@@ -782,7 +858,7 @@ class EdanDanoServicioBasico {
       servicios.any((s) => s.afectado || s.tieneDatos);
 }
 
-class EdanDanoUnidadEducativa {
+class EdanDanoUnidadEducativa with EdanFotoHolder {
   String? idSeccion;
   String nombreEstablecimiento;
   String comunidad;
@@ -796,8 +872,11 @@ class EdanDanoUnidadEducativa {
   int administrativos;
   String observaciones;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanDanoUnidadEducativa({
@@ -895,7 +974,7 @@ class EdanDanoUnidadEducativa {
   int get totalAfectados => estudiantes + profesores + administrativos;
 }
 
-class EdanDanoVivienda {
+class EdanDanoVivienda with EdanFotoHolder {
   String? idSeccion;
   String comunidad;
   int danoParcial;
@@ -903,8 +982,11 @@ class EdanDanoVivienda {
   String necesidadesInmediatas;
   String observaciones;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanDanoVivienda({
@@ -970,7 +1052,7 @@ class EdanDanoVivienda {
       };
 }
 
-class EdanDanoAgricultura {
+class EdanDanoAgricultura with EdanFotoHolder {
   String? idSeccion;
   int? idCultivo;
   String tipoCultivo;
@@ -979,8 +1061,11 @@ class EdanDanoAgricultura {
   String necesidadesInmediatas;
   String observaciones;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanDanoAgricultura({
@@ -1051,7 +1136,7 @@ class EdanDanoAgricultura {
       };
 }
 
-class EdanDanoPecuario {
+class EdanDanoPecuario with EdanFotoHolder {
   String? idSeccion;
   int? idEspecie;
   String especie;
@@ -1060,8 +1145,11 @@ class EdanDanoPecuario {
   int animalesMuertos;
   String necesidadesInmediatas;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanDanoPecuario({
@@ -1134,14 +1222,17 @@ class EdanDanoPecuario {
       };
 }
 
-class EdanInfraProductiva {
+class EdanInfraProductiva with EdanFotoHolder {
   String? idSeccion;
   String tipo;
   int danoParcial;
   int danoTotal;
   List<EdanFoto> fotos;
+  @override
   String? fotografia;
+  @override
   double coordenadaLat;
+  @override
   double coordenadaLon;
 
   EdanInfraProductiva({
@@ -1950,12 +2041,19 @@ class EdanLocalidad {
   List<Map<String, dynamic>> _impactoPoblacionApi() {
     final grupos = <Map<String, dynamic>>[];
     for (final p in impactoPoblacion) {
-      final conDatos = p.gruposEtarios.where((g) => g.tieneDatos).toList();
-      if (conDatos.isNotEmpty) {
-        grupos.addAll(conDatos.map((g) => g.toJson()));
+      final marcados = p.gruposEtarios.where((g) => g.marcado).toList();
+      if (marcados.isNotEmpty) {
+        grupos.addAll(marcados.map((g) => g.toApiJson()));
       } else if (p.tieneDatosGlobales) {
+        final idGrupoEtario = EdanGrupoEtario.resolverIdGrupoEtario(p.grupoEtario);
+        if (idGrupoEtario == null) {
+          // Rango legacy sin equivalente en el catálogo v2: se omite para
+          // evitar un 400 por fila (aislamiento de errores del servidor).
+          continue;
+        }
         grupos.add({
           if (p.idSeccion != null) 'id_seccion': p.idSeccion,
+          'id_grupo_etario': idGrupoEtario,
           'rango': p.grupoEtario,
           'fallecidos': p.fallecidos,
           'heridos': p.heridos,
@@ -2698,4 +2796,15 @@ Usuario? _parseUsuario(dynamic json) {
   } catch (_) {
     return null;
   }
+}
+
+/// Marcador común de las secciones 1:N con foto: expone `fotografia`
+/// (path server o null) y las coordenadas GPS. Permite construir la fila de
+/// la sección en la API v2 (Vía B) incluyendo siempre `fotografia` y las
+/// coordenadas si hay foto.
+abstract mixin class EdanFotoHolder {
+  List<EdanFoto> get fotos;
+  String? get fotografia;
+  double get coordenadaLat;
+  double get coordenadaLon;
 }

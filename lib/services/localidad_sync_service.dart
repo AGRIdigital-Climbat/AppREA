@@ -6,6 +6,8 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
 import '../services/debug_log.dart';
+import '../services/edan_localidades_sync_v2_service.dart';
+import '../services/edan_secciones_registry.dart';
 
 class LocalidadSyncService {
   static final LocalidadSyncService _instance = LocalidadSyncService._();
@@ -270,6 +272,7 @@ class LocalidadSyncService {
 
     _isSyncing = true;
     sincronizando.value = true;
+    final result = SyncResult(exito: true, mensaje: 'Sin cambios');
     try {
       final userId = AuthService.instance.userId;
       if (userId == null) {
@@ -279,7 +282,154 @@ class LocalidadSyncService {
         );
       }
 
-      final result = SyncResult(exito: true, mensaje: 'Sincronización deshabilitada por ahora');
+      final db = DatabaseHelper.instance;
+      final api = ApiService.instance;
+      final sincV2 = EdanLocalidadesSyncV2Service(api: api, db: db);
+      final srv = _EstadosServidor();
+
+      // ===== Fase 0: PULL ligero — mis-estados (UNA llamada) =====
+      final estados = await api.getLocalidadesMisEstados(
+        idUsuario: userId,
+        limit: 1000,
+      );
+      srv.cargar(estados);
+      debugPrint('[SyncC] Fase 0: ${srv.total} estados del servidor');
+
+      // ===== Fase 4: Tombstones / eliminaciones pendientes locales =====
+      final pendientesDelete = await db.getLocalidadesPendingDeletion();
+      for (final loc in pendientesDelete) {
+        final idLocal = loc.idLocal;
+        if (idLocal == null) continue;
+        try {
+          if (loc.idServer != null) {
+            await api.deleteLocalidad(loc.idServer!);
+            result.eliminados++;
+            debugPrint('[SyncC] Tombstone DELETE server ${loc.idServer}');
+          }
+          await db.deleteLocalidad(idLocal);
+        } catch (e) {
+          debugPrint('[SyncC] Error tombstone $idLocal: $e');
+          result.fallidos++;
+          result.exito = false;
+        }
+      }
+
+      // ===== Clasificación de localidades locales =====
+      final locales = await db.getLocalidades(userId);
+      for (final local in locales) {
+        final idLocal = local.idLocal;
+        if (idLocal == null) continue;
+
+        // Si el servidor marca la localidad como eliminado y está sincronizada,
+        // la eliminación vino desde la web: borramos la fila local.
+        final serverItem = srv.porIdLocal(idLocal);
+        if (serverItem != null && serverItem.pendienteEliminacion &&
+            local.sincronizado) {
+          await db.deleteLocalidad(idLocal);
+          result.eliminados++;
+          continue;
+        }
+
+        final idServer = serverItem?.idEdan ?? local.idServer;
+        final serverFecha = serverItem?.fechaModificacion;
+        final localFecha = local.fechaModificacion;
+        final serverMasNuevo =
+            _esMasNueva(serverFecha, localFecha);
+
+        if (serverMasNuevo) {
+          // Fase 1: el servidor tiene la versión más nueva -> PULL completo.
+          if (idServer == null) continue;
+          try {
+            final detalle = await api.getLocalidadById(idServer);
+            final serverLoc = EdanLocalidad.fromJson(detalle);
+            serverLoc.idLocal = idLocal;
+            _preservarEncabezado(serverLoc, local);
+            _mergeSecciones(local, serverLoc);
+            await db.reemplazarLocalidadDesdeServer(
+              serverLoc,
+              fechaServer: serverFecha,
+              idServer: idServer,
+            );
+            result.actualizados++;
+            debugPrint('[SyncC] PULL completa $idLocal (server más nueva)');
+          } catch (e) {
+            debugPrint('[SyncC] Error pull $idLocal: $e');
+            result.fallidos++;
+            result.exito = false;
+          }
+          continue;
+        }
+
+        // Fase 2: cambios locales pendientes -> PUSH (cabecera + secciones).
+        // El tracking por sección es la fuente de verdad: si hay secciones
+        // modificadas, hay que reenviar aunque la localidad ya estuviera
+        // sincronizada (una edición posterior del wizard).
+        final modificadas = await db.getSeccionesModificadas(idLocal);
+        final needPush = !local.sincronizado ||
+            local.pendienteActualizacion ||
+            modificadas.isNotEmpty;
+        if (!needPush) continue;
+
+        try {
+          final Set<String> soloRutas = modificadas.isNotEmpty
+              ? modificadas.toSet()
+              : EdanSeccionesRegistry.rutasV2Todas().toSet();
+          final ok = await sincV2.sincronizarLocalidad(
+            local,
+            soloRutas: soloRutas,
+          );
+          final idEdan = local.idServer;
+          if (ok && idEdan != null) {
+            await db.markLocalidadAsSyncedConFecha(
+              idLocal,
+              idEdan,
+              local.fechaModificacion ?? DateTime.now().toIso8601String(),
+            );
+            result.enviados++;
+            debugPrint('[SyncC] PUSH completa $idLocal (${soloRutas.length} rutas)');
+          } else {
+            result.fallidos++;
+            result.exito = false;
+          }
+        } catch (e) {
+          debugPrint('[SyncC] Error push $idLocal: $e');
+          result.fallidos++;
+          result.exito = false;
+        }
+      }
+
+      // ===== Fase 1 (cont.): localidades del servidor sin fila local =====
+      for (final item in srv.lista) {
+        if (item.pendienteEliminacion) continue;
+        if (item.idEdan == null) continue;
+        final existe = locales.any(
+          (l) =>
+              l.idLocal == item.idLocal ||
+              (l.idServer != null && l.idServer == item.idEdan),
+        );
+        if (existe) continue;
+        try {
+          final detalle = await api.getLocalidadById(item.idEdan!);
+          final serverLoc = EdanLocalidad.fromJson(detalle);
+          serverLoc.idLocal = item.idLocal ?? generateIdLocalTemporal();
+          await db.insertLocalidad(serverLoc, usuarioId: userId);
+          await db.reemplazarLocalidadDesdeServer(
+            serverLoc,
+            fechaServer: item.fechaModificacion,
+            idServer: item.idEdan,
+          );
+          result.creados++;
+          debugPrint('[SyncC] INSERT desde server ${item.idEdan}');
+        } catch (e) {
+          debugPrint('[SyncC] Error insert ${item.idEdan}: $e');
+          result.fallidos++;
+        }
+      }
+
+      result.mensaje = result.resumen;
+      debugPrint('[SyncC] Finalizado: env=${result.enviados} '
+          'act=${result.actualizados} cre=${result.creados} '
+          'del=${result.eliminados} err=${result.fallidos}');
       return result;
     } catch (e) {
       debugPrint('Error en sincronización de localidades: $e');
@@ -293,6 +443,22 @@ class LocalidadSyncService {
       await recargarPendientes();
     }
   }
+
+  /// Compara fechas ISO (con o sin zona horaria). Devuelve true si [a] es
+  /// ESTRICTAMENTE más nueva que [b]. Fechas nulas => false (no se descarga).
+  bool _esMasNueva(String? a, String? b) {
+    if (a == null || b == null) return false;
+    final da = DateTime.tryParse(a);
+    final db = DateTime.tryParse(b);
+    if (da == null || db == null) {
+      // Fallback a comparación lexicográfica (ISO 8601 ordenable).
+      return a.compareTo(b) > 0;
+    }
+    return da.isAfter(db);
+  }
+
+  String generateIdLocalTemporal() =>
+      'pull-${DateTime.now().millisecondsSinceEpoch}';
 
   Future<void> recargarPendientes() async {
     try {
@@ -570,5 +736,66 @@ class SyncResult {
     
     if (partes.isEmpty) return 'Sin cambios';
     return 'Sincronización completada: ${partes.join(', ')}';
+  }
+}
+
+/// Estado ligero de una localidad remota (mis-estados), con parseo defensivo.
+class _EstadosServidor {
+  final List<_EstadoItem> lista = [];
+  final Map<String, _EstadoItem> _porIdLocal = {};
+  final Map<int, _EstadoItem> _porIdEdan = {};
+
+  int get total => lista.length;
+
+  List<_EstadoItem> get pendientesEliminacion =>
+      lista.where((e) => e.pendienteEliminacion).toList();
+
+  void cargar(List<Map<String, dynamic>> estados) {
+    lista.clear();
+    _porIdLocal.clear();
+    _porIdEdan.clear();
+    for (final e in estados) {
+      final item = _EstadoItem.fromJson(e);
+      lista.add(item);
+      if (item.idLocal != null) _porIdLocal[item.idLocal!] = item;
+      if (item.idEdan != null) _porIdEdan[item.idEdan!] = item;
+    }
+  }
+
+  _EstadoItem? porIdLocal(String? idLocal) =>
+      idLocal == null ? null : _porIdLocal[idLocal];
+
+  _EstadoItem? porIdEdan(int? idEdan) =>
+      idEdan == null ? null : _porIdEdan[idEdan];
+}
+
+class _EstadoItem {
+  final String? idLocal;
+  final int? idEdan;
+  final String? fechaModificacion;
+  final bool pendienteEliminacion;
+
+  _EstadoItem({
+    this.idLocal,
+    this.idEdan,
+    this.fechaModificacion,
+    this.pendienteEliminacion = false,
+  });
+
+  factory _EstadoItem.fromJson(Map<String, dynamic> json) {
+    return _EstadoItem(
+      idLocal: json['id_local']?.toString(),
+      idEdan: _intEstado(json['id_edan_localidad'] ?? json['id_server']),
+      fechaModificacion: json['fecha_modificacion']?.toString(),
+      pendienteEliminacion:
+          json['pendiente_eliminacion'] == true ||
+              json['pendiente_eliminacion'] == 1,
+    );
+  }
+
+  static int? _intEstado(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    return int.tryParse(v.toString());
   }
 }

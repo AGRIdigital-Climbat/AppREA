@@ -34,6 +34,7 @@ class ReporteProvider extends ChangeNotifier {
   List<Cultivo> _cultivos = [];
   List<PecuarioGrupo> _pecuarioGrupos = [];
   List<GrupoVulnerableCatalogo> _gruposVulnerables = [];
+  List<GrupoEtarioCatalogo> _gruposEtarios = [];
   List<Map<String, dynamic>> _tiposRepositorio = [];
   MunicipioGeojson? _municipioGeojson;
   int _pendingCount = 0;
@@ -55,6 +56,7 @@ class ReporteProvider extends ChangeNotifier {
   List<Cultivo> get cultivos => _cultivos;
   List<PecuarioGrupo> get pecuarioGrupos => _pecuarioGrupos;
   List<GrupoVulnerableCatalogo> get gruposVulnerables => _gruposVulnerables;
+  List<GrupoEtarioCatalogo> get gruposEtarios => _gruposEtarios;
   List<Map<String, dynamic>> get tiposRepositorio => _tiposRepositorio;
   MunicipioGeojson? get municipioGeojson => _municipioGeojson;
   int get pendingCount => _pendingCount;
@@ -293,6 +295,15 @@ class ReporteProvider extends ChangeNotifier {
     }
 
     try {
+      final gruposEtariosData = await _db.getGruposEtariosLocal();
+      _gruposEtarios = gruposEtariosData
+          .map((g) => GrupoEtarioCatalogo.fromJson(g))
+          .toList();
+    } catch (_) {
+      _gruposEtarios = [];
+    }
+
+    try {
       _tiposRepositorio = await _db.getTiposRepositorioLocal();
     } catch (_) {
       _tiposRepositorio = [];
@@ -416,6 +427,29 @@ class ReporteProvider extends ChangeNotifier {
     }
 
     try {
+      final gruposEtarios = await _api.getGruposEtarios();
+      _gruposEtarios = gruposEtarios;
+      await _db.saveGruposEtarios(
+          gruposEtarios.map((g) => {
+                'id_grupo_etario': g.idGrupoEtario,
+                'codigo': g.codigo,
+                'nombre': g.nombre,
+                'descripcion': g.descripcion,
+                'orden': g.orden,
+                'activo': g.activo ? 1 : 0,
+              }).toList());
+    } catch (_) {
+      try {
+        final gruposEtariosData = await _db.getGruposEtariosLocal();
+        _gruposEtarios = gruposEtariosData
+            .map((g) => GrupoEtarioCatalogo.fromJson(g))
+            .toList();
+      } catch (_) {
+        _gruposEtarios = [];
+      }
+    }
+
+    try {
       final tiposRepositorio = await _api.listarTiposRepositorio();
       _tiposRepositorio = tiposRepositorio;
       await _db.saveTiposRepositorio(
@@ -463,6 +497,36 @@ class ReporteProvider extends ChangeNotifier {
         notifyListeners();
       } catch (_) {
         _gruposVulnerables = [];
+      }
+    }
+  }
+
+  /// Descarga SOLO grupos etarios si está vacío (catálogo v2).
+  Future<void> fetchGruposEtariosIfNeeded() async {
+    if (_gruposEtarios.isNotEmpty) return;
+
+    try {
+      final gruposEtarios = await _api.getGruposEtarios();
+      _gruposEtarios = gruposEtarios;
+      await _db.saveGruposEtarios(
+          gruposEtarios.map((g) => {
+            'id_grupo_etario': g.idGrupoEtario,
+            'codigo': g.codigo,
+            'nombre': g.nombre,
+            'descripcion': g.descripcion,
+            'orden': g.orden,
+            'activo': g.activo ? 1 : 0,
+          }).toList());
+      notifyListeners();
+    } catch (_) {
+      try {
+        final gruposEtariosData = await _db.getGruposEtariosLocal();
+        _gruposEtarios = gruposEtariosData
+            .map((g) => GrupoEtarioCatalogo.fromJson(g))
+            .toList();
+        notifyListeners();
+      } catch (_) {
+        _gruposEtarios = [];
       }
     }
   }
@@ -541,6 +605,29 @@ class ReporteProvider extends ChangeNotifier {
             .toList();
       } catch (_) {
         _gruposVulnerables = [];
+      }
+    }
+
+    try {
+      final gruposEtarios = await _api.getGruposEtarios();
+      _gruposEtarios = gruposEtarios;
+      await _db.saveGruposEtarios(
+          gruposEtarios.map((g) => {
+            'id_grupo_etario': g.idGrupoEtario,
+            'codigo': g.codigo,
+            'nombre': g.nombre,
+            'descripcion': g.descripcion,
+            'orden': g.orden,
+            'activo': g.activo ? 1 : 0,
+          }).toList());
+    } catch (_) {
+      try {
+        final gruposEtariosData = await _db.getGruposEtariosLocal();
+        _gruposEtarios = gruposEtariosData
+            .map((g) => GrupoEtarioCatalogo.fromJson(g))
+            .toList();
+      } catch (_) {
+        _gruposEtarios = [];
       }
     }
 

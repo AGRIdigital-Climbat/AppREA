@@ -202,6 +202,35 @@ class GrupoVulnerableCatalogo {
   }
 }
 
+class GrupoEtarioCatalogo {
+  final int idGrupoEtario;
+  final String codigo;
+  final String nombre;
+  final String? descripcion;
+  final int? orden;
+  final bool activo;
+
+  GrupoEtarioCatalogo({
+    required this.idGrupoEtario,
+    required this.codigo,
+    required this.nombre,
+    this.descripcion,
+    this.orden,
+    this.activo = true,
+  });
+
+  factory GrupoEtarioCatalogo.fromJson(Map<String, dynamic> json) {
+    return GrupoEtarioCatalogo(
+      idGrupoEtario: json['id_grupo_etario'] ?? json['id'] ?? 0,
+      codigo: json['codigo'] ?? '',
+      nombre: json['nombre'] ?? '',
+      descripcion: json['descripcion'],
+      orden: json['orden'],
+      activo: json['activo'] ?? true,
+    );
+  }
+}
+
 class TipoLocalidad {
   final int idTipoLocalidad;
   final String nombre;

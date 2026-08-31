@@ -12,9 +12,10 @@ import '../../../providers/reporte_provider.dart';
 import '../../../config/api_config.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/edan_secciones_registry.dart';
 import '../../../services/image_service.dart';
 import '../../../services/location_service.dart';
-import '../../../services/api_service.dart';
+import '../../../services/edan_localidades_sync_v2_service.dart';
 import '../../../services/localidad_sync_service.dart';
 import '../../../services/debug_log.dart';
 import '../../../services/permission_service.dart';
@@ -349,14 +350,64 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
     });
   }
 
-  void _eliminarLocalidad(int index) {
+  Future<void> _eliminarLocalidad(int index) async {
     if (_edan.localidades.length <= 1) return;
+    final localidad = _edan.localidades[index];
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Eliminar lugar afectado?'),
+        content: Text(
+          'Se eliminará el lugar "${localidad.nombre}".',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
     setState(() {
       _edan.localidades.removeAt(index);
       if (_lugarExpandido >= _edan.localidades.length) {
         _lugarExpandido = _edan.localidades.length - 1;
       }
     });
+  }
+
+  Future<bool> _confirmarEliminarItem(String mensaje) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('¿Eliminar ítem?'),
+            content: Text(mensaje),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Future<void> _confirmarAgregarSubitem({
@@ -512,70 +563,48 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
       if (localidad.idLocal != null) {
         await db.updateLocalidad(localidad);
       } else {
-        localidad.idLocal =
-            '${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+        // id_local se genera UNA vez (UUID v4) y se reutiliza siempre.
+        localidad.idLocal = generarIdLocal();
         await db.insertLocalidad(localidad, usuarioId: userId);
       }
+      // Marcar todas las secciones + cabecera como modificadas localmente:
+      // si el envío inmediato falla, el sync central las sube después.
+      await db.marcarSeccionesModificadas(
+        localidad.idLocal!,
+        EdanSeccionesRegistry.rutasV2Todas(),
+      );
+      await db.marcarSeccionModificada(
+        localidad.idLocal!,
+        EdanSeccionesRegistry.cabecera,
+      );
 
       bool sincronizada = false;
       try {
-        final json = localidad.toApiJson();
-        json['id_usuario'] = userId;
-        json['id_edan_localidad_estado'] = UgrLocalidadEstado.enviadoUgr.id;
-
-        DebugLog.instance.paso('Inicio envío localidad idLocal=${localidad.idLocal} '
-            'idServer previo=${localidad.idServer} '
+        DebugLog.instance.paso('Inicio envío V2 localidad idLocal=${localidad.idLocal} '
             'gruposProteccion=${localidad.proteccionParaEndpointDedicado().length} '
             'proteccionTotal=${localidad.proteccion.length}');
 
-        Map<String, dynamic> respuesta;
-        final idServerExistente = localidad.idServer;
+        // Sincronización por secciones (API v2): sube fotos (Vía B), cabecera
+        // y cada sección con su id_seccion. Grupos mixtos foto/sin foto.
+        final sincV2 = EdanLocalidadesSyncV2Service();
+        final okV2 = await sincV2.sincronizarLocalidad(localidad);
+        DebugLog.instance.i('Resultado sincronización V2: ok=$okV2');
 
-        if (idServerExistente != null) {
-          respuesta = await ApiService.instance.editarLocalidadDirecta(idServerExistente, json);
-          DebugLog.instance.i('Usó editarLocalidadDirecta idServer=$idServerExistente');
-        } else {
-          respuesta = await ApiService.instance.enviarLocalidadDirecta(json);
-          DebugLog.instance.i('Usó enviarLocalidadDirecta (nueva)');
-        }
-
-        final idServerRaw = respuesta['id_edan_localidad'];
-        final serverId = idServerRaw is int
-            ? idServerRaw
-            : int.tryParse('${idServerRaw ?? ''}');
-        // En la ruta de EDICIÓN (PUT) la respuesta es el objeto de la localidad
-        // actualizado, sin la clave 'aplicado'. Se considera aplicado si devuelve
-        // un id_edan_localidad válido. En la ruta de creación (/sync) la respuesta
-        // trae 'aplicado: true'.
-        final aplicado = idServerExistente != null
-            ? (serverId != null || respuesta['aplicado'] == true)
-            : respuesta['aplicado'] == true;
-        DebugLog.instance.i('Respuesta envío: aplicado=$aplicado id_edan_localidad=$idServerRaw '
-            'serverId=$serverId fueEdicion=${idServerExistente != null} '
-            'respuestaKeys=${respuesta.keys}');
-
-        if (aplicado) {
-          final int? fotoServerId = serverId ?? idServerExistente;
-          if (fotoServerId != null) {
-            await LocalidadSyncService.instance.pushFotos(localidad, fotoServerId);
-          } else {
-            DebugLog.instance.e('aplicado=true pero sin idServer para push de fotos/protección');
-          }
+        if (okV2) {
           localidad
             ..idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id
             ..estadoLocalidad = UgrLocalidadEstado.enviadoUgr
-            ..idServer = fotoServerId ?? idServerExistente
             ..sincronizado = true
             ..pendienteActualizacion = false;
           await db.updateLocalidad(localidad);
           sincronizada = true;
-          DebugLog.instance.paso('Localidad marcada como ENVIADA');
+          DebugLog.instance.paso('Localidad marcada como ENVIADA (V2)');
         } else {
-          DebugLog.instance.e('aplicado != true. Respuesta completa: $respuesta');
+          DebugLog.instance.e('Sincronización V2 no completada');
         }
       } catch (e, st) {
-        debugPrint('[ENVIO] Error enviando directo: $e');
-        DebugLog.instance.e('Error enviando directo', e, st);
+        debugPrint('[ENVIO] Error enviando V2: $e');
+        DebugLog.instance.e('Error enviando V2', e, st);
       }
 
       if (!mounted) return;
@@ -1330,8 +1359,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.establecimientosSalud.length > 1,
-                    onEliminar: () => setState(
-                        () => l.establecimientosSalud.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este establecimiento de salud.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.establecimientosSalud.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1468,8 +1501,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     titulo: 'Vía / puente ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.danosViales.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosViales.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este registro de vía o puente.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosViales.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1503,8 +1540,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.danosInfraPublica.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosInfraPublica.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este registro de infraestructura pública.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosInfraPublica.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1627,8 +1668,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.unidadesEducativas.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.unidadesEducativas.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará esta unidad educativa.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.unidadesEducativas.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1713,8 +1758,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.danosVivienda.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosVivienda.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este registro de daño en viviendas.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosVivienda.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1787,8 +1836,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     titulo: 'Cultivo ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.danosAgricultura.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosAgricultura.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este cultivo.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosAgricultura.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1821,8 +1874,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     titulo: 'Especie ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.danosPecuarios.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosPecuarios.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará esta especie pecuaria.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosPecuarios.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1855,8 +1912,12 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                     titulo: 'Infraestructura ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.infraProductiva.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.infraProductiva.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará esta infraestructura productiva.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.infraProductiva.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -2457,6 +2518,31 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
     }
   }
 
+  Future<bool> _confirmarEliminarFoto(BuildContext dialogCtx) async {
+    return await showDialog<bool>(
+          context: dialogCtx,
+          builder: (ctx) => AlertDialog(
+            title: const Text('¿Eliminar foto?'),
+            content: const Text('Se eliminará la foto de respaldo de este ítem.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
   void _verFotoCompleta(
     EdanFoto? foto, {
     String? servidor,
@@ -2569,7 +2655,9 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
                               const SizedBox(width: 10),
                               if (foto != null)
                                 GestureDetector(
-                                  onTap: () {
+                                  onTap: () async {
+                                    final ok = await _confirmarEliminarFoto(dialogCtx);
+                                    if (!ok) return;
                                     Navigator.of(dialogCtx).pop();
                                     widget.fotos.clear();
                                     widget.onChanged();
@@ -2906,7 +2994,9 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
                     ),
                     const SizedBox(width: 8),
                     GestureDetector(
-                      onTap: () {
+                      onTap: () async {
+                        final ok = await _confirmarEliminarFoto(context);
+                        if (!ok) return;
                         widget.fotos.clear();
                         widget.onChanged();
                         setState(() => _advertencia = null);
@@ -3788,8 +3878,16 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
             _impactoCheck(localidad.impPoblacion, 'Población', (v) {
               localidad.impPoblacion = v;
                 if (v && localidad.impactoPoblacion.isEmpty) {
-                 localidad.impactoPoblacion.add(EdanImpactoPoblacion()
-                   ..idSeccion = generarIdSeccion('im'));
+                 final rp = context.read<ReporteProvider>();
+                 localidad.impactoPoblacion.add(EdanImpactoPoblacion(
+                   gruposEtarios: EdanImpactoPoblacion.gruposDesdeCatalogo(
+                       rp.gruposEtarios
+                           .map((g) => {
+                                 'id_grupo_etario': g.idGrupoEtario,
+                                 'nombre': g.nombre,
+                               })
+                           .toList()),
+                 )..idSeccion = generarIdSeccion('im'));
                }
               widget.onChanged();
             }),

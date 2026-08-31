@@ -3,7 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/edan.dart';
+import '../models/id_seccion_helper.dart';
 import '../models/reporte_offline.dart';
+import 'edan_secciones_registry.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._();
@@ -22,7 +24,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 17,
+      version: 19,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -157,6 +159,17 @@ class DatabaseHelper {
     ''');
 
     await db.execute('''
+      CREATE TABLE catalogo_grupo_etario (
+        id_grupo_etario INTEGER PRIMARY KEY,
+        codigo TEXT NOT NULL,
+        nombre TEXT NOT NULL,
+        descripcion TEXT,
+        orden INTEGER,
+        activo INTEGER DEFAULT 1
+      )
+    ''');
+
+    await db.execute('''
       CREATE TABLE catalogo_departamentos (
         id INTEGER PRIMARY KEY,
         codigo_ine TEXT,
@@ -279,6 +292,16 @@ class DatabaseHelper {
         fecha_modificacion TEXT,
         intentos_sync INTEGER DEFAULT 0,
         ultimo_error TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE localidad_seccion_sync (
+        id_local TEXT NOT NULL,
+        seccion TEXT NOT NULL,
+        modificada INTEGER DEFAULT 0,
+        fecha_modificacion TEXT,
+        PRIMARY KEY (id_local, seccion)
       )
     ''');
   }
@@ -492,6 +515,48 @@ class DatabaseHelper {
           activo INTEGER DEFAULT 1,
           extensiones_permitidas TEXT DEFAULT 'pdf',
           tamano_maximo_bytes INTEGER DEFAULT 52428800
+        )
+      ''');
+    }
+    if (oldVersion < 18) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS catalogo_grupo_etario (
+          id_grupo_etario INTEGER PRIMARY KEY,
+          codigo TEXT NOT NULL,
+          nombre TEXT NOT NULL,
+          descripcion TEXT,
+          orden INTEGER,
+          activo INTEGER DEFAULT 1
+        )
+      ''');
+    }
+    if (oldVersion < 19) {
+      await db.execute('''
+        CREATE TABLE localidad_seccion_sync (
+          id_local TEXT NOT NULL,
+          seccion TEXT NOT NULL,
+          modificada INTEGER DEFAULT 0,
+          fecha_modificacion TEXT,
+          PRIMARY KEY (id_local, seccion)
+        )
+      ''');
+      final secciones = EdanSeccionesRegistry.rutasV2Todas();
+      final unionSecciones =
+          secciones.map((s) => "SELECT '$s' AS seccion").join(' UNION ALL ');
+      await db.execute('''
+        INSERT INTO localidad_seccion_sync
+          (id_local, seccion, modificada, fecha_modificacion)
+        SELECT l.id_local, s.seccion,
+               CASE
+                 WHEN l.sincronizado = 0 AND l.pendiente_eliminacion = 0
+                 THEN 1 ELSE 0
+               END,
+               l.fecha_modificacion
+        FROM localidades_offline l
+        CROSS JOIN ($unionSecciones) s
+        WHERE NOT EXISTS (
+          SELECT 1 FROM localidad_seccion_sync x
+          WHERE x.id_local = l.id_local AND x.seccion = s.seccion
         )
       ''');
     }
@@ -851,6 +916,21 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getGruposVulnerablesLocal() async {
     final db = await database;
     return await db.query('catalogo_grupo_vulnerable', orderBy: 'orden ASC');
+  }
+
+  Future<void> saveGruposEtarios(List<Map<String, dynamic>> grupos) async {
+    final db = await database;
+    final batch = db.batch();
+    for (final g in grupos) {
+      batch.insert('catalogo_grupo_etario', g,
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getGruposEtariosLocal() async {
+    final db = await database;
+    return await db.query('catalogo_grupo_etario', orderBy: 'orden ASC');
   }
 
   Future<void> saveDepartamentos(List<Map<String, dynamic>> departamentos) async {
@@ -1272,6 +1352,7 @@ class DatabaseHelper {
     await db.delete('catalogo_cultivos');
     await db.delete('catalogo_pecuario_grupos');
     await db.delete('catalogo_grupo_vulnerable');
+    await db.delete('catalogo_grupo_etario');
     await db.delete('catalogo_tipos_repositorio');
     await db.delete('municipio_geojson');
     await db.delete('edans_offline');
@@ -1341,6 +1422,9 @@ class DatabaseHelper {
     loc.sincronizado = _toBool(row['sincronizado']);
     loc.pendienteEliminacion = _toBool(row['pendiente_eliminacion']);
     loc.pendienteActualizacion = _toBool(row['pendiente_actualizacion']);
+    if (row['fecha_modificacion'] != null) {
+      loc.fechaModificacion = row['fecha_modificacion'] as String;
+    }
     // Fallback: resolver nombres desde columnas si datos_json no los tiene
     if (loc.departamentoNombre == null || loc.departamentoNombre!.isEmpty) {
       loc.departamentoNombre = row['departamento_nombre'] as String?;
@@ -1479,49 +1563,61 @@ class DatabaseHelper {
   Future<int> updateLocalidad(EdanLocalidad localidad) async {
     if (localidad.idLocal == null) return 0;
     final db = await database;
-    final now = DateTime.now().toIso8601String();
-    localidad.fechaModificacion = now;
     return await db.update(
       'localidades_offline',
-      {
-        'id_server': localidad.idServer,
-        'id_edan': localidad.idEdan,
-        'es_huerfana': localidad.esHuerfana ? 1 : 0,
-        'id_tipo_localidad': localidad.idTipoLocalidad,
-        'id_tipo_evento': localidad.idTipoEvento,
-        'id_departamento': localidad.idDepartamento,
-        'id_provincia': localidad.idProvincia,
-        'id_municipio': localidad.idMunicipio,
-        'departamento_nombre': localidad.departamentoNombre,
-        'provincia_nombre': localidad.provinciaNombre,
-        'municipio_nombre': localidad.municipioNombre,
-        'localidad': localidad.nombre,
-        'fecha_llenado': localidad.fechaLlenado,
-        'fecha_evento': localidad.fechaEvento,
-        'hora_evento': localidad.horaEvento,
-        'total_poblacion_afectada': localidad.totalPoblacionAfectada,
-        'total_familias_afectadas': localidad.totalFamiliasAfectadas,
-        'total_familias_damnificadas': localidad.totalFamiliasDamnificadas,
-        'imp_poblacion': localidad.impPoblacion ? 1 : 0,
-        'imp_salud': localidad.impSalud ? 1 : 0,
-        'imp_infraestructura': localidad.impInfraestructura ? 1 : 0,
-        'imp_servicios': localidad.impServicios ? 1 : 0,
-        'imp_educacion': localidad.impEducacion ? 1 : 0,
-        'imp_vivienda': localidad.impVivienda ? 1 : 0,
-        'imp_agropecuario': localidad.impAgropecuario ? 1 : 0,
-        'imp_proteccion': localidad.impProteccion ? 1 : 0,
-        'imp_necesidades': localidad.impNecesidades ? 1 : 0,
-        'id_edan_localidad_estado': localidad.idEdanLocalidadEstado,
-        'estado_localidad': localidad.estadoLocalidad?.label,
-        'datos_json': jsonEncode(localidad.toJson()),
-        'sincronizado': localidad.sincronizado ? 1 : 0,
-        'pendiente_actualizacion': localidad.pendienteActualizacion ? 1 : 0,
-        'pendiente_eliminacion': localidad.pendienteEliminacion ? 1 : 0,
-        'fecha_modificacion': now,
-      },
+      _localidadToRow(localidad),
       where: 'id_local = ?',
       whereArgs: [localidad.idLocal],
     );
+  }
+
+  Map<String, dynamic> _localidadToRow(
+    EdanLocalidad l, {
+    String? fechaModificacion,
+    bool? sincronizado,
+    bool? pendienteActualizacion,
+    bool? pendienteEliminacion,
+  }) {
+    final fecha = fechaModificacion ?? DateTime.now().toIso8601String();
+    l.fechaModificacion = fecha;
+    return {
+      'id_server': l.idServer,
+      'id_edan': l.idEdan,
+      'es_huerfana': l.esHuerfana ? 1 : 0,
+      'id_tipo_localidad': l.idTipoLocalidad,
+      'id_tipo_evento': l.idTipoEvento,
+      'id_departamento': l.idDepartamento,
+      'id_provincia': l.idProvincia,
+      'id_municipio': l.idMunicipio,
+      'departamento_nombre': l.departamentoNombre,
+      'provincia_nombre': l.provinciaNombre,
+      'municipio_nombre': l.municipioNombre,
+      'localidad': l.nombre,
+      'fecha_llenado': l.fechaLlenado,
+      'fecha_evento': l.fechaEvento,
+      'hora_evento': l.horaEvento,
+      'total_poblacion_afectada': l.totalPoblacionAfectada,
+      'total_familias_afectadas': l.totalFamiliasAfectadas,
+      'total_familias_damnificadas': l.totalFamiliasDamnificadas,
+      'imp_poblacion': l.impPoblacion ? 1 : 0,
+      'imp_salud': l.impSalud ? 1 : 0,
+      'imp_infraestructura': l.impInfraestructura ? 1 : 0,
+      'imp_servicios': l.impServicios ? 1 : 0,
+      'imp_educacion': l.impEducacion ? 1 : 0,
+      'imp_vivienda': l.impVivienda ? 1 : 0,
+      'imp_agropecuario': l.impAgropecuario ? 1 : 0,
+      'imp_proteccion': l.impProteccion ? 1 : 0,
+      'imp_necesidades': l.impNecesidades ? 1 : 0,
+      'id_edan_localidad_estado': l.idEdanLocalidadEstado,
+      'estado_localidad': l.estadoLocalidad?.label,
+      'datos_json': jsonEncode(l.toJson()),
+      'sincronizado': (sincronizado ?? l.sincronizado) ? 1 : 0,
+      'pendiente_actualizacion':
+          (pendienteActualizacion ?? l.pendienteActualizacion) ? 1 : 0,
+      'pendiente_eliminacion':
+          (pendienteEliminacion ?? l.pendienteEliminacion) ? 1 : 0,
+      'fecha_modificacion': fecha,
+    };
   }
 
   Future<int> deleteLocalidad(String idLocal) async {
@@ -1549,6 +1645,153 @@ class DatabaseHelper {
       where: 'id_local = ?',
       whereArgs: [idLocal],
     );
+  }
+
+  /// Marca sincronizada conservando la fecha_modificacion del servidor
+  /// (autoridad de tiempo para LWW). No la sobrescribe con DateTime.now().
+  Future<int> markLocalidadAsSyncedConFecha(
+    String idLocal,
+    int idServer,
+    String fechaModificacion,
+  ) async {
+    final db = await database;
+    return await db.update(
+      'localidades_offline',
+      {
+        'id_server': idServer,
+        'sincronizado': 1,
+        'pendiente_eliminacion': 0,
+        'pendiente_actualizacion': 0,
+        'intentos_sync': 0,
+        'ultimo_error': null,
+        'fecha_modificacion': fechaModificacion,
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  // ========== Tracking de secciones v2 (localidad_seccion_sync) ==========
+
+  /// Inserta o actualiza la fila de una sección marcándola como modificada
+  /// localmente (candidata a subir) con su fecha local para LWW.
+  Future<void> marcarSeccionModificada(
+    String idLocal,
+    String seccion, {
+    String? fecha,
+  }) async {
+    final db = await database;
+    await db.insert(
+      'localidad_seccion_sync',
+      {
+        'id_local': idLocal,
+        'seccion': seccion,
+        'modificada': 1,
+        'fecha_modificacion': fecha ?? DateTime.now().toIso8601String(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  /// Marca varias secciones como modificadas (p. ej. las de una página del
+  /// wizard). La cabecera se marca con la pseudo-ruta `cabecera`.
+  Future<void> marcarSeccionesModificadas(
+    String idLocal,
+    List<String> secciones, {
+    String? fecha,
+  }) async {
+    for (final s in secciones) {
+      await marcarSeccionModificada(idLocal, s, fecha: fecha);
+    }
+  }
+
+  /// Marca una sección como sincronizada (ya subida). OPCIONAL conservar la
+  /// fecha local si se pasa [fecha].
+  Future<void> marcarSeccionSincronizada(
+    String idLocal,
+    String seccion, {
+    String? fecha,
+  }) async {
+    final db = await database;
+    final fechaFinal = fecha ?? DateTime.now().toIso8601String();
+    await db.update(
+      'localidad_seccion_sync',
+      {
+        'modificada': 0,
+        'fecha_modificacion': fechaFinal,
+      },
+      where: 'id_local = ? AND seccion = ?',
+      whereArgs: [idLocal, seccion],
+    );
+  }
+
+  /// Marca todas las secciones de una localidad como sincronizadas.
+  Future<void> marcarTodasSeccionesSincronizadas(String idLocal) async {
+    final db = await database;
+    await db.update(
+      'localidad_seccion_sync',
+      {'modificada': 0},
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  /// Secciones marcadas como modificadas localmente (candidatas a subir).
+  Future<List<String>> getSeccionesModificadas(String idLocal) async {
+    final db = await database;
+    final maps = await db.query(
+      'localidad_seccion_sync',
+      columns: ['seccion'],
+      where: 'id_local = ? AND modificada = 1',
+      whereArgs: [idLocal],
+    );
+    return maps.map((m) => m['seccion'] as String).toList();
+  }
+
+  /// Fecha local de modificación de una sección (para LWW en conflictos).
+  Future<String?> getSeccionFechaModificacion(String idLocal, String seccion) async {
+    final db = await database;
+    final maps = await db.query(
+      'localidad_seccion_sync',
+      columns: ['fecha_modificacion'],
+      where: 'id_local = ? AND seccion = ?',
+      whereArgs: [idLocal, seccion],
+      limit: 1,
+    );
+    if (maps.isEmpty) return null;
+    return maps.first['fecha_modificacion'] as String?;
+  }
+
+  /// Reemplaza la localidad local con la copia íntegra del servidor y
+  /// conserva la fecha del servidor (autoridad de tiempo, evita regresión LWW).
+  /// Limpia los flags de sección. [fechaServer] prevalece; si es null usa
+  /// `localidad.fechaModificacion`.
+  Future<int> reemplazarLocalidadDesdeServer(
+    EdanLocalidad localidad, {
+    String? fechaServer,
+    int? idServer,
+  }) async {
+    if (localidad.idLocal == null) return 0;
+    final db = await database;
+    final fecha = fechaServer ??
+        localidad.fechaModificacion ??
+        DateTime.now().toIso8601String();
+    final row = _localidadToRow(
+      localidad,
+      fechaModificacion: fecha,
+      sincronizado: true,
+    );
+    row['id_server'] = idServer ?? localidad.idServer;
+    row['pendiente_actualizacion'] = 0;
+    row['pendiente_eliminacion'] = 0;
+    final result = await db.update(
+      'localidades_offline',
+      row,
+      where: 'id_local = ?',
+      whereArgs: [localidad.idLocal],
+    );
+    await marcarTodasSeccionesSincronizadas(localidad.idLocal!);
+    return result;
   }
 
   Future<int> markLocalidadAsPendingDeletion(String idLocal) async {
@@ -1620,7 +1863,7 @@ class DatabaseHelper {
   }
 
   String _generateUuid() {
-    return '${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
+    return generarIdLocal();
   }
 
   int _toInt(dynamic value) {

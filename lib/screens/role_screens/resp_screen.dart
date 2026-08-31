@@ -8,7 +8,7 @@ import '../../services/localidad_sync_service.dart';
 import '../../widgets/perfil_tab.dart';
 import '../../widgets/asistente_ia.dart';
 import 'resp/resp_dashboard_tab.dart';
-import 'resp/resp_edan_form_screen.dart';
+import 'resp/edan/edan_form_wizard.dart';
 import 'resp/resp_edan_localidad_tab.dart';
 import 'resp/resp_guia_tab.dart';
 import 'resp/resp_mapa_tab.dart';
@@ -355,7 +355,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
         return FloatingActionButton(
           onPressed: () async {
             final exito = await Navigator.of(context).push<bool>(
-              ugrRoute(const RespEdanFormScreen(), palette: Palettes.rea),
+              ugrRoute(EdanFormWizard(), palette: Palettes.rea),
             );
             if (exito != true || !mounted) return;
             _dashboardTabKey.currentState?.refresh();
@@ -374,7 +374,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
         return FloatingActionButton(
           onPressed: () async {
             final exito = await Navigator.of(context).push<bool>(
-              ugrRoute(const RespEdanFormScreen(), palette: Palettes.rea),
+              ugrRoute(EdanFormWizard(), palette: Palettes.rea),
             );
             if (exito != true || !mounted) return;
             _edanTabKey.currentState?.refresh();

@@ -387,9 +387,61 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     setState(() => _edan.localidades.add(EdanLocalidad()));
   }
 
-  void _eliminarLocalidad(int index) {
+  Future<void> _eliminarLocalidad(int index) async {
     if (_edan.localidades.length <= 1) return;
+    final ok = await _confirmarConfirmacionLocalidad();
+    if (!ok || !mounted) return;
     setState(() => _edan.localidades.removeAt(index));
+  }
+
+  Future<bool> _confirmarConfirmacionLocalidad() async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('¿Eliminar lugar afectado?'),
+            content: const Text('Se eliminará este lugar afectado del EDAN.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<bool> _confirmarEliminarItem(String mensaje) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('¿Eliminar ítem?'),
+            content: Text(mensaje),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 
   Future<void> _confirmarAgregarSubitem({
@@ -1343,8 +1395,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.establecimientosSalud.length > 1,
-                    onEliminar: () => setState(
-                        () => l.establecimientosSalud.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este establecimiento de salud.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.establecimientosSalud.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1483,8 +1539,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     titulo: 'Vía / puente ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.danosViales.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosViales.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este registro de vía o puente.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosViales.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1520,8 +1580,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.danosInfraPublica.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosInfraPublica.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este registro de infraestructura pública.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosInfraPublica.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1646,8 +1710,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.unidadesEducativas.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.unidadesEducativas.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará esta unidad educativa.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.unidadesEducativas.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1734,8 +1802,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     valor: valor,
                     comunidadInicial: l.etiquetaLugar,
                     puedeEliminar: l.danosVivienda.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosVivienda.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este registro de daño en viviendas.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosVivienda.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1810,8 +1882,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     titulo: 'Cultivo ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.danosAgricultura.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosAgricultura.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará este cultivo.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosAgricultura.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1846,8 +1922,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     titulo: 'Especie ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.danosPecuarios.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.danosPecuarios.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará esta especie pecuaria.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.danosPecuarios.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -1882,8 +1962,12 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                     titulo: 'Infraestructura ${j + 1}',
                     valor: valor,
                     puedeEliminar: l.infraProductiva.length > 1,
-                    onEliminar: () =>
-                        setState(() => l.infraProductiva.removeAt(j)),
+                    onEliminar: () async {
+                      final ok = await _confirmarEliminarItem(
+                          'Se eliminará esta infraestructura productiva.');
+                      if (!ok || !mounted) return;
+                      setState(() => l.infraProductiva.removeAt(j));
+                    },
                     onChanged: () => setState(() {}),
                     autoFocus: idSeccionDe(valor) == _focusNodeId,
                   ),
@@ -2437,7 +2521,9 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
                     ),
                     const SizedBox(width: 8),
                     GestureDetector(
-                      onTap: () {
+                      onTap: () async {
+                        final ok = await _confirmarEliminarFoto(context);
+                        if (!ok) return;
                         widget.fotos.clear();
                         widget.onChanged();
                         setState(() => _advertencia = null);
@@ -2468,6 +2554,31 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
           ),
       ],
     );
+  }
+
+  Future<bool> _confirmarEliminarFoto(BuildContext dialogCtx) async {
+    return await showDialog<bool>(
+          context: dialogCtx,
+          builder: (ctx) => AlertDialog(
+            title: const Text('¿Eliminar foto?'),
+            content: const Text('Se eliminará la foto de respaldo de este ítem.'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Eliminar'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
   }
 }
 
@@ -3168,8 +3279,16 @@ class _TarjetaLocalidadState extends State<_TarjetaLocalidad> {
           _impactoCheck(localidad.impPoblacion, 'Población', (v) {
             localidad.impPoblacion = v;
             if (v && localidad.impactoPoblacion.isEmpty) {
-              localidad.impactoPoblacion.add(EdanImpactoPoblacion()
-                ..idSeccion = generarIdSeccion('im'));
+              final rp = context.read<ReporteProvider>();
+              localidad.impactoPoblacion.add(EdanImpactoPoblacion(
+                gruposEtarios: EdanImpactoPoblacion.gruposDesdeCatalogo(
+                    rp.gruposEtarios
+                        .map((g) => {
+                              'id_grupo_etario': g.idGrupoEtario,
+                              'nombre': g.nombre,
+                            })
+                        .toList()),
+              )..idSeccion = generarIdSeccion('im'));
             }
             widget.onChanged();
           }),

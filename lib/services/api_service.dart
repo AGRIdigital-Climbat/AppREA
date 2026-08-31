@@ -525,6 +525,19 @@ class ApiService {
         .toList();
   }
 
+  Future<List<GrupoEtarioCatalogo>> getGruposEtarios() async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanEndpoint}/grupo-etario'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => GrupoEtarioCatalogo.fromJson(json))
+        .toList();
+  }
+
   Future<List<Estado>> getEstados() async {
     final response = await _requestWithRetry(() =>
       http.get(
@@ -864,6 +877,26 @@ class ApiService {
     return _extractDataList(body);
   }
 
+  /// Listado ligero de mis localidades (cabecera + estado + flags de sync,
+  /// SIN secciones). Es la Fase 0 del sync central: permite comparar
+  /// `fecha_modificacion` por `id_local` en UNA llamada.
+  Future<List<Map<String, dynamic>>> getLocalidadesMisEstados({
+    int? idUsuario,
+    int skip = 0,
+    int limit = 1000,
+  }) async {
+    final params = <String>['skip=$skip', 'limit=$limit'];
+    if (idUsuario != null) params.add('id_usuario=$idUsuario');
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/mis-estados?${params.join('&')}'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body);
+  }
+
   Future<List<Map<String, dynamic>>> getLocalidadesSyncPull({
     required int idUsuario,
     DateTime? fechaDesde,
@@ -1002,6 +1035,81 @@ class ApiService {
     await _requestWithRetry(() =>
       http.delete(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion/$idGrupo'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+  }
+
+  // ========== API V2: sincronización por secciones ==========
+
+  /// Crea o actualiza la CABECERA de una localidad (UPSERT por id_local) y
+  /// devuelve el `id_edan_localidad` del servidor. Debe llamarse primero.
+  Future<Map<String, dynamic>> enviarLocalidadCabeceraV2(
+    Map<String, dynamic> cabecera,
+  ) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/cabecera'),
+        headers: _headers,
+        body: jsonEncode(cabecera),
+      ).timeout(const Duration(seconds: 30))
+    );
+    final body = await _handleResponse(response);
+    DebugLog.instance.i('cabeceraV2 OK status=${response.statusCode} '
+        'id_local=${cabecera['id_local']}');
+    final data = body['data'];
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return Map<String, dynamic>.from(body);
+  }
+
+  /// Envía una sección (1:N como array o 1:1 como objeto único) de una
+  /// localidad v2. `payload` puede ser un `Map` o un `List<Map>`.
+  Future<Map<String, dynamic>> enviarLocalidadSeccionV2({
+    required int idLocalidad,
+    required String seccion,
+    required dynamic payload,
+  }) async {
+    final response = await _requestWithRetry(() =>
+      http.post(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion'),
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 90))
+    );
+    final body = await _handleResponse(response);
+    DebugLog.instance.i('seccionV2 OK $seccion status=${response.statusCode} '
+        'localidad=$idLocalidad');
+    final data = body['data'];
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return Map<String, dynamic>.from(body);
+  }
+
+  /// Mapea un id_local (UUID) al id_edan_localidad del servidor.
+  Future<Map<String, dynamic>> mapearLocalidadPorIdLocalV2(
+    String idLocal,
+  ) async {
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/por-id-local/$idLocal'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    final data = body['data'];
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return Map<String, dynamic>.from(body);
+  }
+
+  /// Elimina un ítem de una sección v2 por su id_seccion.
+  Future<void> eliminarLocalidadSeccionV2({
+    required int idLocalidad,
+    required String seccion,
+    required String idSeccion,
+  }) async {
+    await _requestWithRetry(() =>
+      http.delete(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/'
+            '$idLocalidad/$seccion/seccion/$idSeccion'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
     );
