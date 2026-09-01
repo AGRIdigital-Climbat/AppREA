@@ -24,7 +24,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 19,
+      version: 20,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -560,6 +560,302 @@ class DatabaseHelper {
         )
       ''');
     }
+    // v20: tablas de sección por Modelo A (roles RESP). Se inicia limpio; las
+    // nuevas tablas por sección con columna `editado` (1 = pendiente de envío).
+    // `localidades_offline`/`datos_json`/`localidad_seccion_sync` se conservan
+    // para el rol 6 UGR (consolidar).
+    if (oldVersion < 20) {
+      await _crearTablasSeccionV20(db);
+    }
+  }
+
+  /// Crea las 14 tablas de sección v2 (Modelo A) + carrete de fotos.
+  /// Cada tabla replica el backend (mismas columnas) y agrega columnas locales:
+  ///   - `editado`            : 1 = fila pendiente de envío / 0 = sincronizada
+  ///   - `marcado_borrar`     : 1 = emitir DELETE
+  ///   - `insertada_en_server`: 0 = INSERT (id_seccion nuevo) / 1 = UPDATE
+  Future<void> _crearTablasSeccionV20(Database db) async {
+    // ===== Secciones 1:N con foto =====
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_impacto_poblacion (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        id_grupo_etario INTEGER,
+        rango TEXT,
+        fallecidos INTEGER,
+        heridos INTEGER,
+        desaparecidos INTEGER,
+        observaciones TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_salud_establecimientos (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        nombre_establecimiento TEXT,
+        comunidad TEXT,
+        nivel_atencion TEXT,
+        id_nivel_atencion INTEGER,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        medicos_afectados INTEGER,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_danos_viales (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        via INTEGER,
+        puente INTEGER,
+        tramo TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        km_danio REAL,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_danos_infra_publica (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        comunidad TEXT,
+        tipo_estructura TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_servicios_basicos (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        tipo TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_unidades_educativas (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        nombre_establecimiento TEXT,
+        comunidad TEXT,
+        nivel_educativo TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        suspension_clases INTEGER,
+        estudiantes INTEGER,
+        docentes INTEGER,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_danos_vivienda (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        comunidad TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_danos_agricultura (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        id_cultivo INTEGER,
+        tipo_cultivo TEXT,
+        hectareas_afectadas INTEGER,
+        hectareas_perdidas INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_danos_pecuarios (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        id_especie INTEGER,
+        especie TEXT,
+        raza TEXT,
+        animales_afectados INTEGER,
+        animales_muertos INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_infra_productiva (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        tipo TEXT,
+        comunidad TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    // ===== Secciones 1:N sin foto =====
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_proteccion (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        id_grupo_vulnerable_catalogo INTEGER,
+        grupo_vulnerable TEXT,
+        mujeres INTEGER,
+        hombres INTEGER,
+        apoyo_psicologico INTEGER,
+        observaciones TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    // ===== Secciones 1:1 (objeto único por localidad) =====
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_primera_respuesta (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        busqueda INTEGER,
+        salvamento INTEGER,
+        evacuacion INTEGER,
+        observaciones TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_necesidad_salud (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        numero_personas INTEGER,
+        otras_necesidades TEXT,
+        observaciones TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS seccion_necesidad_humanitaria (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        alimentos INTEGER,
+        refugio_vivienda INTEGER,
+        ropa_cama INTEGER,
+        articulos_higiene INTEGER,
+        articulos_cocina INTEGER,
+        prendas_vestir INTEGER,
+        herramientas INTEGER,
+        almacenamiento_agua INTEGER,
+        banos INTEGER,
+        obs_alimentos TEXT,
+        obs_refugio_vivienda TEXT,
+        obs_ropa_cama TEXT,
+        obs_articulos_higiene TEXT,
+        obs_articulos_cocina TEXT,
+        obs_prendas_vestir TEXT,
+        obs_herramientas TEXT,
+        obs_almacenamiento_agua TEXT,
+        obs_banos TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0
+      )
+    ''');
+    // ===== Carrete de fotos (desacopla binarios del guardado de sección) =====
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS foto_pendiente (
+        id_foto TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        id_seccion TEXT,
+        ruta_local_archivo TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        subida INTEGER DEFAULT 0,
+        path_servidor TEXT
+      )
+    ''');
   }
 
   Future<void> _onOpen(Database db) async {
@@ -1571,6 +1867,18 @@ class DatabaseHelper {
     );
   }
 
+  /// Actualiza solo la columna `datos_json` de una localidad (para reemplazar
+  /// paths del servidor por paths locales de fotos descargadas).
+  Future<int> updateLocalidadJson(String idLocal, String datosJson) async {
+    final db = await database;
+    return await db.update(
+      'localidades_offline',
+      {'datos_json': datosJson},
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
   Map<String, dynamic> _localidadToRow(
     EdanLocalidad l, {
     String? fechaModificacion,
@@ -1864,6 +2172,212 @@ class DatabaseHelper {
 
   String _generateUuid() {
     return generarIdLocal();
+  }
+
+  // ========== Tablas de sección (Modelo A v20) ==========
+
+  /// Guarda (upsert por `id_seccion`) las filas de una sección en su tabla,
+  /// marcándolas `editado=1` (candidatas a envío). Si [idEdanLocalidad] no es
+  /// null, lo propaga a las filas recién escritas (tras subir la cabecera).
+  Future<void> guardarFilasSeccion(
+    String tabla,
+    String idLocal,
+    List<Map<String, dynamic>> filas, {
+    int? idEdanLocalidad,
+  }) async {
+    final db = await database;
+    final batch = db.batch();
+    for (final fila in filas) {
+      final idSeccion = fila['id_seccion']?.toString();
+      if (idSeccion == null || idSeccion.isEmpty) continue;
+      final row = Map<String, dynamic>.from(fila);
+      row['id_local'] = idLocal;
+      if (idEdanLocalidad != null) row['id_edan_localidad'] = idEdanLocalidad;
+      row['editado'] = 1;
+      // No sobrescribir marcado_borrar ni insertada_en_server existentes.
+      row.remove('marcado_borrar');
+      row.remove('insertada_en_server');
+      row.remove('_fecha_modificacion');
+      batch.insert(
+        tabla,
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+    if (idEdanLocalidad != null) {
+      await propagarIdEdanAUnicaTabla(tabla, idLocal, idEdanLocalidad);
+    }
+  }
+
+  /// Lee las filas con `editado=1` de una sección (las que faltan enviar).
+  Future<List<Map<String, dynamic>>> leerFilasEditadas(
+    String tabla,
+    String idLocal,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      tabla,
+      where: 'id_local = ? AND editado = 1',
+      whereArgs: [idLocal],
+    );
+    return maps;
+  }
+
+  /// Marca una fila de sección como sincronizada (editado=0, insertada en
+  /// servidor). Se inserta al UPSERT como fila nueva (INSERT) la primera vez,
+  /// y como UPDATE en ediciones reutilizando el MISMO id_seccion.
+  Future<void> marcarFilaSeccionSincronizada(
+    String tabla,
+    String idSeccion, {
+    bool insertadaEnServer = true,
+  }) async {
+    final db = await database;
+    await db.update(
+      tabla,
+      {
+        'editado': 0,
+        'insertada_en_server': insertadaEnServer ? 1 : 0,
+      },
+      where: 'id_seccion = ?',
+      whereArgs: [idSeccion],
+    );
+  }
+
+  /// Marca todas las filas editadas de una sección como sincronizadas.
+  Future<void> marcarFilasSeccionSincronizadas(
+    String tabla,
+    String idLocal,
+  ) async {
+    final db = await database;
+    await db.update(
+      tabla,
+      {'editado': 0, 'insertada_en_server': 1},
+      where: 'id_local = ? AND editado = 1',
+      whereArgs: [idLocal],
+    );
+  }
+
+  /// Marca una fila de sección borrada (`marcado_borrar=1`). Se usa al eliminar
+  /// un ítem 1:N localmente; se elimina del servidor en el siguiente envío.
+  Future<void> marcarFilaSeccionBorrada(
+    String tabla,
+    String idSeccion,
+  ) async {
+    final db = await database;
+    await db.update(
+      tabla,
+      {'marcado_borrar': 1},
+      where: 'id_seccion = ?',
+      whereArgs: [idSeccion],
+    );
+  }
+
+  /// Lee las filas marcadas para borrar de una sección.
+  Future<List<Map<String, dynamic>>> leerFilasBorradas(
+    String tabla,
+    String idLocal,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      tabla,
+      where: 'id_local = ? AND marcado_borrar = 1',
+      whereArgs: [idLocal],
+    );
+    return maps;
+  }
+
+  /// Elimina localmente una fila de sección (tras borrado confirmado el server).
+  Future<void> eliminarFilaSeccion(String tabla, String idSeccion) async {
+    final db = await database;
+    await db.delete(
+      tabla,
+      where: 'id_seccion = ?',
+      whereArgs: [idSeccion],
+    );
+  }
+
+  /// Propaga el `id_edan_localidad` a TODAS las secciones de una localidad
+  /// (puente offline→online del Modelo A). Se llama una sola vez tras subir la
+  /// cabecera.
+  Future<void> propagarIdEdanASecciones(String idLocal, int idEdan) async {
+    for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+      await propagarIdEdanAUnicaTabla(tabla, idLocal, idEdan);
+    }
+  }
+
+  Future<void> propagarIdEdanAUnicaTabla(
+    String tabla,
+    String idLocal,
+    int idEdan,
+  ) async {
+    final db = await database;
+    await db.update(
+      tabla,
+      {'id_edan_localidad': idEdan},
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  /// Limpia todo el contenido de las tablas de sección y del carrete (borrado
+  /// completo de una localidad).
+  Future<void> limpiarSeccionesDeLocalidad(String idLocal) async {
+    final db = await database;
+    for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+      await db.delete(tabla, where: 'id_local = ?', whereArgs: [idLocal]);
+    }
+    await db.delete('foto_pendiente',
+        where: 'id_local = ?', whereArgs: [idLocal]);
+  }
+
+  // ========== Carrete de fotos (foto_pendiente) ==========
+
+  /// Registra una foto local pendiente de subir. Si [idFoto] ya existe lo
+  /// reemplaza; de lo contrario lo genera.
+  Future<String> insertarFotoPendiente({
+    String? idFoto,
+    String? idLocal,
+    int? idEdanLocalidad,
+    String? idSeccion,
+    required String rutaLocalArchivo,
+    double? lat,
+    double? lon,
+  }) async {
+    final db = await database;
+    final idFotoFinal = idFoto ?? generarIdLocal();
+    await db.insert(
+      'foto_pendiente',
+      {
+        'id_foto': idFotoFinal,
+        'id_local': idLocal,
+        'id_edan_localidad': idEdanLocalidad,
+        'id_seccion': idSeccion,
+        'ruta_local_archivo': rutaLocalArchivo,
+        'coordenada_lat': lat,
+        'coordenada_lon': lon,
+        'subida': 0,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+    return idFotoFinal;
+  }
+
+  /// Fotos pendientes de subir (cualquiera de las localidades dadas o todas).
+  Future<List<Map<String, dynamic>>> leerFotosPendientes() async {
+    final db = await database;
+    return await db.query('foto_pendiente', where: 'subida = 0');
+  }
+
+  /// Marca una foto como subida guardando el path del servidor.
+  Future<void> marcarFotoSubida(String idFoto, String pathServidor) async {
+    final db = await database;
+    await db.update(
+      'foto_pendiente',
+      {'subida': 1, 'path_servidor': pathServidor},
+      where: 'id_foto = ?',
+      whereArgs: [idFoto],
+    );
   }
 
   int _toInt(dynamic value) {

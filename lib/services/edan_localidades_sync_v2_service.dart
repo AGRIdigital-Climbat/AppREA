@@ -54,12 +54,14 @@ class EdanLocalidadesSyncV2Service {
       // 1. Fotos primero (Vía B): subir pendientes de las rutas incluidas.
       await _subirFotosPendientes(localidad, rutas: rutas);
 
-      // 2. Cabecera primero -> id_edan_localidad (viaja dentro de `data`).
+      // 1.5. Eliminar ítems marcados como eliminados localmente.
+      await _eliminarSecciones(localidad);
+
+      // 2. Cabecera primero -> id_edan_localidad.
+      //    enviarLocalidadCabeceraV2 ya extrae body['data'], así que el
+      //    mapa retornado contiene directamente id_edan_localidad.
       final cabecera = await _enviarCabecera(localidad);
-      final cabeceraData = cabecera['data'];
-      final idEdan = _intId(
-        cabeceraData is Map ? cabeceraData['id_edan_localidad'] : null,
-      );
+      final idEdan = _intId(cabecera['id_edan_localidad']);
       if (idEdan == null) {
         debugPrint('[SyncV2] Cabecera no devolvió id_edan_localidad: $cabecera');
         return false;
@@ -186,6 +188,38 @@ class EdanLocalidadesSyncV2Service {
     }
 
     await _db.updateLocalidad(localidad);
+  }
+
+  /// Elimina en el servidor los ítems de secciones 1:N que el usuario borró
+  /// localmente. Si no hay idEdan (no sincronizado aún), solo limpia la lista.
+  Future<void> _eliminarSecciones(EdanLocalidad localidad) async {
+    if (localidad.seccionesEliminadas.isEmpty) return;
+    final idEdan = localidad.idServer;
+    if (idEdan == null) {
+      localidad.seccionesEliminadas.clear();
+      return;
+    }
+    final pendientes = List<Map<String, String>>.from(
+        localidad.seccionesEliminadas);
+    for (final item in pendientes) {
+      final ruta = item['ruta']!;
+      final idSeccion = item['id_seccion']!;
+      try {
+        await _api.eliminarLocalidadSeccionV2(
+          idLocalidad: idEdan,
+          seccion: ruta,
+          idSeccion: idSeccion,
+        );
+        localidad.seccionesEliminadas.removeWhere(
+            (e) => e['id_seccion'] == idSeccion && e['ruta'] == ruta);
+        debugPrint('[SyncV2] DELETE $idEdan/$ruta/$idSeccion OK');
+      } catch (e) {
+        debugPrint('[SyncV2] Error DELETE $idEdan/$ruta/$idSeccion: $e');
+      }
+    }
+    if (localidad.seccionesEliminadas.isEmpty) {
+      await _db.updateLocalidad(localidad);
+    }
   }
 
   Future<void> _subirFotosSeccion<T>(

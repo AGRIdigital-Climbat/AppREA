@@ -15,7 +15,7 @@ import '../../../services/database_helper.dart';
 import '../../../services/edan_secciones_registry.dart';
 import '../../../services/image_service.dart';
 import '../../../services/location_service.dart';
-import '../../../services/edan_localidades_sync_v2_service.dart';
+import '../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../services/localidad_sync_service.dart';
 import '../../../services/debug_log.dart';
 import '../../../services/permission_service.dart';
@@ -584,11 +584,11 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
             'gruposProteccion=${localidad.proteccionParaEndpointDedicado().length} '
             'proteccionTotal=${localidad.proteccion.length}');
 
-        // Sincronización por secciones (API v2): sube fotos (Vía B), cabecera
+        // Sincronización por secciones (API v2): sube fotos (carrete), cabecera
         // y cada sección con su id_seccion. Grupos mixtos foto/sin foto.
-        final sincV2 = EdanLocalidadesSyncV2Service();
-        final okV2 = await sincV2.sincronizarLocalidad(localidad);
-        DebugLog.instance.i('Resultado sincronización V2: ok=$okV2');
+        final sincV2 = EdanLocalidadesEnvioV2Service();
+        final okV2 = await sincV2.enviarLocalidad(localidad);
+        DebugLog.instance.i('Resultado envío V2: ok=$okV2');
 
         if (okV2) {
           localidad

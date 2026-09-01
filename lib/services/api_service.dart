@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import '../config/api_config.dart';
@@ -321,19 +323,26 @@ class ApiService {
 
   Future<String?> downloadImage(String serverPath, String savePath) async {
     try {
-      final encodedPath = Uri.encodeComponent(serverPath);
+      final encodedPath = Uri.encodeFull(serverPath);
+      final url = '${ApiConfig.baseUrl}/upload/descargar/$encodedPath';
+      debugPrint('[downloadImage] GET $url');
       final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/upload/descargar/$encodedPath'),
+        Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 30));
+      debugPrint('[downloadImage] status=${response.statusCode} '
+          'bytes=${response.bodyBytes.length}');
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final file = File(savePath);
         await file.parent.create(recursive: true);
         await file.writeAsBytes(response.bodyBytes);
         return savePath;
       }
+      debugPrint('[downloadImage] Error ${response.statusCode}: '
+          '${response.body.substring(0, response.body.length.clamp(0, 200))}');
       return null;
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[downloadImage] Exception: $e');
       return null;
     }
   }
@@ -461,6 +470,93 @@ class ApiService {
 
     final response = await _requestWithRetry(doUpload);
     return _handleResponse(response);
+  }
+
+  /// Sube las fotos del "carrete" de una localidad EDAN (Modelo A).
+  /// `POST /api/v2/edan/localidades/foto/subir` multipart. Se suben UNA O VARIAS
+  /// fotos paralelamente a su `id_seccion`. Devuelve un mapa
+  /// `id_seccion -> path_servidor` a partir de `results[]`.
+  ///
+  /// - [files] paths de archivos; [idSecciones] paralelos (misma longitud).
+  /// - `id_local` (UUID) y/o `id_edan_localidad` (int) resuelven el municipio;
+  ///   si vienen ambos el servidor valida coherencia (400 si no apuntan a la
+  ///   misma localidad).
+  /// - GPS es opcional en el carrete.
+  Future<Map<String, String>> subirFotosCarrete({
+    required List<String> files,
+    required List<String> idSecciones,
+    String? idLocal,
+    int? idEdanLocalidad,
+    double? lat,
+    double? lon,
+  }) async {
+    assert(files.length == idSecciones.length,
+        'files e idSecciones deben tener la misma longitud');
+
+    Future<http.Response> doUpload() async {
+      final request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/foto/subir'),
+      );
+      if (_token != null) {
+        request.headers['Authorization'] = 'Bearer $_token';
+      }
+      request.headers['Accept'] = 'application/json';
+
+      if (idLocal != null && idLocal.isNotEmpty) {
+        request.fields['id_local'] = idLocal;
+      }
+      if (idEdanLocalidad != null) {
+        request.fields['id_edan_localidad'] = '$idEdanLocalidad';
+      }
+      if (lat != null) request.fields['coordenada_lat'] = '$lat';
+      if (lon != null) request.fields['coordenada_lon'] = '$lon';
+
+      for (final idSeccion in idSecciones) {
+        request.fields['id_seccion'] = idSeccion;
+      }
+      for (final filePath in files) {
+        final contentType = _getImageContentType(filePath);
+        request.files.add(await http.MultipartFile.fromPath(
+          'file',
+          filePath,
+          contentType: MediaType.parse(contentType),
+        ));
+      }
+      final streamedResponse =
+          await request.send().timeout(const Duration(seconds: 60));
+      return http.Response.fromStream(streamedResponse);
+    }
+
+    final response = await _requestWithRetry(doUpload);
+    final body = await _handleResponse(response);
+    return _extractCarretePaths(body);
+  }
+
+  /// Extrae de la respuesta de `foto/subir` el mapa `id_seccion -> path`.
+  /// `results` puede estar en `body['results']` o `body['data']['results']`.
+  static Map<String, String> _extractCarretePaths(Map<String, dynamic> body) {
+    final paths = <String, String>{};
+    dynamic results;
+    final data = body['data'];
+    if (data is Map && data['results'] is List) {
+      results = data['results'];
+    } else if (body['results'] is List) {
+      results = body['results'];
+    }
+    if (results is List) {
+      for (final r in results) {
+        if (r is Map) {
+          final idSeccion = r['id_seccion']?.toString();
+          final path = r['path']?.toString();
+          if (idSeccion != null && idSeccion.isNotEmpty &&
+              path != null && path.isNotEmpty) {
+            paths[idSeccion] = path;
+          }
+        }
+      }
+    }
+    return paths;
   }
 
   Future<void> deleteReporte(int id) async {

@@ -21,6 +21,12 @@ class EdanItemCard extends StatelessWidget {
   /// respaldo (Diseño C): al tocarlo se captura coordenadas/foto desde la
   /// página (sin pasar por el diálogo).
   final VoidCallback? onRespaldar;
+
+  /// Al definir [onCambiarFoto] se muestra una acción "Cambiar foto" cuando el
+  /// ítem ya tiene foto/coordenadas. Al tocarla se recapturan coordenadas y
+  /// se toma una foto nueva (reemplazando la existente).
+  final VoidCallback? onCambiarFoto;
+
   final bool tieneCoordenadas;
   final bool tieneFoto;
 
@@ -41,6 +47,7 @@ class EdanItemCard extends StatelessWidget {
     required     this.onEliminar,
     this.fotoCount,
     this.onRespaldar,
+    this.onCambiarFoto,
     this.tieneCoordenadas = false,
     this.tieneFoto = false,
     this.respaldo,
@@ -155,6 +162,26 @@ class EdanItemCard extends StatelessWidget {
                             size: 20, color: Color(0xFF2196F3)),
                       ),
                     ),
+                    if (completo && onCambiarFoto != null) ...[
+                      InkWell(
+                        onTap: onCambiarFoto,
+                        borderRadius: BorderRadius.circular(8),
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.photo_camera_outlined,
+                              size: 20, color: Color(0xFF4CAF50)),
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Cambiar',
+                        style: TextStyle(
+                          fontSize: 9,
+                          color: Color(0xFF4CAF50),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                     if (onFoto != null) ...[
                       InkWell(
                         onTap: onFoto,

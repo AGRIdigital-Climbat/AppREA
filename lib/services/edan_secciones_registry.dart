@@ -8,13 +8,18 @@ class EdanSeccionDescriptor {
   final String llaveJson;
   final EdanSeccionTipo tipo;
   final bool usaFoto;
+  final String tabla;
 
   const EdanSeccionDescriptor({
     required this.rutaV2,
     required this.llaveJson,
     required this.tipo,
+    required this.tabla,
     this.usaFoto = false,
   });
+
+  /// Nombre de la tabla SQLite por seccion (Modelo A v20).
+  String get tablaSqlite => 'seccion_$tabla';
 }
 
 /// Registro único y declarativo de las secciones v2 de una localidad EDAN.
@@ -33,82 +38,99 @@ class EdanSeccionesRegistry {
       rutaV2: 'impacto-poblacion',
       llaveJson: 'impacto_poblacion',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'impacto_poblacion',
     ),
     EdanSeccionDescriptor(
       rutaV2: 'salud-establecimientos',
       llaveJson: 'establecimientos_salud',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'salud_establecimientos',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'danos-viales',
       llaveJson: 'danos_viales',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'danos_viales',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'danos-infra-publica',
       llaveJson: 'danos_infra_publica',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'danos_infra_publica',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'servicios-basicos',
       llaveJson: 'servicios_basicos',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'servicios_basicos',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'unidades-educativas',
       llaveJson: 'unidades_educativas',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'unidades_educativas',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'danos-vivienda',
       llaveJson: 'danos_vivienda',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'danos_vivienda',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'danos-agricultura',
       llaveJson: 'danos_agricultura',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'danos_agricultura',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'danos-pecuarios',
       llaveJson: 'danos_pecuarios',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'danos_pecuarios',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'infra-productiva',
       llaveJson: 'infra_productiva',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'infra_productiva',
       usaFoto: true,
     ),
     EdanSeccionDescriptor(
       rutaV2: 'proteccion',
       llaveJson: 'proteccion',
       tipo: EdanSeccionTipo.unoAN,
+      tabla: 'proteccion',
     ),
     EdanSeccionDescriptor(
       rutaV2: 'primera-respuesta',
       llaveJson: 'necesidad_primera_respuesta',
       tipo: EdanSeccionTipo.unoAUno,
+      tabla: 'primera_respuesta',
     ),
     EdanSeccionDescriptor(
       rutaV2: 'necesidad-salud',
       llaveJson: 'necesidad_salud',
       tipo: EdanSeccionTipo.unoAUno,
+      tabla: 'necesidad_salud',
     ),
     EdanSeccionDescriptor(
       rutaV2: 'necesidad-humanitaria',
       llaveJson: 'necesidad_humanitaria',
       tipo: EdanSeccionTipo.unoAUno,
+      tabla: 'necesidad_humanitaria',
     ),
   ];
+
+  /// Nombre de la tabla SQLite de una sección dada su ruta v2.
+  static String? tablaDeRuta(String rutaV2) => porRuta(rutaV2)?.tablaSqlite;
 
   /// Páginas del wizard EDAN (clave de página) -> rutas v2 que impactan.
   /// `cabecera` agrupa Datos generales (01), población (02) y Responsable (13).
@@ -136,6 +158,14 @@ class EdanSeccionesRegistry {
 
   static List<String> rutasV2Todas() =>
       secciones.map((s) => s.rutaV2).toList();
+
+  /// Nombres de todas las tablas SQLite de sección (Modelo A v20).
+  static List<String> tablasSqlite() =>
+      secciones.map((s) => s.tablaSqlite).toList();
+
+  /// Nombres de las tablas SQLite de sección con foto.
+  static List<String> tablasSqliteConFoto() =>
+      secciones.where((s) => s.usaFoto).map((s) => s.tablaSqlite).toList();
 
   /// Rutas v2 que debe marcar una página dada del wizard.
   static List<String> rutasDePagina(String paginaWizard) =>

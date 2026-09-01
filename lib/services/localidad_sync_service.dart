@@ -1,12 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import '../models/edan.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
 import '../services/debug_log.dart';
-import '../services/edan_localidades_sync_v2_service.dart';
+import '../services/edan/edan_localidades_envio_v2_service.dart';
 import '../services/edan_secciones_registry.dart';
 
 class LocalidadSyncService {
@@ -77,6 +79,8 @@ class LocalidadSyncService {
         }
       }
       await recargarPendientes();
+      // Descargar fotos de secciones EDAN del servidor (paths → archivos locales).
+      descargarFotosEdan();
       debugPrint('[recargarLocalidadesUsuario] Finalizado. Pendientes: ${pendientes.value}');
     } catch (e, st) {
       debugPrint('[recargarLocalidadesUsuario] Error general: $e');
@@ -284,7 +288,7 @@ class LocalidadSyncService {
 
       final db = DatabaseHelper.instance;
       final api = ApiService.instance;
-      final sincV2 = EdanLocalidadesSyncV2Service(api: api, db: db);
+      final sincV2 = EdanLocalidadesEnvioV2Service(api: api, db: db);
       final srv = _EstadosServidor();
 
       // ===== Fase 0: PULL ligero — mis-estados (UNA llamada) =====
@@ -374,7 +378,7 @@ class LocalidadSyncService {
           final Set<String> soloRutas = modificadas.isNotEmpty
               ? modificadas.toSet()
               : EdanSeccionesRegistry.rutasV2Todas().toSet();
-          final ok = await sincV2.sincronizarLocalidad(
+          final ok = await sincV2.enviarLocalidad(
             local,
             soloRutas: soloRutas,
           );
@@ -465,6 +469,121 @@ class LocalidadSyncService {
       pendientes.value = await DatabaseHelper.instance.countLocalidadesPendientesSync();
     } catch (e) {
       debugPrint('Error recargando pendientes de localidades: $e');
+    }
+  }
+
+  /// Descarga las fotos de secciones EDAN que el servidor tiene pero el
+  /// dispositivo no. Reemplaza los paths del servidor (`/uploads/...`) por
+  /// paths locales en `datos_json` para que la app pueda mostrarlas offline.
+  Future<void> descargarFotosEdan() async {
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final fotosDir = Directory('${appDir.path}/edan_fotos');
+      await fotosDir.create(recursive: true);
+
+      final userId = AuthService.instance.userId;
+      if (userId == null) {
+        debugPrint('[FotosEDAN] Sin userId, abortando');
+        return;
+      }
+
+      final localidades = await DatabaseHelper.instance.getLocalidades(userId);
+      debugPrint('[FotosEDAN] ${localidades.length} localidades para revisar');
+      int descargadas = 0;
+      int omitidas = 0;
+      int fallidas = 0;
+
+      for (final loc in localidades) {
+        final datos = loc.toJson();
+        var modificado = false;
+
+        // Recolectar todos los paths de fotos de todas las secciones 1:N.
+        final paths = <String>[];
+        _extraerFotos(datos, paths);
+
+        if (paths.isEmpty) continue;
+        debugPrint('[FotosEDAN] ${loc.nombre}: ${paths.length} fotos encontradas');
+
+        for (final serverPath in paths) {
+          if (!serverPath.startsWith('/uploads/')) {
+            debugPrint('[FotosEDAN]   Saltando path no-servidor: $serverPath');
+            continue;
+          }
+
+          // Nombre de archivo local: hash del path para unicidad.
+          final fileName = serverPath.replaceAll('/', '_');
+          final savePath = '${fotosDir.path}/$fileName';
+
+          // Si ya existe en disco, reemplazar path en el JSON.
+          if (await File(savePath).exists()) {
+            _reemplazarFotos(datos, serverPath, savePath);
+            modificado = true;
+            omitidas++;
+            continue;
+          }
+
+          // Descargar del servidor.
+          final result = await ApiService.instance.downloadImage(
+            serverPath,
+            savePath,
+          );
+          if (result != null) {
+            _reemplazarFotos(datos, serverPath, savePath);
+            modificado = true;
+            descargadas++;
+            debugPrint('[FotosEDAN]   OK: $serverPath');
+          } else {
+            fallidas++;
+            debugPrint('[FotosEDAN]   FALLO: $serverPath');
+          }
+        }
+
+        if (modificado) {
+          await DatabaseHelper.instance.updateLocalidadJson(
+            loc.idLocal!,
+            jsonEncode(datos),
+          );
+        }
+      }
+
+      debugPrint('[FotosEDAN] Fin: $descargadas descargadas, '
+          '$omitidas ya existentes, $fallidas fallidas');
+    } catch (e, st) {
+      debugPrint('[FotosEDAN] Error: $e');
+      debugPrint('[FotosEDAN] Stack: $st');
+    }
+  }
+
+  /// Extrae recursivamente todos los paths de `fotografia` de un JSON.
+  void _extraerFotos(dynamic node, List<String> paths) {
+    if (node is Map<String, dynamic>) {
+      if (node.containsKey('fotografia') && node['fotografia'] is String) {
+        final p = node['fotografia'] as String;
+        if (p.isNotEmpty) paths.add(p);
+      }
+      for (final v in node.values) {
+        _extraerFotos(v, paths);
+      }
+    } else if (node is List) {
+      for (final item in node) {
+        _extraerFotos(item, paths);
+      }
+    }
+  }
+
+  /// Reemplaza recursivamente un path del servidor por un path local en `fotografia`.
+  void _reemplazarFotos(dynamic node, String serverPath, String localPath) {
+    if (node is Map<String, dynamic>) {
+      if (node.containsKey('fotografia') && node['fotografia'] == serverPath) {
+        node['fotografia'] = localPath;
+      }
+      for (final v in node.values) {
+        _reemplazarFotos(v, serverPath, localPath);
+      }
+    } else if (node is List) {
+      for (final item in node) {
+        _reemplazarFotos(item, serverPath, localPath);
+      }
     }
   }
 

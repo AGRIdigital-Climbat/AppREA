@@ -85,9 +85,10 @@ class RespMapaTabState extends State<RespMapaTab>
         final db = DatabaseHelper.instance;
         localidades = await db.getLocalidades(userId);
       }
+      final visibles = localidades.where((l) => !l.pendienteEliminacion).toList();
       final puntos = <_PuntoMapa>[];
       final vistos = <String>{};
-      for (final l in localidades) {
+      for (final l in visibles) {
         final fechaKey = _fechaKeyDeLocalidad(l);
         for (final s in l.establecimientosSalud) {
           final datos = <String, String>{

@@ -8,7 +8,7 @@ import '../../../../providers/reporte_provider.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
-import '../../../../services/edan_localidades_sync_v2_service.dart';
+import '../../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../../services/edan_secciones_registry.dart';
 import '../../../../services/localidad_sync_service.dart';
 import 'edan_navigation_bar.dart';
@@ -411,64 +411,28 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       return;
     }
     setState(() => _saving = true);
-    await _guardar(actual.key);
-    await _enviarSeccion(actual.key);
+    // Solo guarda localmente. El envío al servidor ocurre solo al presionar
+    // "Guardar" o "Salir y guardar" (via _guardarYEnviar).
+    if (_huboCambios()) {
+      await _guardar(actual.key);
+    } else {
+      await _guardarSinMarcar();
+    }
     setState(() => _saving = false);
     if (!mounted) return;
     _irA(_currentPage + 1);
   }
 
-  /// Sube al servidor (si hay conexión) las secciones de la página recién
-  /// guardada, manteniendo la localidad en estado BORRADOR. No se toca
-  /// `idEdanLocalidadEstado`/`estadoLocalidad`: las secciones viajan igual en
-  /// borrador. Si el envío parcial falla o no hay conexión, las secciones
-  /// quedan marcadas como modificadas y el sync en segundo plano las reintenta.
-  Future<void> _enviarSeccion(String seccionKey) async {
-    try {
-      final rutas = EdanSeccionesRegistry.rutasDePagina(seccionKey);
-      if (rutas.isEmpty) return;
-      final idLocal = _localidad.idLocal;
-      if (idLocal == null) return;
-
-      final conectado = await ConnectivityService().checkNow();
-      if (!conectado) return;
-
-      final ok = await EdanLocalidadesSyncV2Service()
-          .sincronizarLocalidad(_localidad, soloRutas: rutas.toSet());
-      if (ok) {
-        for (final ruta in rutas) {
-          await _db.marcarSeccionSincronizada(idLocal, ruta);
-        }
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Secciones enviadas: ${rutas.join(", ")}'),
-              backgroundColor: const Color(0xFF059669),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-      } else {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Falló envío: ${rutas.join(", ")} (pendiente reintento)'),
-              backgroundColor: const Color(0xFFD97706),
-              duration: const Duration(seconds: 3),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('EdanFormWizard._enviarSeccion error: $e');
-    }
-  }
-
   Future<void> _guardar(String seccionKey) async {
     final token = AuthService.instance.currentToken;
+    final envio = EdanLocalidadesEnvioV2Service();
     try {
       if (_localidad.idLocal != null) {
         await _db.updateLocalidad(_localidad);
+        await envio.guardarSecciones(
+          _localidad,
+          EdanSeccionesRegistry.rutasDePagina(seccionKey),
+        );
         await _db.marcarSeccionesModificadas(
           _localidad.idLocal!,
           EdanSeccionesRegistry.rutasDePagina(seccionKey),
@@ -476,6 +440,10 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       } else if (token != null) {
         final id = await _db.insertLocalidad(_localidad, usuarioId: token.userId);
         _localidad.idLocal = id;
+        await envio.guardarSecciones(
+          _localidad,
+          EdanSeccionesRegistry.rutasDePagina(seccionKey),
+        );
         await _db.marcarSeccionesModificadas(
           id,
           EdanSeccionesRegistry.rutasDePagina(seccionKey),
@@ -571,8 +539,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     final conectado = await ConnectivityService().checkNow();
     if (!conectado) return _GuardadoResult.sinConexion;
 
-    final ok = await EdanLocalidadesSyncV2Service()
-        .sincronizarLocalidad(_localidad, soloRutas: modificadas.toSet());
+    final ok = await EdanLocalidadesEnvioV2Service()
+        .enviarLocalidad(_localidad, soloRutas: modificadas.toSet());
     if (ok) {
       _localidad
         ..pendienteActualizacion = false
@@ -692,8 +660,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     // Si hay conexión, envío inmediato al servidor (secciones v2 + fotos).
     final conectado = await ConnectivityService().checkNow();
     if (conectado) {
-      final ok = await EdanLocalidadesSyncV2Service()
-          .sincronizarLocalidad(_localidad);
+      final ok = await EdanLocalidadesEnvioV2Service()
+          .enviarLocalidad(_localidad);
       if (ok && _localidad.idLocal != null) {
         _localidad
           ..pendienteActualizacion = false

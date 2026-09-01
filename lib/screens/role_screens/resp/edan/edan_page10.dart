@@ -16,6 +16,17 @@ class EdanPage10 extends StatefulWidget {
 }
 
 class _EdanPage10State extends State<EdanPage10> {
+  Widget _campoTitulo(String titulo) {
+    return Text(
+      titulo,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: AppColors.textPrimary,
+      ),
+    );
+  }
+
   Future<void> _editar(EdanGrupoVulnerable g) async {
     final mujeres = TextEditingController(text: g.mujeres > 0 ? '${g.mujeres}' : '');
     final hombres = TextEditingController(text: g.hombres > 0 ? '${g.hombres}' : '');
@@ -31,15 +42,18 @@ class _EdanPage10State extends State<EdanPage10> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                _campoTitulo('N° Mujeres'),
+                const SizedBox(height: 6),
                 TextField(controller: mujeres, keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'N° Mujeres')),
-                const SizedBox(height: 8),
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Hombres'),
+                const SizedBox(height: 6),
                 TextField(controller: hombres, keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'N° Hombres')),
-                const SizedBox(height: 8),
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                const SizedBox(height: 4),
                 CheckboxListTile(
                   value: apoyo,
                   dense: true,

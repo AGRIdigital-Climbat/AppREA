@@ -5,7 +5,7 @@ import '../../../models/edan.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
-import '../../../services/edan_localidades_sync_v2_service.dart';
+import '../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../services/localidad_sync_service.dart';
 import 'edan/edan_form_wizard.dart';
 import '../ugr/ugr_edan_preview_screen.dart';
@@ -71,10 +71,11 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
     try {
       final db = DatabaseHelper.instance;
       final localidades = await db.getLocalidades(userId);
+      final visibles = localidades.where((l) => !l.pendienteEliminacion).toList();
       // Resolver nombres geográficos desde catálogo si faltan
       if (mounted) {
         final rp = context.read<ReporteProvider>();
-        for (final loc in localidades) {
+        for (final loc in visibles) {
           if ((loc.departamentoNombre == null || loc.departamentoNombre!.isEmpty) &&
               loc.idDepartamento != null) {
             final match = rp.departamentos.where((d) => d.id == loc.idDepartamento);
@@ -92,14 +93,14 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
           }
         }
       }
-      localidades.sort((a, b) {
+      visibles.sort((a, b) {
         final fa = a.fechaModificacion ?? '';
         final fb = b.fechaModificacion ?? '';
         return fb.compareTo(fa);
       });
       if (mounted) {
         setState(() {
-          _localidades = localidades.take(15).toList();
+          _localidades = visibles.take(15).toList();
         });
       }
     } catch (_) {}
@@ -145,17 +146,18 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
     if (confirm != true || !mounted) return;
     try {
       if (localidad.sincronizado) {
-        localidad.pendienteEliminacion = true;
-        localidad.pendienteActualizacion = true;
-        localidad.sincronizado = false;
-        await DatabaseHelper.instance.updateLocalidad(localidad);
+        await DatabaseHelper.instance.markLocalidadAsPendingDeletion(idLocal);
       } else {
         await DatabaseHelper.instance.deleteLocalidad(idLocal);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Localidad eliminada'),
+          SnackBar(
+            content: Text(
+              localidad.sincronizado
+                  ? 'Localidad marcada para eliminación. Se borrará al sincronizar.'
+                  : 'Localidad eliminada',
+            ),
             backgroundColor: AppColors.rechazado,
           ),
         );
@@ -197,7 +199,7 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
       localidad.idEdanLocalidadEstado = estadoDestino.id;
 
       sincronizada =
-          await EdanLocalidadesSyncV2Service().sincronizarLocalidad(localidad);
+          await EdanLocalidadesEnvioV2Service().enviarLocalidad(localidad);
 
       if (sincronizada) {
         localidad.estadoLocalidad = estadoDestino;

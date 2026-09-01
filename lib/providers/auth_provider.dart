@@ -32,6 +32,10 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> initialize() async {
     await _authService.initialize();
+    // Si hay sesión activa (auto-login), refrescar localidades del servidor.
+    if (_authService.isAuthenticated) {
+      _dispararCargaEdansMunicipio();
+    }
     notifyListeners();
   }
 

@@ -6,6 +6,7 @@ import '../../../../models/id_seccion_helper.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
+import 'edan_aviso.dart';
 import 'edan_subsection_header.dart';
 
 /// Página 04: Impacto en la salud (establecimientos + necesidad de salud).
@@ -20,6 +21,8 @@ class EdanPage04 extends StatefulWidget {
 
 class _EdanPage04State extends State<EdanPage04> {
   late final TextEditingController _personas;
+  late final TextEditingController _otras;
+  late final TextEditingController _obsSalud;
 
   final _nombre = TextEditingController();
   final _comunidad = TextEditingController();
@@ -38,13 +41,26 @@ class _EdanPage04State extends State<EdanPage04> {
         text: widget.localidad.necesidadSalud!.numeroPersonas > 0
             ? '${widget.localidad.necesidadSalud!.numeroPersonas}'
             : '');
-    _personas.addListener(() => widget.localidad.necesidadSalud!.numeroPersonas =
-        int.tryParse(_personas.text) ?? 0);
+    _otras = TextEditingController(
+        text: widget.localidad.necesidadSalud!.otrasNecesidades);
+    _obsSalud = TextEditingController(
+        text: widget.localidad.necesidadSalud!.observaciones);
+    _personas.addListener(() {
+      final n = int.tryParse(_personas.text) ?? 0;
+      widget.localidad.necesidadSalud!.numeroPersonas = n;
+      widget.localidad.necesidadSalud!.botiquines = n > 0;
+    });
+    _otras.addListener(
+        () => widget.localidad.necesidadSalud!.otrasNecesidades = _otras.text);
+    _obsSalud.addListener(
+        () => widget.localidad.necesidadSalud!.observaciones = _obsSalud.text);
   }
 
   @override
   void dispose() {
     _personas.dispose();
+    _otras.dispose();
+    _obsSalud.dispose();
     _nombre.dispose();
     _comunidad.dispose();
     _medicos.dispose();
@@ -86,7 +102,7 @@ class _EdanPage04State extends State<EdanPage04> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _campoTitulo('Comunidad'),
+                _campoTitulo('Localidad'),
                 TextField(controller: _comunidad),
                 const SizedBox(height: 12),
                 _campoTitulo('Nombre del establecimiento'),
@@ -192,6 +208,19 @@ class _EdanPage04State extends State<EdanPage04> {
     setState(() {});
   }
 
+  Future<void> _cambiarFoto(EdanEstablecimientoSalud est) async {
+    final ok = await EdanBotonSacarFoto.cambiarFoto(
+      context,
+      fotos: est.fotos,
+      onCoordenadasCapturadas: (lat, lon) {
+        est.coordenadaLat = lat;
+        est.coordenadaLon = lon;
+      },
+    );
+    if (!ok || !mounted) return;
+    setState(() {});
+  }
+
   Widget _campoTitulo(String titulo) {
     return Text(
       titulo,
@@ -227,12 +256,14 @@ class _EdanPage04State extends State<EdanPage04> {
   @override
   Widget build(BuildContext context) {
     final l = widget.localidad;
-    final necesidad = l.necesidadSalud!;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _avisoAfectaciones(),
+        EdanAvisoAfectaciones(
+          texto: 'Presiona en agregar para registrar la afectación en un '
+              'establecimiento de salud. Puedes agregar más de uno.',
+        ),
         const SizedBox(height: 10),
         EdanSubsectionHeader(
           titulo: 'Establecimientos de salud',
@@ -255,6 +286,7 @@ class _EdanPage04State extends State<EdanPage04> {
               onEditar: () => _editar(e),
               onEliminar: () => _eliminar(e),
               onRespaldar: () => _capturarRespaldo(e),
+              onCambiarFoto: () => _cambiarFoto(e),
               respaldo: e,
               seccionRespaldo: 'Salud',
               onFotoEliminada: () => setState(() {}),
@@ -269,50 +301,108 @@ class _EdanPage04State extends State<EdanPage04> {
           ),
         ),
         const SizedBox(height: 6),
-        EdanCheckRow(
-          label: 'Requiere botiquines',
-          value: necesidad.botiquines,
-          onChanged: (v) =>
-              setState(() => widget.localidad.necesidadSalud!.botiquines = v),
+        const Text(
+          'Botiquín',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'Número de personas que requieren atención inmediata',
+          style: TextStyle(
+            fontSize: 11,
+            color: AppColors.textSecondary,
+          ),
         ),
         const SizedBox(height: 8),
+        const Text(
+          'N° Personas',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
         TextField(
           controller: _personas,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(labelText: 'N° Personas'),
-        ),
-      ],
-    );
-  }
-
-  Widget _avisoAfectaciones() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF8E1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFFFB300)),
-      ),
-      child: const Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.info_outline, size: 18, color: Color(0xFFB26A00)),
-          SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'Presiona en agregar para registrar la afectación en un '
-              'establecimiento de salud. Puedes agregar más de uno.',
-              style: TextStyle(
-                fontSize: 12,
-                color: Color(0xFF6B4A00),
-                height: 1.35,
-              ),
+          decoration: const InputDecoration(
+            hintText: '0',
+            filled: true,
+            fillColor: AppColors.surface,
+            contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: AppColors.divider),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: AppColors.divider),
             ),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Otras necesidades',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _otras,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Escribe otras necesidades',
+            filled: true,
+            fillColor: AppColors.surface,
+            contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: AppColors.divider),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: AppColors.divider),
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        const Text(
+          'Observaciones',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: AppColors.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: _obsSalud,
+          maxLines: 2,
+          decoration: const InputDecoration(
+            hintText: 'Escribe observaciones',
+            filled: true,
+            fillColor: AppColors.surface,
+            contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: AppColors.divider),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.all(Radius.circular(12)),
+              borderSide: BorderSide(color: AppColors.divider),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

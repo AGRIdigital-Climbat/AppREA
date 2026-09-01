@@ -7,6 +7,7 @@ import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_subsection_header.dart';
+import 'edan_aviso.dart';
 
 /// Página 09: Impacto agropecuario.
 ///
@@ -39,9 +40,9 @@ class _EdanPage09State extends State<EdanPage09> {
 
     await _dialogo(
       titulo: 'Daño en cultivo',
-      campos: [
-        TextField(controller: cultivo, decoration: const InputDecoration(labelText: 'Tipo de cultivo')),
-      ],
+      camposTexto: {
+        cultivo: 'Tipo de cultivo',
+      },
       labels: {
         afectadas: 'N° Hectáreas afectadas',
         perdidas: 'N° Hectáreas perdidas',
@@ -78,10 +79,10 @@ class _EdanPage09State extends State<EdanPage09> {
 
     await _dialogo(
       titulo: 'Daño en especie pecuaria',
-      campos: [
-        TextField(controller: especie, decoration: const InputDecoration(labelText: 'Especie')),
-        TextField(controller: raza, decoration: const InputDecoration(labelText: 'Raza')),
-      ],
+      camposTexto: {
+        especie: 'Especie',
+        raza: 'Raza',
+      },
       labels: {
         afectados: 'N° Animales afectados',
         muertos: 'N° Animales muertos',
@@ -118,9 +119,9 @@ class _EdanPage09State extends State<EdanPage09> {
 
     await _dialogo(
       titulo: 'Infraestructura productiva',
-      campos: [
-        TextField(controller: tipo, decoration: const InputDecoration(labelText: 'Tipo')),
-      ],
+      camposTexto: {
+        tipo: 'Tipo',
+      },
       labels: {
         parcial: 'N° Daño parcial',
         total: 'N° Daño total',
@@ -139,12 +140,46 @@ class _EdanPage09State extends State<EdanPage09> {
     total.dispose();
   }
 
+  Widget _campoTitulo(String titulo) {
+    return Text(
+      titulo,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: AppColors.textPrimary,
+      ),
+    );
+  }
+
   Future<void> _dialogo({
     required String titulo,
-    required List<Widget> campos,
+    required Map<TextEditingController, String> camposTexto,
     required Map<TextEditingController, String> labels,
     required TextEditingController? nec,
   }) async {
+    Widget input(
+      TextEditingController c,
+      String label, {
+      TextInputType? kb,
+      List<TextInputFormatter>? fmt,
+      bool multiline = false,
+    }) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _campoTitulo(label),
+          const SizedBox(height: 6),
+          TextField(
+            controller: c,
+            keyboardType: kb,
+            inputFormatters: fmt,
+            maxLines: multiline ? 3 : 1,
+          ),
+          const SizedBox(height: 12),
+        ],
+      );
+    }
+
     await showDialog<void>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -154,23 +189,17 @@ class _EdanPage09State extends State<EdanPage09> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ...campos,
-                const SizedBox(height: 12),
-                ...labels.entries.map((e) => Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: TextField(
-                        controller: e.key,
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        decoration: InputDecoration(labelText: e.value),
-                      ),
+                ...camposTexto.entries
+                    .map((e) => input(e.key, e.value)),
+                ...labels.entries.map((e) => input(
+                      e.key,
+                      e.value,
+                      kb: TextInputType.number,
+                      fmt: [FilteringTextInputFormatter.digitsOnly],
                     )),
-                if (nec != null) ...[
-                  const SizedBox(height: 8),
-                  TextField(controller: nec, maxLines: 2,
-                      decoration: const InputDecoration(labelText: 'Necesidades inmediatas')),
-                ],
+                if (nec != null) input(nec, 'Necesidades inmediatas', multiline: true),
               ],
             ),
           ),
@@ -198,6 +227,19 @@ class _EdanPage09State extends State<EdanPage09> {
     setState(() {});
   }
 
+  Future<void> _cambiarFotoAgricultura(EdanDanoAgricultura a) async {
+    final ok = await EdanBotonSacarFoto.cambiarFoto(
+      context,
+      fotos: a.fotos,
+      onCoordenadasCapturadas: (lat, lon) {
+        a.coordenadaLat = lat;
+        a.coordenadaLon = lon;
+      },
+    );
+    if (!ok || !mounted) return;
+    setState(() {});
+  }
+
   Future<void> _capturarRespaldoPecuario(EdanDanoPecuario p) async {
     final ok = await EdanBotonSacarFoto.capturarRespaldo(
       context,
@@ -213,12 +255,38 @@ class _EdanPage09State extends State<EdanPage09> {
     setState(() {});
   }
 
+  Future<void> _cambiarFotoPecuario(EdanDanoPecuario p) async {
+    final ok = await EdanBotonSacarFoto.cambiarFoto(
+      context,
+      fotos: p.fotos,
+      onCoordenadasCapturadas: (lat, lon) {
+        p.coordenadaLat = lat;
+        p.coordenadaLon = lon;
+      },
+    );
+    if (!ok || !mounted) return;
+    setState(() {});
+  }
+
   Future<void> _capturarRespaldoInfra(EdanInfraProductiva i) async {
     final ok = await EdanBotonSacarFoto.capturarRespaldo(
       context,
       fotos: i.fotos,
       latActual: i.coordenadaLat,
       lonActual: i.coordenadaLon,
+      onCoordenadasCapturadas: (lat, lon) {
+        i.coordenadaLat = lat;
+        i.coordenadaLon = lon;
+      },
+    );
+    if (!ok || !mounted) return;
+    setState(() {});
+  }
+
+  Future<void> _cambiarFotoInfra(EdanInfraProductiva i) async {
+    final ok = await EdanBotonSacarFoto.cambiarFoto(
+      context,
+      fotos: i.fotos,
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
@@ -269,6 +337,8 @@ class _EdanPage09State extends State<EdanPage09> {
           icono: Icons.agriculture_outlined,
           count: l.danosAgricultura.length,
           onAgregar: _agregarAgricultura,
+          aviso: 'Presiona en agregar para registrar la afectación en '
+              'agricultura. Puedes agregar más de uno.',
           items: l.danosAgricultura.map((a) => EdanItemCard(
                 titulo: a.tipoCultivo.isEmpty ? 'Cultivo' : a.tipoCultivo,
                 subtitulo: [
@@ -279,6 +349,7 @@ class _EdanPage09State extends State<EdanPage09> {
                 onEditar: () => _editarAgricultura(a),
                 onEliminar: () => _eliminarAgricultura(a),
                 onRespaldar: () => _capturarRespaldoAgricultura(a),
+                onCambiarFoto: () => _cambiarFotoAgricultura(a),
                 respaldo: a,
                 seccionRespaldo: 'Agricultura',
                 onFotoEliminada: () => setState(() {}),
@@ -289,6 +360,8 @@ class _EdanPage09State extends State<EdanPage09> {
           icono: Icons.pets_outlined,
           count: l.danosPecuarios.length,
           onAgregar: _agregarPecuario,
+          aviso: 'Presiona en agregar para registrar la afectación en '
+              'pecuarios. Puedes agregar más de uno.',
           items: l.danosPecuarios.map((p) => EdanItemCard(
                 titulo: p.especie.isEmpty ? 'Especie' : p.especie,
                 subtitulo: [
@@ -300,6 +373,7 @@ class _EdanPage09State extends State<EdanPage09> {
                 onEditar: () => _editarPecuario(p),
                 onEliminar: () => _eliminarPecuario(p),
                 onRespaldar: () => _capturarRespaldoPecuario(p),
+                onCambiarFoto: () => _cambiarFotoPecuario(p),
                 respaldo: p,
                 seccionRespaldo: 'Pecuario',
                 onFotoEliminada: () => setState(() {}),
@@ -310,6 +384,8 @@ class _EdanPage09State extends State<EdanPage09> {
           icono: Icons.factory_outlined,
           count: l.infraProductiva.length,
           onAgregar: _agregarInfra,
+          aviso: 'Presiona en agregar para registrar la afectación en '
+              'infraestructura productiva. Puedes agregar más de una.',
           items: l.infraProductiva.map((i) => EdanItemCard(
                 titulo: i.tipo.isEmpty ? 'Infraestructura' : i.tipo,
                 subtitulo: [
@@ -320,6 +396,7 @@ class _EdanPage09State extends State<EdanPage09> {
                 onEditar: () => _editarInfra(i),
                 onEliminar: () => _eliminarInfra(i),
                 onRespaldar: () => _capturarRespaldoInfra(i),
+                onCambiarFoto: () => _cambiarFotoInfra(i),
                 respaldo: i,
                 seccionRespaldo: 'Infraestructura productiva',
                 onFotoEliminada: () => setState(() {}),
@@ -334,11 +411,14 @@ class _EdanPage09State extends State<EdanPage09> {
     required IconData icono,
     required int count,
     required VoidCallback onAgregar,
+    required String aviso,
     required List<Widget> items,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        EdanAvisoAfectaciones(texto: aviso),
+        const SizedBox(height: 10),
         EdanSubsectionHeader(
           titulo: titulo,
           icono: icono,

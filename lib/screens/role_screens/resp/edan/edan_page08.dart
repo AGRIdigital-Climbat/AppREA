@@ -7,6 +7,7 @@ import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_subsection_header.dart';
+import 'edan_aviso.dart';
 
 /// Página 08: Impacto en viviendas (daño parcial y total).
 class EdanPage08 extends StatefulWidget {
@@ -33,6 +34,17 @@ class _EdanPage08State extends State<EdanPage08> {
     super.dispose();
   }
 
+  Widget _campoTitulo(String titulo) {
+    return Text(
+      titulo,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: AppColors.textPrimary,
+      ),
+    );
+  }
+
   void _agregar() {
     final v = EdanDanoVivienda(idSeccion: generarIdSeccion('dv'));
     setState(() => widget.localidad.danosVivienda.add(v));
@@ -54,19 +66,25 @@ class _EdanPage08State extends State<EdanPage08> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(controller: _comunidad, decoration: const InputDecoration(labelText: 'Comunidad')),
-                const SizedBox(height: 8),
+                _campoTitulo('Comunidad'),
+                const SizedBox(height: 6),
+                TextField(controller: _comunidad),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Viviendas con daño parcial'),
+                const SizedBox(height: 6),
                 TextField(controller: _parcial, keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'N° Viviendas con daño parcial')),
-                const SizedBox(height: 8),
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Viviendas con daño total'),
+                const SizedBox(height: 6),
                 TextField(controller: _total, keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                    decoration: const InputDecoration(labelText: 'N° Viviendas con daño total')),
-                const SizedBox(height: 8),
-                TextField(controller: _nec, maxLines: 2,
-                    decoration: const InputDecoration(labelText: 'Necesidades inmediatas')),
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                const SizedBox(height: 12),
+                _campoTitulo('Necesidades inmediatas'),
+                const SizedBox(height: 6),
+                TextField(controller: _nec, maxLines: 2),
               ],
             ),
           ),
@@ -102,6 +120,19 @@ class _EdanPage08State extends State<EdanPage08> {
     setState(() {});
   }
 
+  Future<void> _cambiarFoto(EdanDanoVivienda v) async {
+    final ok = await EdanBotonSacarFoto.cambiarFoto(
+      context,
+      fotos: v.fotos,
+      onCoordenadasCapturadas: (lat, lon) {
+        v.coordenadaLat = lat;
+        v.coordenadaLon = lon;
+      },
+    );
+    if (!ok || !mounted) return;
+    setState(() {});
+  }
+
   Future<void> _eliminar(EdanDanoVivienda v) async {
     final ok = await confirmarEliminacion(
       context,
@@ -118,6 +149,11 @@ class _EdanPage08State extends State<EdanPage08> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        EdanAvisoAfectaciones(
+          texto: 'Presiona en agregar para registrar la afectación en una '
+              'vivienda. Puedes agregar más de una.',
+        ),
+        const SizedBox(height: 10),
         EdanSubsectionHeader(
           titulo: 'Daños en viviendas',
           icono: Icons.home_outlined,
@@ -125,13 +161,7 @@ class _EdanPage08State extends State<EdanPage08> {
           itemCount: l.danosVivienda.length,
         ),
         const SizedBox(height: 10),
-        if (l.danosVivienda.isEmpty)
-          const Text(
-            'Toca "Agregar" para registrar daños en viviendas.',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-          )
-        else
-          ...l.danosVivienda.map((v) => EdanItemCard(
+        ...l.danosVivienda.map((v) => EdanItemCard(
                 titulo: v.comunidad.isEmpty ? 'Comunidad' : v.comunidad,
                 subtitulo: [
                   if (v.danoParcial > 0) '${v.danoParcial} parcial',
@@ -141,6 +171,7 @@ class _EdanPage08State extends State<EdanPage08> {
                 onEditar: () => _editar(v),
                 onEliminar: () => _eliminar(v),
                 onRespaldar: () => _capturarRespaldo(v),
+                onCambiarFoto: () => _cambiarFoto(v),
                 respaldo: v,
                 seccionRespaldo: 'Viviendas',
                 onFotoEliminada: () => setState(() {}),

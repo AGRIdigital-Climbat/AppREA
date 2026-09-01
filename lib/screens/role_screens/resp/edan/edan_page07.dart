@@ -7,6 +7,7 @@ import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_subsection_header.dart';
+import 'edan_aviso.dart';
 
 /// Página 07: Impacto en educación (unidades educativas afectadas).
 class EdanPage07 extends StatefulWidget {
@@ -38,6 +39,17 @@ class _EdanPage07State extends State<EdanPage07> {
     super.dispose();
   }
 
+  Widget _campoTitulo(String titulo) {
+    return Text(
+      titulo,
+      style: const TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w500,
+        color: AppColors.textPrimary,
+      ),
+    );
+  }
+
   void _agregar() {
     final u = EdanDanoUnidadEducativa(idSeccion: generarIdSeccion('ue'));
     setState(() => widget.localidad.unidadesEducativas.add(u));
@@ -63,14 +75,27 @@ class _EdanPage07State extends State<EdanPage07> {
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextField(controller: _nombre, decoration: const InputDecoration(labelText: 'Nombre')),
-                const SizedBox(height: 8),
-                TextField(controller: _comunidad, decoration: const InputDecoration(labelText: 'Comunidad')),
-                const SizedBox(height: 8),
-                _num(_estudiantes, 'N° Estudiantes'),
-                _num(_profesores, 'N° Profesores'),
-                _num(_administrativos, 'N° Administrativos'),
+                _campoTitulo('Nombre'),
+                const SizedBox(height: 6),
+                TextField(controller: _nombre),
+                const SizedBox(height: 12),
+                _campoTitulo('Comunidad'),
+                const SizedBox(height: 6),
+                TextField(controller: _comunidad),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Estudiantes'),
+                const SizedBox(height: 6),
+                TextField(controller: _estudiantes, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Profesores'),
+                const SizedBox(height: 6),
+                TextField(controller: _profesores, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Administrativos'),
+                const SizedBox(height: 6),
+                TextField(controller: _administrativos, keyboardType: TextInputType.number, inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
                 const SizedBox(height: 4),
                 EdanCheckRow(label: 'Daño parcial', value: _parcial,
                     onChanged: (x) => setLocal(() => _parcial = x)),
@@ -117,6 +142,19 @@ class _EdanPage07State extends State<EdanPage07> {
     setState(() {});
   }
 
+  Future<void> _cambiarFoto(EdanDanoUnidadEducativa u) async {
+    final ok = await EdanBotonSacarFoto.cambiarFoto(
+      context,
+      fotos: u.fotos,
+      onCoordenadasCapturadas: (lat, lon) {
+        u.coordenadaLat = lat;
+        u.coordenadaLon = lon;
+      },
+    );
+    if (!ok || !mounted) return;
+    setState(() {});
+  }
+
   Future<void> _eliminar(EdanDanoUnidadEducativa u) async {
     final ok = await confirmarEliminacion(
       context,
@@ -127,22 +165,17 @@ class _EdanPage07State extends State<EdanPage07> {
     setState(() => widget.localidad.unidadesEducativas.remove(u));
   }
 
-  Widget _num(TextEditingController c, String label) => Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: TextField(
-          controller: c,
-          keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: InputDecoration(labelText: label),
-        ),
-      );
-
   @override
   Widget build(BuildContext context) {
     final l = widget.localidad;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        EdanAvisoAfectaciones(
+          texto: 'Presiona en agregar para registrar la afectación en una '
+              'unidad educativa. Puedes agregar más de una.',
+        ),
+        const SizedBox(height: 10),
         EdanSubsectionHeader(
           titulo: 'Unidades educativas afectadas',
           icono: Icons.school_outlined,
@@ -150,13 +183,7 @@ class _EdanPage07State extends State<EdanPage07> {
           itemCount: l.unidadesEducativas.length,
         ),
         const SizedBox(height: 10),
-        if (l.unidadesEducativas.isEmpty)
-          const Text(
-            'Toca "Agregar" para registrar una unidad educativa.',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-          )
-        else
-          ...l.unidadesEducativas.map((u) => EdanItemCard(
+        ...l.unidadesEducativas.map((u) => EdanItemCard(
                 titulo: u.nombreEstablecimiento.isEmpty
                     ? 'Unidad educativa'
                     : u.nombreEstablecimiento,
@@ -170,6 +197,7 @@ class _EdanPage07State extends State<EdanPage07> {
                 onEditar: () => _editar(u),
                 onEliminar: () => _eliminar(u),
                 onRespaldar: () => _capturarRespaldo(u),
+                onCambiarFoto: () => _cambiarFoto(u),
                 respaldo: u,
                 seccionRespaldo: 'Educación',
                 onFotoEliminada: () => setState(() {}),
