@@ -57,9 +57,8 @@ class _EdanPage05State extends State<EdanPage05> {
     super.dispose();
   }
   void _agregarVial() {
-    final v = EdanDanoVial(idSeccion: generarIdSeccion('sv'));
-    setState(() => widget.localidad.danosViales.add(v));
-    _editarVial(v);
+    final v = EdanDanoVial(idSeccion: nuevoIdDanoVial());
+    _editarVial(v, esNuevo: true);
   }
 
   Widget _campoTitulo(String titulo) {
@@ -73,7 +72,8 @@ class _EdanPage05State extends State<EdanPage05> {
     );
   }
 
-  Future<void> _editarVial(EdanDanoVial v) async {
+  Future<void> _editarVial(EdanDanoVial v,
+      {bool esNuevo = false}) async {
     _tipoVial = v.viaPuente.isEmpty ? null : v.viaPuente;
     _tramo.text = v.tramo;
     _km.text = v.kmDanio > 0 ? '${v.kmDanio}' : '';
@@ -81,7 +81,7 @@ class _EdanPage05State extends State<EdanPage05> {
     _parcialVial = v.danoParcial;
     _totalVial = v.danoTotal;
 
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -151,13 +151,13 @@ class _EdanPage05State extends State<EdanPage05> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Guardar')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
           ],
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
 
     setState(() {
       v.viaPuente = _tipoVial ?? '';
@@ -166,6 +166,7 @@ class _EdanPage05State extends State<EdanPage05> {
       v.danoParcial = _parcialVial;
       v.danoTotal = _totalVial;
       v.necesidadesInmediatas = _nec.text;
+      if (esNuevo) widget.localidad.danosViales.add(v);
     });
   }
 
@@ -182,12 +183,12 @@ class _EdanPage05State extends State<EdanPage05> {
   }
 
   void _agregarInfra() {
-    final i = EdanDanoInfraPublica(idSeccion: generarIdSeccion('di'));
-    setState(() => widget.localidad.danosInfraPublica.add(i));
-    _editarInfra(i);
+    final i = EdanDanoInfraPublica(idSeccion: nuevoIdDanoInfraPublica());
+    _editarInfra(i, esNuevo: true);
   }
 
-  Future<void> _editarInfra(EdanDanoInfraPublica i) async {
+  Future<void> _editarInfra(EdanDanoInfraPublica i,
+      {bool esNuevo = false}) async {
     _tipoEstructuraSel = _tiposEstructura.contains(i.tipoEstructura)
         ? i.tipoEstructura
         : (i.tipoEstructura.isEmpty ? null : _tipoOtros);
@@ -199,7 +200,7 @@ class _EdanPage05State extends State<EdanPage05> {
     _parcialInfra = i.danoParcial;
     _totalInfra = i.danoTotal;
 
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -268,13 +269,13 @@ class _EdanPage05State extends State<EdanPage05> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Guardar')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
           ],
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
 
     setState(() {
       i.tipoEstructura = _tipoEstructuraSel == _tipoOtros
@@ -284,6 +285,7 @@ class _EdanPage05State extends State<EdanPage05> {
       i.danoParcial = _parcialInfra;
       i.danoTotal = _totalInfra;
       i.observaciones = _obs.text;
+      if (esNuevo) widget.localidad.danosInfraPublica.add(i);
     });
   }
 
@@ -307,12 +309,13 @@ class _EdanPage05State extends State<EdanPage05> {
     setState(() => widget.localidad.danosInfraPublica.remove(i));
   }
 
-  Future<void> _capturarRespaldoVial(EdanDanoVial v) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _fotoVial(EdanDanoVial v) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: v.fotos,
       latActual: v.coordenadaLat,
       lonActual: v.coordenadaLon,
+      seccion: 'Vías y puentes',
       onCoordenadasCapturadas: (lat, lon) {
         v.coordenadaLat = lat;
         v.coordenadaLon = lon;
@@ -322,38 +325,13 @@ class _EdanPage05State extends State<EdanPage05> {
     setState(() {});
   }
 
-  Future<void> _cambiarFotoVial(EdanDanoVial v) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: v.fotos,
-      onCoordenadasCapturadas: (lat, lon) {
-        v.coordenadaLat = lat;
-        v.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _capturarRespaldoInfra(EdanDanoInfraPublica i) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _fotoInfra(EdanDanoInfraPublica i) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: i.fotos,
       latActual: i.coordenadaLat,
       lonActual: i.coordenadaLon,
-      onCoordenadasCapturadas: (lat, lon) {
-        i.coordenadaLat = lat;
-        i.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _cambiarFotoInfra(EdanDanoInfraPublica i) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: i.fotos,
+      seccion: 'Infraestructura pública',
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
@@ -392,8 +370,8 @@ class _EdanPage05State extends State<EdanPage05> {
               icono: Icons.construction,
               onEditar: () => _editarVial(v),
               onEliminar: () => _eliminarVial(v),
-              onRespaldar: () => _capturarRespaldoVial(v),
-              onCambiarFoto: () => _cambiarFotoVial(v),
+              onRespaldar: () => _fotoVial(v),
+              onCambiarFoto: () => _fotoVial(v),
               respaldo: v,
               seccionRespaldo: 'Vías y puentes',
               onFotoEliminada: () => setState(() {}),
@@ -421,8 +399,8 @@ class _EdanPage05State extends State<EdanPage05> {
               icono: Icons.apartment_outlined,
               onEditar: () => _editarInfra(i),
               onEliminar: () => _eliminarInfra(i),
-              onRespaldar: () => _capturarRespaldoInfra(i),
-              onCambiarFoto: () => _cambiarFotoInfra(i),
+              onRespaldar: () => _fotoInfra(i),
+              onCambiarFoto: () => _fotoInfra(i),
               respaldo: i,
               seccionRespaldo: 'Infraestructura pública',
               onFotoEliminada: () => setState(() {}),

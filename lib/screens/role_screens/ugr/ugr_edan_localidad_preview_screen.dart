@@ -155,15 +155,15 @@ class _UgrEdanLocalidadPreviewScreenState
     final seccionesVisibles = <String>{
       '01',
       '13',
-      if (localidad.impPoblacion) '03',
-      if (localidad.impSalud) '04',
+      if (localidad.impImpactoPoblacion || localidad.impPrimeraRespuesta) '03',
+      if (localidad.impSaludEstablecimientos || localidad.impNecesidadSalud) '04',
       if (localidad.impInfraestructura) '05',
       if (localidad.impServicios) '06',
       if (localidad.impEducacion) '07',
       if (localidad.impVivienda) '08',
       if (localidad.impAgropecuario) '09',
       if (localidad.impProteccion) '10',
-      if (localidad.impNecesidades) '11',
+      if (localidad.impNecesidadHumanitaria) '11',
     };
 
     return Scaffold(

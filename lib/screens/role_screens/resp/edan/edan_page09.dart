@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
 import '../../../../models/id_seccion_helper.dart';
+import '../../../../models/reporte.dart';
+import '../../../../providers/reporte_provider.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -25,119 +28,416 @@ class EdanPage09 extends StatefulWidget {
 }
 
 class _EdanPage09State extends State<EdanPage09> {
-  // ─── Agricultura ───
-  void _agregarAgricultura() {
-    final a = EdanDanoAgricultura(idSeccion: generarIdSeccion('ag'));
-    setState(() => widget.localidad.danosAgricultura.add(a));
-    _editarAgricultura(a);
+  final _afectadasAg = TextEditingController();
+  final _perdidasAg = TextEditingController();
+  final _necAg = TextEditingController();
+  final _obsAg = TextEditingController();
+  final _razaPc = TextEditingController();
+  final _afectadosPc = TextEditingController();
+  final _muertosPc = TextEditingController();
+  final _necPc = TextEditingController();
+  final _tipoIp = TextEditingController();
+  final _parcialIp = TextEditingController();
+  final _totalIp = TextEditingController();
+
+  @override
+  void dispose() {
+    _afectadasAg.dispose();
+    _perdidasAg.dispose();
+    _necAg.dispose();
+    _obsAg.dispose();
+    _razaPc.dispose();
+    _afectadosPc.dispose();
+    _muertosPc.dispose();
+    _necPc.dispose();
+    _tipoIp.dispose();
+    _parcialIp.dispose();
+    _totalIp.dispose();
+    super.dispose();
   }
 
-  Future<void> _editarAgricultura(EdanDanoAgricultura a) async {
-    final cultivo = TextEditingController(text: a.tipoCultivo);
-    final afectadas = TextEditingController(text: a.hectareasAfectadas > 0 ? '${a.hectareasAfectadas}' : '');
-    final perdidas = TextEditingController(text: a.hectareasPerdidas > 0 ? '${a.hectareasPerdidas}' : '');
-    final nec = TextEditingController(text: a.necesidadesInmediatas);
+  // ─── Agricultura ───
+  void _agregarAgricultura() {
+    final a = EdanDanoAgricultura(idSeccion: nuevoIdDanoAgricultura());
+    _editarAgricultura(a, esNuevo: true);
+  }
 
-    await _dialogo(
-      titulo: 'Daño en cultivo',
-      camposTexto: {
-        cultivo: 'Tipo de cultivo',
-      },
-      labels: {
-        afectadas: 'N° Hectáreas afectadas',
-        perdidas: 'N° Hectáreas perdidas',
-      },
-      nec: nec,
+  Future<void> _editarAgricultura(EdanDanoAgricultura a,
+      {bool esNuevo = false}) async {
+    final cultivos =
+        Provider.of<ReporteProvider>(context, listen: false).cultivos;
+    _afectadasAg.text =
+        a.hectareasAfectadas > 0 ? '${a.hectareasAfectadas}' : '';
+    _perdidasAg.text = a.hectareasPerdidas > 0 ? '${a.hectareasPerdidas}' : '';
+    _necAg.text = a.necesidadesInmediatas;
+    _obsAg.text = a.observaciones;
+    int? selCultivo =
+        cultivos.any((c) => c.idCultivo == a.idCultivo) ? a.idCultivo : null;
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
+          title: const Text('Daño en cultivo'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _campoTitulo('Tipo de cultivo'),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () => _abrirSelectorCultivos(
+                    ctx,
+                    cultivos,
+                    selCultivo,
+                    (v) => setLocal(() => selCultivo = v),
+                  ),
+                  child: InputDecorator(
+                    isEmpty:
+                        !cultivos.any((c) => c.idCultivo == selCultivo),
+                    decoration: const InputDecoration(
+                        hintText: 'Seleccione un cultivo'),
+                    child: Text(
+                      cultivos.where((c) => c.idCultivo == selCultivo).isNotEmpty
+                          ? cultivos
+                              .firstWhere((c) => c.idCultivo == selCultivo)
+                              .nombre
+                          : '',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: selCultivo != null
+                            ? AppColors.textPrimary
+                            : AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Hectáreas afectadas'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _afectadasAg,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(hintText: 'Ej: 8'),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Hectáreas perdidas'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _perdidasAg,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(hintText: 'Ej: 3'),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('Necesidades inmediatas'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _necAg,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      hintText: 'Ej: Semillas, fertilizantes'),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('Observaciones'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _obsAg,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      hintText: 'Ej: Cultivo de maíz sin regadío'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Guardar')),
+          ],
+        ),
+      ),
     );
 
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
     setState(() {
-      a.tipoCultivo = cultivo.text;
-      a.hectareasAfectadas = int.tryParse(afectadas.text) ?? 0;
-      a.hectareasPerdidas = int.tryParse(perdidas.text) ?? 0;
-      a.necesidadesInmediatas = nec.text;
+      final sel = cultivos.where((c) => c.idCultivo == selCultivo);
+      a.idCultivo = selCultivo;
+      a.tipoCultivo = sel.isNotEmpty ? sel.first.nombre : '';
+      a.hectareasAfectadas = int.tryParse(_afectadasAg.text) ?? 0;
+      a.hectareasPerdidas = int.tryParse(_perdidasAg.text) ?? 0;
+      a.necesidadesInmediatas = _necAg.text;
+      a.observaciones = _obsAg.text;
+      if (esNuevo) widget.localidad.danosAgricultura.add(a);
     });
-    cultivo.dispose();
-    afectadas.dispose();
-    perdidas.dispose();
-    nec.dispose();
   }
 
   // ─── Pecuario ───
   void _agregarPecuario() {
-    final p = EdanDanoPecuario(idSeccion: generarIdSeccion('pc'));
-    setState(() => widget.localidad.danosPecuarios.add(p));
-    _editarPecuario(p);
+    final p = EdanDanoPecuario(idSeccion: nuevoIdDanoPecuario());
+    _editarPecuario(p, esNuevo: true);
   }
 
-  Future<void> _editarPecuario(EdanDanoPecuario p) async {
-    final especie = TextEditingController(text: p.especie);
-    final raza = TextEditingController(text: p.raza);
-    final afectados = TextEditingController(text: p.animalesAfectados > 0 ? '${p.animalesAfectados}' : '');
-    final muertos = TextEditingController(text: p.animalesMuertos > 0 ? '${p.animalesMuertos}' : '');
-    final nec = TextEditingController(text: p.necesidadesInmediatas);
+  Future<void> _editarPecuario(EdanDanoPecuario p,
+      {bool esNuevo = false}) async {
+    final grupos = Provider.of<ReporteProvider>(context, listen: false)
+        .pecuarioGrupos;
+    _razaPc.text = p.raza;
+    _afectadosPc.text =
+        p.animalesAfectados > 0 ? '${p.animalesAfectados}' : '';
+    _muertosPc.text = p.animalesMuertos > 0 ? '${p.animalesMuertos}' : '';
+    _necPc.text = p.necesidadesInmediatas;
+    int? selEspecie = grupos.any((g) => g.idPecuarioGrupo == p.idEspecie)
+        ? p.idEspecie
+        : null;
 
-    await _dialogo(
-      titulo: 'Daño en especie pecuaria',
-      camposTexto: {
-        especie: 'Especie',
-        raza: 'Raza',
-      },
-      labels: {
-        afectados: 'N° Animales afectados',
-        muertos: 'N° Animales muertos',
-      },
-      nec: nec,
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 32),
+          title: const Text('Daño en especie pecuaria'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _campoTitulo('Especie'),
+                const SizedBox(height: 6),
+                InkWell(
+                  onTap: () => _abrirSelectorEspecie(
+                    ctx,
+                    grupos,
+                    selEspecie,
+                    (v) => setLocal(() => selEspecie = v),
+                  ),
+                  child: InputDecorator(
+                    isEmpty: !grupos.any((g) => g.idPecuarioGrupo == selEspecie),
+                    decoration: const InputDecoration(
+                        hintText: 'Seleccione una especie'),
+                    child: Text(
+                      grupos.where((g) => g.idPecuarioGrupo == selEspecie).isNotEmpty
+                          ? grupos
+                              .firstWhere((g) => g.idPecuarioGrupo == selEspecie)
+                              .nombre
+                          : '',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: selEspecie != null
+                            ? AppColors.textPrimary
+                            : AppColors.textSecondary,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('Raza'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _razaPc,
+                  decoration: const InputDecoration(hintText: 'Ej: Holstein'),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Animales afectados'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _afectadosPc,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(hintText: 'Ej: 40'),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('N° Animales muertos'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _muertosPc,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(hintText: 'Ej: 5'),
+                ),
+                const SizedBox(height: 12),
+                _campoTitulo('Necesidades inmediatas'),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: _necPc,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                      hintText: 'Ej: Concentrado, sal mineral, forraje'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancelar')),
+            ElevatedButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Guardar')),
+          ],
+        ),
+      ),
     );
 
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
     setState(() {
-      p.especie = especie.text;
-      p.raza = raza.text;
-      p.animalesAfectados = int.tryParse(afectados.text) ?? 0;
-      p.animalesMuertos = int.tryParse(muertos.text) ?? 0;
-      p.necesidadesInmediatas = nec.text;
+      final sel = grupos.where((g) => g.idPecuarioGrupo == selEspecie);
+      p.idEspecie = selEspecie;
+      p.especie = sel.isNotEmpty ? sel.first.nombre : '';
+      p.raza = _razaPc.text;
+      p.animalesAfectados = int.tryParse(_afectadosPc.text) ?? 0;
+      p.animalesMuertos = int.tryParse(_muertosPc.text) ?? 0;
+      p.necesidadesInmediatas = _necPc.text;
+      if (esNuevo) widget.localidad.danosPecuarios.add(p);
     });
-    especie.dispose();
-    raza.dispose();
-    afectados.dispose();
-    muertos.dispose();
-    nec.dispose();
   }
 
   // ─── Infraestructura productiva ───
   void _agregarInfra() {
-    final i = EdanInfraProductiva(idSeccion: generarIdSeccion('ip'));
-    setState(() => widget.localidad.infraProductiva.add(i));
-    _editarInfra(i);
+    final i = EdanInfraProductiva(idSeccion: nuevoIdInfraProductiva());
+    _editarInfra(i, esNuevo: true);
   }
 
-  Future<void> _editarInfra(EdanInfraProductiva i) async {
-    final tipo = TextEditingController(text: i.tipo);
-    final parcial = TextEditingController(text: i.danoParcial > 0 ? '${i.danoParcial}' : '');
-    final total = TextEditingController(text: i.danoTotal > 0 ? '${i.danoTotal}' : '');
+  Future<void> _editarInfra(EdanInfraProductiva i,
+      {bool esNuevo = false}) async {
+    _tipoIp.text = i.tipo;
+    _parcialIp.text = i.danoParcial > 0 ? '${i.danoParcial}' : '';
+    _totalIp.text = i.danoTotal > 0 ? '${i.danoTotal}' : '';
 
-    await _dialogo(
+    final saved = await _dialogo(
       titulo: 'Infraestructura productiva',
       camposTexto: {
-        tipo: 'Tipo',
+        _tipoIp: 'Tipo',
       },
       labels: {
-        parcial: 'N° Daño parcial',
-        total: 'N° Daño total',
+        _parcialIp: 'N° Daño parcial',
+        _totalIp: 'N° Daño total',
       },
       nec: null,
+      hints: {
+        _tipoIp: 'Ej: Almacén, silo, galpón',
+        _parcialIp: 'Ej: 2',
+        _totalIp: 'Ej: 1',
+      },
     );
 
-    if (!mounted) return;
+    if (!mounted || !saved) return;
     setState(() {
-      i.tipo = tipo.text;
-      i.danoParcial = int.tryParse(parcial.text) ?? 0;
-      i.danoTotal = int.tryParse(total.text) ?? 0;
+      i.tipo = _tipoIp.text;
+      i.danoParcial = int.tryParse(_parcialIp.text) ?? 0;
+      i.danoTotal = int.tryParse(_totalIp.text) ?? 0;
+      if (esNuevo) widget.localidad.infraProductiva.add(i);
     });
-    tipo.dispose();
-    parcial.dispose();
-    total.dispose();
+  }
+
+  Future<void> _abrirSelectorCultivos(
+    BuildContext ctx,
+    List<Cultivo> cultivos,
+    int? actual,
+    void Function(int?) onSeleccion,
+  ) async {
+    final sorted =
+        (cultivos.toList()..sort((x, y) => x.nombre.compareTo(y.nombre)));
+    final seleccion = await showModalBottomSheet<int>(
+      context: ctx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Tipo de cultivo',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: sorted.length,
+                itemBuilder: (context, i) {
+                  final c = sorted[i];
+                  return ListTile(
+                    title: Text(c.nombre),
+                    trailing: c.idCultivo == actual
+                        ? const Icon(Icons.check, color: AppColors.primary)
+                        : null,
+                    onTap: () => Navigator.pop(sheetCtx, c.idCultivo),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    onSeleccion(seleccion);
+  }
+
+  Future<void> _abrirSelectorEspecie(
+    BuildContext ctx,
+    List<PecuarioGrupo> grupos,
+    int? actual,
+    void Function(int?) onSeleccion,
+  ) async {
+    final sorted =
+        (grupos.toList()..sort((x, y) => x.nombre.compareTo(y.nombre)));
+    final seleccion = await showModalBottomSheet<int>(
+      context: ctx,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Especie',
+                style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textPrimary),
+              ),
+            ),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: sorted.length,
+                itemBuilder: (context, i) {
+                  final g = sorted[i];
+                  return ListTile(
+                    title: Text(g.nombre),
+                    trailing: g.idPecuarioGrupo == actual
+                        ? const Icon(Icons.check, color: AppColors.primary)
+                        : null,
+                    onTap: () => Navigator.pop(sheetCtx, g.idPecuarioGrupo),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    onSeleccion(seleccion);
   }
 
   Widget _campoTitulo(String titulo) {
@@ -151,11 +451,12 @@ class _EdanPage09State extends State<EdanPage09> {
     );
   }
 
-  Future<void> _dialogo({
+  Future<bool> _dialogo({
     required String titulo,
     required Map<TextEditingController, String> camposTexto,
     required Map<TextEditingController, String> labels,
     required TextEditingController? nec,
+    Map<TextEditingController, String>? hints,
   }) async {
     Widget input(
       TextEditingController c,
@@ -174,13 +475,14 @@ class _EdanPage09State extends State<EdanPage09> {
             keyboardType: kb,
             inputFormatters: fmt,
             maxLines: multiline ? 3 : 1,
+            decoration: InputDecoration(hintText: hints?[c]),
           ),
           const SizedBox(height: 12),
         ],
       );
     }
 
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -204,20 +506,22 @@ class _EdanPage09State extends State<EdanPage09> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Guardar')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
           ],
         ),
       ),
     );
+    return saved ?? false;
   }
 
-  Future<void> _capturarRespaldoAgricultura(EdanDanoAgricultura a) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _fotoAgricultura(EdanDanoAgricultura a) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: a.fotos,
       latActual: a.coordenadaLat,
       lonActual: a.coordenadaLon,
+      seccion: 'Agricultura',
       onCoordenadasCapturadas: (lat, lon) {
         a.coordenadaLat = lat;
         a.coordenadaLon = lon;
@@ -227,25 +531,13 @@ class _EdanPage09State extends State<EdanPage09> {
     setState(() {});
   }
 
-  Future<void> _cambiarFotoAgricultura(EdanDanoAgricultura a) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: a.fotos,
-      onCoordenadasCapturadas: (lat, lon) {
-        a.coordenadaLat = lat;
-        a.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _capturarRespaldoPecuario(EdanDanoPecuario p) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _fotoPecuario(EdanDanoPecuario p) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: p.fotos,
       latActual: p.coordenadaLat,
       lonActual: p.coordenadaLon,
+      seccion: 'Pecuario',
       onCoordenadasCapturadas: (lat, lon) {
         p.coordenadaLat = lat;
         p.coordenadaLon = lon;
@@ -255,38 +547,13 @@ class _EdanPage09State extends State<EdanPage09> {
     setState(() {});
   }
 
-  Future<void> _cambiarFotoPecuario(EdanDanoPecuario p) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: p.fotos,
-      onCoordenadasCapturadas: (lat, lon) {
-        p.coordenadaLat = lat;
-        p.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _capturarRespaldoInfra(EdanInfraProductiva i) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _fotoInfra(EdanInfraProductiva i) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: i.fotos,
       latActual: i.coordenadaLat,
       lonActual: i.coordenadaLon,
-      onCoordenadasCapturadas: (lat, lon) {
-        i.coordenadaLat = lat;
-        i.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _cambiarFotoInfra(EdanInfraProductiva i) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: i.fotos,
+      seccion: 'Infraestructura productiva',
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
@@ -348,8 +615,8 @@ class _EdanPage09State extends State<EdanPage09> {
                 icono: Icons.agriculture_outlined,
                 onEditar: () => _editarAgricultura(a),
                 onEliminar: () => _eliminarAgricultura(a),
-                onRespaldar: () => _capturarRespaldoAgricultura(a),
-                onCambiarFoto: () => _cambiarFotoAgricultura(a),
+                onRespaldar: () => _fotoAgricultura(a),
+                onCambiarFoto: () => _fotoAgricultura(a),
                 respaldo: a,
                 seccionRespaldo: 'Agricultura',
                 onFotoEliminada: () => setState(() {}),
@@ -372,8 +639,8 @@ class _EdanPage09State extends State<EdanPage09> {
                 icono: Icons.pets_outlined,
                 onEditar: () => _editarPecuario(p),
                 onEliminar: () => _eliminarPecuario(p),
-                onRespaldar: () => _capturarRespaldoPecuario(p),
-                onCambiarFoto: () => _cambiarFotoPecuario(p),
+                onRespaldar: () => _fotoPecuario(p),
+                onCambiarFoto: () => _fotoPecuario(p),
                 respaldo: p,
                 seccionRespaldo: 'Pecuario',
                 onFotoEliminada: () => setState(() {}),
@@ -395,8 +662,8 @@ class _EdanPage09State extends State<EdanPage09> {
                 icono: Icons.factory_outlined,
                 onEditar: () => _editarInfra(i),
                 onEliminar: () => _eliminarInfra(i),
-                onRespaldar: () => _capturarRespaldoInfra(i),
-                onCambiarFoto: () => _cambiarFotoInfra(i),
+                onRespaldar: () => _fotoInfra(i),
+                onCambiarFoto: () => _fotoInfra(i),
                 respaldo: i,
                 seccionRespaldo: 'Infraestructura productiva',
                 onFotoEliminada: () => setState(() {}),

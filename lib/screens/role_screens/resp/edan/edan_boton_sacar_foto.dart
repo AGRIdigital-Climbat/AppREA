@@ -7,6 +7,7 @@ import '../../../../config/api_config.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../services/database_helper.dart';
 import '../../../../services/image_service.dart';
 import '../../../../services/location_service.dart';
 import '../../../../services/permission_service.dart';
@@ -109,6 +110,50 @@ class EdanBotonSacarFoto {
     );
   }
 
+  /// Abre el bottom sheet de respaldo de foto para un ítem.
+  ///
+  /// Flujo (seguridad): primero se obtienen y muestran las coordenadas GPS
+  /// (precisión < [precisionMinima]); el botón verde "Sacar foto" queda
+  /// deshabilitado hasta tener coordenadas válidas. Al tocarlo:
+  /// - sin foto: captura una nueva foto y la guarda en [fotos].
+  /// - con foto: abre un mini menú (Ver foto / Re-tomar foto / Cancelar).
+  ///   "Re-tomar foto" vuelve a capturar coordenadas frescas y la foto nueva,
+  ///   reemplazando la existente.
+  ///
+  /// Devuelve true si se tomó guardó una foto (nueva o reemplazada).
+  /// [onCoordenadasCapturadas] recibe las coordenadas finales para que la
+  /// página las escriba en el ítem (coordenadaLat/coordenadaLon).
+  static Future<bool> mostrarSheetFoto(
+    BuildContext context, {
+    required List<EdanFoto> fotos,
+    required double latActual,
+    required double lonActual,
+    required void Function(double lat, double lon) onCoordenadasCapturadas,
+    String? seccion,
+    String? idLocal,
+    String? idSeccion,
+    double precisionMinima = 30,
+  }) async {
+    final saved = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      isDismissible: true,
+      enableDrag: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => _SheetFoto(
+        fotos: fotos,
+        latActual: latActual,
+        lonActual: lonActual,
+        precisionMinima: precisionMinima,
+        seccion: seccion,
+        idLocal: idLocal,
+        idSeccion: idSeccion,
+        onCoordenadasCapturadas: onCoordenadasCapturadas,
+      ),
+    );
+    return saved ?? false;
+  }
+
   /// Captura una foto con la cámara y la guarda en [fotos] con sus
   /// coordenadas. Utilizable también fuera del widget cuando la captura
   /// se hace con el diálogo ya cerrado.
@@ -117,6 +162,8 @@ class EdanBotonSacarFoto {
     required double latitud,
     required double longitud,
     required double precision,
+    String? idLocal,
+    String? idSeccion,
   }) async {
     final hasPermission = await PermissionService.requestCameraPermission();
     if (!hasPermission) {
@@ -132,6 +179,20 @@ class EdanBotonSacarFoto {
       longitud: longitud,
       precision: precision,
     ));
+    // Registrar en foto_pendiente para tracking de sync.
+    if (idLocal != null && idSeccion != null) {
+      try {
+        await DatabaseHelper.instance.insertarFotoPendiente(
+          idLocal: idLocal,
+          idSeccion: idSeccion,
+          rutaLocalArchivo: savedPath,
+          lat: latitud,
+          lon: longitud,
+        );
+      } catch (e) {
+        debugPrint('[FotoPendiente] Error al registrar foto: $e');
+      }
+    }
     return true;
   }
 
@@ -146,6 +207,7 @@ class EdanBotonSacarFoto {
     double coordenadaLon = 0,
     String? seccion,
     VoidCallback? onEliminada,
+    bool soloLectura = false,
   }) {
     final EdanFoto? foto = fotos.isNotEmpty ? fotos.first : null;
     final lat = foto != null && foto.latitud != 0 ? foto.latitud : coordenadaLat;
@@ -253,7 +315,7 @@ class EdanBotonSacarFoto {
                                   ),
                                 ),
                               const SizedBox(width: 10),
-                              if (foto != null)
+                              if (foto != null && !soloLectura)
                                 GestureDetector(
                                   onTap: () async {
                                     final ok = await confirmarEliminacion(
@@ -430,6 +492,375 @@ class EdanFotoMiniatura extends StatelessWidget {
         size: 18,
         color: AppColors.textSecondary,
       ),
+    );
+  }
+}
+
+/// Bottom sheet de captura/edición de foto de respaldo de un ítem.
+///
+/// Flujo:
+/// 1. Obtiene y muestra coordenadas GPS (o usa las ya guardadas del ítem).
+/// 2. El botón verde "Sacar foto" se habilita solo con coordenadas válidas.
+/// 3. Sin foto: captura y guarda una foto nueva.
+///    Con foto: abre un mini menú (Ver foto / Re-tomar foto / Cancelar);
+///    "Re-tomar foto" vuelve a capturar coordenadas frescas y reemplaza.
+class _SheetFoto extends StatefulWidget {
+  final List<EdanFoto> fotos;
+  final double latActual;
+  final double lonActual;
+  final double precisionMinima;
+  final String? seccion;
+  final String? idLocal;
+  final String? idSeccion;
+  final void Function(double lat, double lon) onCoordenadasCapturadas;
+
+  const _SheetFoto({
+    required this.fotos,
+    required this.latActual,
+    required this.lonActual,
+    required this.precisionMinima,
+    this.seccion,
+    this.idLocal,
+    this.idSeccion,
+    required this.onCoordenadasCapturadas,
+  });
+
+  @override
+  State<_SheetFoto> createState() => _SheetFotoState();
+}
+
+class _SheetFotoState extends State<_SheetFoto> {
+  bool _capturando = false;
+  bool _reintentar = false;
+  double? _lat;
+  double? _lon;
+  double _prec = 0;
+  bool _sacando = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.latActual != 0 || widget.lonActual != 0) {
+      _lat = widget.latActual;
+      _lon = widget.lonActual;
+    } else {
+      _capturarCoordenadas();
+    }
+  }
+
+  Future<void> _capturarCoordenadas() async {
+    if (_capturando) return;
+    setState(() {
+      _capturando = true;
+      _reintentar = false;
+    });
+    final pos = await EdanBotonSacarFoto.capturarCoordenadas(
+      context,
+      precisionMinima: widget.precisionMinima,
+    );
+    if (!mounted) return;
+    if (pos != null) {
+      setState(() {
+        _lat = pos.latitude;
+        _lon = pos.longitude;
+        _prec = pos.accuracy;
+        _capturando = false;
+      });
+    } else {
+      setState(() {
+        _reintentar = true;
+        _capturando = false;
+      });
+    }
+  }
+
+  /// Devuelve true si se completó una captura (nueva o reemplazada) con
+  /// coordenadas frescas [lat]/[lon].
+  Future<bool> _tomarFoto({bool recapturarCoordenadas = false}) async {
+    if (recapturarCoordenadas) {
+      setState(() => _capturando = true);
+      final pos = await EdanBotonSacarFoto.capturarCoordenadas(
+        context,
+        precisionMinima: widget.precisionMinima,
+      );
+      if (!mounted) return false;
+      if (pos == null) {
+        setState(() {
+          _capturando = false;
+          _reintentar = true;
+        });
+        return false;
+      }
+      setState(() {
+        _lat = pos.latitude;
+        _lon = pos.longitude;
+        _prec = pos.accuracy;
+        _capturando = false;
+      });
+    }
+    final lat = _lat;
+    final lon = _lon;
+    if (lat == null || lon == null) return false;
+
+    setState(() => _sacando = true);
+    final ok = await EdanBotonSacarFoto.capturarFoto(
+      fotos: widget.fotos,
+      latitud: lat,
+      longitud: lon,
+      precision: _prec,
+      idLocal: widget.idLocal,
+      idSeccion: widget.idSeccion,
+    );
+    if (!mounted) return false;
+    setState(() => _sacando = false);
+    if (ok) {
+      widget.onCoordenadasCapturadas(lat, lon);
+      Navigator.of(context).pop(true);
+    }
+    return ok;
+  }
+
+  void _abrirMenuFotoExistente() {
+    showModalBottomSheet<bool>(
+      context: context,
+      builder: (menuCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_outlined, color: AppColors.textPrimary),
+              title: const Text('Ver foto actual'),
+              onTap: () {
+                Navigator.of(menuCtx).pop();
+                EdanBotonSacarFoto.verFotoCompleta(
+                  context,
+                  fotos: widget.fotos,
+                  fotografia: null,
+                  coordenadaLat: _lat ?? 0,
+                  coordenadaLon: _lon ?? 0,
+                  seccion: widget.seccion,
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.refresh, color: AppColors.completed),
+              title: const Text('Re-tomar foto'),
+              subtitle: const Text('Se recapturarán las coordenadas por seguridad'),
+              onTap: () {
+                Navigator.of(menuCtx).pop();
+                _tomarFoto(recapturarCoordenadas: true);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.close, color: AppColors.textSecondary),
+              title: const Text('Cancelar'),
+              onTap: () => Navigator.of(menuCtx).pop(),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _onSacarFoto() {
+    if (_sacando || _lat == null || _lon == null) return;
+    if (widget.fotos.isNotEmpty) {
+      _abrirMenuFotoExistente();
+      return;
+    }
+    _tomarFoto();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const colorPrimario = AppColors.completed;
+    final bool coordsListas = _lat != null && _lon != null;
+    final bool tienefoto = widget.fotos.isNotEmpty;
+
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+          child: SafeArea(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: colorPrimario.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.camera_alt_outlined,
+                          color: AppColors.completed, size: 22),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        widget.seccion != null
+                            ? 'Respaldo · ${widget.seccion}'
+                            : 'Respaldo de foto',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _coordenadasCard(colorPrimario, coordsListas),
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 52,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: colorPrimario,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: AppColors.closed.withValues(alpha: 0.4),
+                      disabledForegroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    onPressed:
+                        (coordsListas && !_sacando) ? _onSacarFoto : null,
+                    icon: _sacando
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.photo_camera_outlined, size: 20),
+                    label: Text(
+                      tienefoto ? 'Editar foto' : 'Sacar foto',
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                if (tienefoto) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Ya tienes una foto. El botón abrirá opciones para '
+                    'verla o retomarla.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.textSecondary,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _coordenadasCard(Color verde, bool coordsListas) {
+    final Widget contenido;
+    if (_capturando) {
+      contenido = const Row(
+        children: [
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Capturando ubicación…',
+              style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
+            ),
+          ),
+        ],
+      );
+    } else if (coordsListas) {
+      contenido = Row(
+        children: [
+          const Icon(Icons.check_circle_outline, color: AppColors.completed, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${_lat!.toStringAsFixed(6)}, ${_lon!.toStringAsFixed(6)}',
+              style: const TextStyle(
+                fontSize: 13,
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (_prec > 0)
+            Text(
+              '±${_prec.toStringAsFixed(0)}m',
+              style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
+        ],
+      );
+    } else {
+      contenido = Row(
+        children: [
+          const Icon(Icons.error_outline, color: AppColors.rejected, size: 20),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'No se pudo obtener la ubicación',
+              style: TextStyle(fontSize: 13, color: AppColors.textPrimary),
+            ),
+          ),
+          if (_reintentar)
+            TextButton(
+              onPressed: _capturarCoordenadas,
+              child: const Text('Reintentar'),
+            ),
+        ],
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      decoration: BoxDecoration(
+        color: coordsListas
+            ? verde.withValues(alpha: 0.10)
+            : AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: coordsListas
+              ? verde.withValues(alpha: 0.4)
+              : AppColors.divider,
+        ),
+      ),
+      child: contenido,
     );
   }
 }

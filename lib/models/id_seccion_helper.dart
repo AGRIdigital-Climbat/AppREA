@@ -18,6 +18,22 @@ String generarIdSeccion(String prefijo) {
   return '$timestampBase32-$uuidShort';
 }
 
+/// Helpers por sección: cada uno genera el `id_seccion` de UNA sección
+/// concreta usando SIEMPRE el mismo prefijo (legible y consistente). Úsalos al
+/// crear ítems NUEVOS de esa sección; NUNCA al serializar para GET/PUT (ahí se
+/// reutiliza el id ya existente del ítem).
+String nuevoIdImpactoPoblacion() => generarIdSeccion('im');
+String nuevoIdSaludEstablecimiento() => generarIdSeccion('es');
+String nuevoIdDanoVial() => generarIdSeccion('sv');
+String nuevoIdDanoInfraPublica() => generarIdSeccion('di');
+String nuevoIdServicioBasico() => generarIdSeccion('sb');
+String nuevoIdUnidadEducativa() => generarIdSeccion('ue');
+String nuevoIdDanoVivienda() => generarIdSeccion('dv');
+String nuevoIdDanoAgricultura() => generarIdSeccion('ag');
+String nuevoIdDanoPecuario() => generarIdSeccion('pc');
+String nuevoIdInfraProductiva() => generarIdSeccion('ip');
+String nuevoIdProteccion() => generarIdSeccion('po');
+
 /// Genera un UUID v4 estándar (36 caracteres) para `id_local`.
 ///
 /// El `id_local` es la identidad estable e inmutable de una localidad,

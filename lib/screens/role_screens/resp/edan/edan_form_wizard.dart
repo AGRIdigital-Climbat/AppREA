@@ -164,7 +164,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       ),
       _WizardPage(
         key: '02',
-        titulo: 'Información de población afectada y damnificada',
+        titulo: 'Población damnificada y afectada',
         instruccion:
             'Ingrese los totales estimados de población afectada y familias '
             'damnificadas.',
@@ -254,7 +254,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (l.impProteccion) {
       pages.add(_WizardPage(
         key: '10',
-        titulo: 'Impacto en protección',
+        titulo: 'Necesidades de protección',
         instruccion:
             'Registre la población vulnerable por sexo y la necesidad de apoyo '
             'psicológico.',
@@ -302,11 +302,9 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   }
 
   static const String _introTexto =
-      'Este formulario es una Evaluación de Daños y Análisis de Necesidades '
-      '(EDAN) que será revisado por la Unidad de Gestión de Riesgos (UGR) para '
-      'su aprobación.\n\n'
-      'Complete cada sección según corresponda al evento. Deslice (swipe) para '
-      'avanzar entre secciones; cada sección se guarda al presionar "Siguiente".';
+      'El EDAN (Evaluación de Daños y Análisis de Necesidades) es una herramienta oficial utilizada para registrar directamente en el lugar de un desastre la gravedad, ubicación y extensión de los daños provocados por un evento adverso..\n\n'
+      'Complete cada sección según corresponda al evento. Deslice hacia la izquierda para '
+      'avanzar entre secciones o presione "SIGUIENTE"; Presione el ícono de guardar en la parte superior para salvar la información.';
 
   Map<String, bool> _seccionesCompletas() {
     final map = <String, bool>{};
@@ -324,27 +322,54 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   bool _seccionTieneDatos(String key) {
     switch (key) {
       case '03':
-        return _localidad.impactoPoblacion.any((i) => i.tieneDatosGlobales);
+        if (_localidad.impImpactoPoblacion ||
+            _localidad.impPrimeraRespuesta) {
+          return true;
+        }
+        return _localidad.impactoPoblacion.any((i) => i.tieneDatosGlobales) ||
+            (_localidad.necesidadPrimeraRespuesta?.tieneDatos ?? false);
       case '04':
+        if (_localidad.impSaludEstablecimientos ||
+            _localidad.impNecesidadSalud) {
+          return true;
+        }
         return _localidad.establecimientosSalud.isNotEmpty ||
-            (_localidad.necesidadSalud?.numeroPersonas ?? 0) > 0;
+            (_localidad.necesidadSalud?.tieneDatos ?? false);
       case '05':
+        if (_localidad.impDanosViales || _localidad.impDanosInfraPublica) {
+          return true;
+        }
         return _localidad.danosViales.isNotEmpty ||
             _localidad.danosInfraPublica.isNotEmpty;
       case '06':
-        return _localidad.serviciosBasicos.any((s) => s.tieneDatos);
+        return _localidad.impServiciosBasicos
+            ? true
+            : _localidad.serviciosBasicos.any((s) => s.tieneDatos);
       case '07':
-        return _localidad.unidadesEducativas.isNotEmpty;
+        return _localidad.impUnidadesEducativas
+            ? true
+            : _localidad.unidadesEducativas.isNotEmpty;
       case '08':
-        return _localidad.danosVivienda.isNotEmpty;
+        return _localidad.impDanosVivienda
+            ? true
+            : _localidad.danosVivienda.isNotEmpty;
       case '09':
+        if (_localidad.impDanosAgricultura ||
+            _localidad.impDanosPecuarios ||
+            _localidad.impInfraProductiva) {
+          return true;
+        }
         return _localidad.danosAgricultura.isNotEmpty ||
             _localidad.danosPecuarios.isNotEmpty ||
             _localidad.infraProductiva.isNotEmpty;
       case '10':
-        return _localidad.proteccion.any((g) => g.tieneDatos);
+        return _localidad.impProteccion
+            ? true
+            : _localidad.proteccion.any((g) => g.tieneDatos);
       case '11':
-        return _localidad.necesidadHumanitaria?.algunaSeleccionada ?? false;
+        return _localidad.impNecesidadHumanitaria
+            ? true
+            : (_localidad.necesidadHumanitaria?.tieneDatos ?? false);
       default:
         return false;
     }
@@ -427,27 +452,28 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     final token = AuthService.instance.currentToken;
     final envio = EdanLocalidadesEnvioV2Service();
     try {
+      // Determinar rutas: la página actual, o TODAS si es resumen/página sin mapa.
+      final rutasPagina = EdanSeccionesRegistry.rutasDePagina(seccionKey);
+      final rutasGuardar = rutasPagina.isEmpty
+          ? EdanSeccionesRegistry.rutasV2Todas()
+          : rutasPagina;
+
+      if (_huboCambios()) {
+        _localidad.editado = true;
+      }
+
       if (_localidad.idLocal != null) {
         await _db.updateLocalidad(_localidad);
-        await envio.guardarSecciones(
-          _localidad,
-          EdanSeccionesRegistry.rutasDePagina(seccionKey),
-        );
+        await envio.guardarSecciones(_localidad, rutasGuardar);
         await _db.marcarSeccionesModificadas(
           _localidad.idLocal!,
-          EdanSeccionesRegistry.rutasDePagina(seccionKey),
+          rutasGuardar,
         );
       } else if (token != null) {
         final id = await _db.insertLocalidad(_localidad, usuarioId: token.userId);
         _localidad.idLocal = id;
-        await envio.guardarSecciones(
-          _localidad,
-          EdanSeccionesRegistry.rutasDePagina(seccionKey),
-        );
-        await _db.marcarSeccionesModificadas(
-          id,
-          EdanSeccionesRegistry.rutasDePagina(seccionKey),
-        );
+        await envio.guardarSecciones(_localidad, rutasGuardar);
+        await _db.marcarSeccionesModificadas(id, rutasGuardar);
       }
       _marcarGuardada(seccionKey);
     } catch (e) {
@@ -541,14 +567,16 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
 
     final ok = await EdanLocalidadesEnvioV2Service()
         .enviarLocalidad(_localidad, soloRutas: modificadas.toSet());
-    if (ok) {
-      _localidad
-        ..pendienteActualizacion = false
-        ..sincronizado = true;
-      await _db.updateLocalidad(_localidad);
-      LocalidadSyncService.instance.recargarPendientes();
-      return _GuardadoResult.enviado;
-    }
+      if (ok) {
+        _localidad
+          ..editado = false
+          ..sincronizado = true;
+        await _db.updateLocalidad(_localidad);
+        // Limpiar las marcas de modificada para las rutas enviadas.
+        await _db.clearSeccionesModificadas(idLocal, modificadas.toSet());
+        LocalidadSyncService.instance.recargarPendientes();
+        return _GuardadoResult.enviado;
+      }
     return _GuardadoResult.fallo;
   }
 
@@ -620,14 +648,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (!mounted) return;
     switch (salir) {
       case 'guardar':
-        setState(() => _saving = true);
-        final resultado = await _guardarYEnviar(_pages[_currentPage].key);
-        setState(() => _saving = false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_mensajeGuardado(resultado))),
-          );
-        }
+        // Guarda igual que el botón de la AppBar (solo local, sin reenvío).
+        await _guardarSinSalir();
         _salirPermitido();
         break;
       case 'salir':
@@ -652,7 +674,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     // Marcar estado Enviado UGR (destino del responsable al enviar).
     _localidad.idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id;
     _localidad.estadoLocalidad = UgrLocalidadEstado.enviadoUgr;
-    _localidad.pendienteActualizacion = true;
+    _localidad.editado = true;
     if (_localidad.idLocal != null) {
       await _db.updateLocalidad(_localidad);
     }
@@ -664,9 +686,11 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
           .enviarLocalidad(_localidad);
       if (ok && _localidad.idLocal != null) {
         _localidad
-          ..pendienteActualizacion = false
+          ..editado = false
           ..sincronizado = true;
         await _db.updateLocalidad(_localidad);
+        // Limpiar las marcas de modificada (ya se enviaron todas).
+        await _db.marcarTodasSeccionesSincronizadas(_localidad.idLocal!);
         LocalidadSyncService.instance.recargarPendientes();
       }
     }
@@ -744,7 +768,15 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               controller: _pageController,
               physics: const PageScrollPhysics(),
               itemCount: _pages.length,
-              onPageChanged: (i) => setState(() => _currentPage = i),
+              onPageChanged: (i) {
+                // Auto-guardar la página que se deja al hacer swipe.
+                final prevKey = _pages[_currentPage].key;
+                final prevRutas = EdanSeccionesRegistry.rutasDePagina(prevKey);
+                setState(() => _currentPage = i);
+                if (prevRutas.isNotEmpty && _huboCambios()) {
+                  _guardar(prevKey);
+                }
+              },
               itemBuilder: (context, index) {
                 final p = _pages[index];
                 return EdanSectionPage(

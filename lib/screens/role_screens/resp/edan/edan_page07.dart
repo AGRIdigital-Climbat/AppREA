@@ -51,12 +51,12 @@ class _EdanPage07State extends State<EdanPage07> {
   }
 
   void _agregar() {
-    final u = EdanDanoUnidadEducativa(idSeccion: generarIdSeccion('ue'));
-    setState(() => widget.localidad.unidadesEducativas.add(u));
-    _editar(u);
+    final u = EdanDanoUnidadEducativa(idSeccion: nuevoIdUnidadEducativa());
+    _editar(u, esNuevo: true);
   }
 
-  Future<void> _editar(EdanDanoUnidadEducativa u) async {
+  Future<void> _editar(EdanDanoUnidadEducativa u,
+      {bool esNuevo = false}) async {
     _nombre.text = u.nombreEstablecimiento;
     _comunidad.text = u.comunidad;
     _estudiantes.text = u.estudiantes > 0 ? '${u.estudiantes}' : '';
@@ -66,7 +66,7 @@ class _EdanPage07State extends State<EdanPage07> {
     _total = u.danoTotal;
     _suspension = u.suspensionClases ?? false;
 
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -107,13 +107,13 @@ class _EdanPage07State extends State<EdanPage07> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Guardar')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
           ],
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
 
     setState(() {
       u.nombreEstablecimiento = _nombre.text;
@@ -124,28 +124,17 @@ class _EdanPage07State extends State<EdanPage07> {
       u.danoParcial = _parcial;
       u.danoTotal = _total;
       u.suspensionClases = _suspension;
+      if (esNuevo) widget.localidad.unidadesEducativas.add(u);
     });
   }
 
-  Future<void> _capturarRespaldo(EdanDanoUnidadEducativa u) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _foto(EdanDanoUnidadEducativa u) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: u.fotos,
       latActual: u.coordenadaLat,
       lonActual: u.coordenadaLon,
-      onCoordenadasCapturadas: (lat, lon) {
-        u.coordenadaLat = lat;
-        u.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _cambiarFoto(EdanDanoUnidadEducativa u) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: u.fotos,
+      seccion: 'Educación',
       onCoordenadasCapturadas: (lat, lon) {
         u.coordenadaLat = lat;
         u.coordenadaLon = lon;
@@ -196,8 +185,8 @@ class _EdanPage07State extends State<EdanPage07> {
                 icono: Icons.school_outlined,
                 onEditar: () => _editar(u),
                 onEliminar: () => _eliminar(u),
-                onRespaldar: () => _capturarRespaldo(u),
-                onCambiarFoto: () => _cambiarFoto(u),
+                onRespaldar: () => _foto(u),
+                onCambiarFoto: () => _foto(u),
                 respaldo: u,
                 seccionRespaldo: 'Educación',
                 onFotoEliminada: () => setState(() {}),

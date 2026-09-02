@@ -175,7 +175,7 @@ class _EdanPage03State extends State<EdanPage03> {
           child: TextField(
             controller: _obsPrimeraRespuesta,
             maxLines: 2,
-            decoration: _inputDecor(),
+            decoration: _inputDecor(hint: 'Ej: Recursos solicitados a la UGR'),
           ),
         ),
       ],
@@ -294,26 +294,26 @@ class _EdanPage03State extends State<EdanPage03> {
             const Color(0xFF2563EB), (v) {
           g.heridos = int.tryParse(v.trim()) ?? 0;
           _onEdit();
-        }),
+        }, hint: 'Ej: 18'),
         const SizedBox(height: 10),
         _campoNum(c.fallecidos, 'N° Fallecidos', Icons.person_off_outlined,
             const Color(0xFFC0392B), (v) {
           g.fallecidos = int.tryParse(v.trim()) ?? 0;
           _onEdit();
-        }),
+        }, hint: 'Ej: 6'),
         const SizedBox(height: 10),
         _campoNum(c.desaparecidos, 'N° Desaparecidos',
             Icons.person_search_outlined, const Color(0xFF8B5CF6), (v) {
           g.desaparecidos = int.tryParse(v.trim()) ?? 0;
           _onEdit();
-        }),
+        }, hint: 'Ej: 2'),
         const SizedBox(height: 10),
         _campoTitulo(
           titulo: 'Observaciones',
           child: TextField(
             controller: c.observaciones,
             maxLines: 2,
-            decoration: _inputDecor(),
+            decoration: _inputDecor(hint: 'Ej: Menores trasladados'),
             onChanged: (v) {
               g.observaciones = v;
               setState(() {});
@@ -324,16 +324,17 @@ class _EdanPage03State extends State<EdanPage03> {
     );
   }
 
-  InputDecoration _inputDecor() {
-    return const InputDecoration(
+  InputDecoration _inputDecor({String? hint}) {
+    return InputDecoration(
+      hintText: hint,
       filled: true,
       fillColor: Colors.white,
       isDense: true,
-      border: OutlineInputBorder(
+      border: const OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(10)),
         borderSide: BorderSide(color: Color(0xFFE2E8F0)),
       ),
-      enabledBorder: OutlineInputBorder(
+      enabledBorder: const OutlineInputBorder(
         borderRadius: BorderRadius.all(Radius.circular(10)),
         borderSide: BorderSide(color: Color(0xFFE2E8F0)),
       ),
@@ -346,7 +347,7 @@ class _EdanPage03State extends State<EdanPage03> {
   }
 
   Widget _campoNum(TextEditingController c, String label, IconData icono,
-      Color tituloColor, ValueChanged<String> onChanged) {
+      Color tituloColor, ValueChanged<String> onChanged, {String? hint}) {
     return _campoTitulo(
       titulo: label,
       icono: icono,
@@ -355,7 +356,7 @@ class _EdanPage03State extends State<EdanPage03> {
         controller: c,
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: _inputDecor(),
+        decoration: _inputDecor(hint: hint),
         onChanged: onChanged,
       ),
     );

@@ -223,7 +223,7 @@ class EdanGrupoEtario {
   /// JSON para la API: igual que [toJson] pero SIN `marcado` (campo interno
   /// de la UI que no debe enviarse al servidor).
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'im'),
+        'id_seccion': idSeccion,
         if (idGrupoEtario != null) 'id_grupo_etario': idGrupoEtario,
         'rango': rango,
         'fallecidos': fallecidos,
@@ -319,8 +319,8 @@ class EdanNecesidadPrimeraRespuesta {
     this.salvamento = false,
     this.evacuacion = false,
     this.observaciones = '',
-    this.idSeccion,
-  });
+    String? idSeccion,
+  }) : idSeccion = idSeccion ?? generarIdSeccion('nr');
 
   factory EdanNecesidadPrimeraRespuesta.fromJson(Map<String, dynamic> json) {
     return EdanNecesidadPrimeraRespuesta(
@@ -343,6 +343,11 @@ class EdanNecesidadPrimeraRespuesta {
       };
 
   bool get algunaSeleccionada => busqueda || salvamento || evacuacion;
+
+  /// Regla única 1:1: la sección cuenta si algún checkbox es true O algún
+  /// texto (observaciones) está lleno. Espejo de la condición del servidor.
+  bool get tieneDatos =>
+      algunaSeleccionada || observaciones.trim().isNotEmpty;
 }
 
 class EdanFoto {
@@ -454,7 +459,7 @@ class EdanEstablecimientoSalud with EdanFotoHolder {
   /// Serialización alineada al schema EstablecimientoSalud de la API.
   /// NO incluye fotografia: las fotos se suben vía con-foto (POST dedicado).
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'es'),
+        'id_seccion': idSeccion,
         'nombre_establecimiento': nombreEstablecimiento,
         'comunidad': comunidad,
         'nivel_atencion': nivelAtencion,
@@ -486,8 +491,8 @@ class EdanNecesidadSalud {
     this.numeroPersonas = 0,
     this.otrasNecesidades = '',
     this.observaciones = '',
-    this.idSeccion,
-  });
+    String? idSeccion,
+  }) : idSeccion = idSeccion ?? generarIdSeccion('ns');
 
   factory EdanNecesidadSalud.fromJson(Map<String, dynamic> json) {
     return EdanNecesidadSalud(
@@ -519,6 +524,14 @@ class EdanNecesidadSalud {
         'observaciones': observaciones,
         'id_seccion': idSeccion,
       };
+  bool get algunaSeleccionada => botiquines || numeroPersonas > 0;
+
+  /// Regla única 1:1: la sección cuenta si algún checkbox es true O algún
+  /// texto (otrasNecesidades/observaciones) está lleno. Espejo del servidor.
+  bool get tieneDatos =>
+      algunaSeleccionada ||
+      otrasNecesidades.trim().isNotEmpty ||
+      observaciones.trim().isNotEmpty;
 }
 
 class EdanDanoVial with EdanFotoHolder {
@@ -596,7 +609,7 @@ class EdanDanoVial with EdanFotoHolder {
   Map<String, dynamic> toApiJson() {
     final vp = viaPuente.trim().toLowerCase();
     return {
-      'id_seccion': requireIdSeccion(idSeccion, 'dv'),
+      'id_seccion': idSeccion,
       'via': vp == 'vía' || vp == 'via' || vp == 'carretera' || vp == 'camino' || vp == 'túnel' || vp == 'tunel',
       'puente': vp == 'puente',
       'tramo': tramo,
@@ -677,7 +690,7 @@ class EdanDanoInfraPublica with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'di'),
+        'id_seccion': idSeccion,
         'comunidad': comunidad,
         'tipo_estructura': tipoEstructura,
         'dano_parcial': danoParcial,
@@ -759,9 +772,8 @@ class EdanServicioBasicoDetalle with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'sb'),
+        'id_seccion': idSeccion,
         'tipo': tipo,
-        'afectado': afectado,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
@@ -962,7 +974,7 @@ class EdanDanoUnidadEducativa with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'ue'),
+        'id_seccion': idSeccion,
         'nombre_establecimiento': nombreEstablecimiento,
         'comunidad': comunidad,
         'dano_parcial': danoParcial,
@@ -1048,7 +1060,7 @@ class EdanDanoVivienda with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'dv'),
+        'id_seccion': idSeccion,
         'comunidad': comunidad,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
@@ -1131,7 +1143,7 @@ class EdanDanoAgricultura with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'da'),
+        'id_seccion': idSeccion,
         'id_cultivo': idCultivo,
         'tipo_cultivo': tipoCultivo,
         'hectareas_afectadas': hectareasAfectadas,
@@ -1217,7 +1229,7 @@ class EdanDanoPecuario with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'dp'),
+        'id_seccion': idSeccion,
         'id_especie': idEspecie,
         'especie': especie,
         'raza': raza,
@@ -1288,7 +1300,7 @@ class EdanInfraProductiva with EdanFotoHolder {
       };
 
   Map<String, dynamic> toApiJson() => {
-        'id_seccion': requireIdSeccion(idSeccion, 'ip'),
+        'id_seccion': idSeccion,
         'tipo': tipo,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
@@ -1373,7 +1385,7 @@ class EdanGrupoVulnerable {
   /// Serialización alineada al schema GrupoVulnerable de la API: envía
   /// id_grupo_vulnerable_catalogo (FK) y grupo como objeto.
   Map<String, dynamic> toApiJson(Map<String, dynamic>? grupoCatalogo) => {
-        'id_seccion': requireIdSeccion(idSeccion, 'po'),
+        'id_seccion': idSeccion,
         if (idGrupoVulnerableCatalogo != null)
           'id_grupo_vulnerable_catalogo': idGrupoVulnerableCatalogo,
         if (grupoCatalogo != null) 'grupo': grupoCatalogo,
@@ -1518,8 +1530,8 @@ class EdanNecesidadHumanitaria {
     this.obsHerramientas = '',
     this.obsAlmacenamientoAgua = '',
     this.obsBanos = '',
-    this.idSeccion,
-  });
+    String? idSeccion,
+  }) : idSeccion = idSeccion ?? generarIdSeccion('nh');
 
   factory EdanNecesidadHumanitaria.fromJson(Map<String, dynamic> json) {
     return EdanNecesidadHumanitaria(
@@ -1579,6 +1591,20 @@ class EdanNecesidadHumanitaria {
       herramientas ||
       almacenamientoAgua ||
       banos;
+
+  /// Regla única 1:1: la sección cuenta si algún checkbox es true O algún
+  /// texto obs_* está lleno. Espejo de la condición del servidor.
+  bool get tieneDatos =>
+      algunaSeleccionada ||
+      obsAlimentos.trim().isNotEmpty ||
+      obsRefugioVivienda.trim().isNotEmpty ||
+      obsRopaCama.trim().isNotEmpty ||
+      obsArticulosHigiene.trim().isNotEmpty ||
+      obsArticulosCocina.trim().isNotEmpty ||
+      obsPrendasVestir.trim().isNotEmpty ||
+      obsHerramientas.trim().isNotEmpty ||
+      obsAlmacenamientoAgua.trim().isNotEmpty ||
+      obsBanos.trim().isNotEmpty;
 }
 
 class EdanLocalidad {
@@ -1592,6 +1618,7 @@ class EdanLocalidad {
   bool sincronizado;
   bool pendienteEliminacion;
   bool pendienteActualizacion;
+  bool editado;
   String? fechaModificacion;
 
   // Campos básicos
@@ -1629,6 +1656,19 @@ class EdanLocalidad {
   bool impAgropecuario;
   bool impProteccion;
   bool impNecesidades;
+  bool impImpactoPoblacion;
+  bool impSaludEstablecimientos;
+  bool impDanosViales;
+  bool impDanosInfraPublica;
+  bool impServiciosBasicos;
+  bool impUnidadesEducativas;
+  bool impDanosVivienda;
+  bool impDanosAgricultura;
+  bool impDanosPecuarios;
+  bool impInfraProductiva;
+  bool impPrimeraRespuesta;
+  bool impNecesidadSalud;
+  bool impNecesidadHumanitaria;
 
   // Secciones como LISTAS (schema API v1.3.0)
   List<EdanImpactoPoblacion> impactoPoblacion;
@@ -1695,6 +1735,7 @@ class EdanLocalidad {
     this.sincronizado = false,
     this.pendienteEliminacion = false,
     this.pendienteActualizacion = false,
+    this.editado = false,
     this.fechaModificacion,
     this.tipoLocalidad = '',
     this.nombre = '',
@@ -1726,6 +1767,19 @@ class EdanLocalidad {
     this.impAgropecuario = false,
     this.impProteccion = false,
     this.impNecesidades = false,
+    this.impImpactoPoblacion = false,
+    this.impSaludEstablecimientos = false,
+    this.impDanosViales = false,
+    this.impDanosInfraPublica = false,
+    this.impServiciosBasicos = false,
+    this.impUnidadesEducativas = false,
+    this.impDanosVivienda = false,
+    this.impDanosAgricultura = false,
+    this.impDanosPecuarios = false,
+    this.impInfraProductiva = false,
+    this.impPrimeraRespuesta = false,
+    this.impNecesidadSalud = false,
+    this.impNecesidadHumanitaria = false,
     List<EdanImpactoPoblacion>? impactoPoblacion,
     EdanNecesidadPrimeraRespuesta? necesidadPrimeraRespuesta,
     List<EdanEstablecimientoSalud>? establecimientosSalud,
@@ -1886,6 +1940,19 @@ class EdanLocalidad {
       impAgropecuario: _toBool(json['imp_agropecuario']),
       impProteccion: _toBool(json['imp_proteccion']),
       impNecesidades: _toBool(json['imp_necesidades']),
+      impImpactoPoblacion: _toBool(json['imp_impacto_poblacion']),
+      impSaludEstablecimientos: _toBool(json['imp_salud_establecimientos']),
+      impDanosViales: _toBool(json['imp_danos_viales']),
+      impDanosInfraPublica: _toBool(json['imp_danos_infra_publica']),
+      impServiciosBasicos: _toBool(json['imp_servicios_basicos']),
+      impUnidadesEducativas: _toBool(json['imp_unidades_educativas']),
+      impDanosVivienda: _toBool(json['imp_danos_vivienda']),
+      impDanosAgricultura: _toBool(json['imp_danos_agricultura']),
+      impDanosPecuarios: _toBool(json['imp_danos_pecuarios']),
+      impInfraProductiva: _toBool(json['imp_infra_productiva']),
+      impPrimeraRespuesta: _toBool(json['imp_primera_respuesta']),
+      impNecesidadSalud: _toBool(json['imp_necesidad_salud']),
+      impNecesidadHumanitaria: _toBool(json['imp_necesidad_humanitaria']),
       impactoPoblacion: impactoPoblacion,
       necesidadPrimeraRespuesta: json['necesidad_primera_respuesta'] is Map
           ? EdanNecesidadPrimeraRespuesta.fromJson(
@@ -1918,6 +1985,132 @@ class EdanLocalidad {
     );
     localidad.deduplicarSecciones();
     return localidad;
+  }
+
+  /// Recalcula los flags 1:1 de impacto según los datos reales cargados en las
+  /// secciones (espejo local del `_marcar_impacto` del backend). Se invoca
+  /// antes de persistir para que el flag refleje el estado tras editar.
+  void recalcularFlagsImpacto() {
+    impImpactoPoblacion = impactoPoblacion.any((i) =>
+        i.fallecidos > 0 || i.heridos > 0 || i.desaparecidos > 0);
+    impSaludEstablecimientos = establecimientosSalud.any((e) =>
+        e.nombreEstablecimiento.trim().isNotEmpty ||
+        e.comunidad.trim().isNotEmpty ||
+        e.danoParcial ||
+        e.danoTotal ||
+        e.medicosAfectados > 0 ||
+        e.enfermerasAfectados > 0 ||
+        e.otrosAfectados > 0 ||
+        e.fotografia != null ||
+        e.fotos.isNotEmpty ||
+        e.coordenadaLat != 0 ||
+        e.coordenadaLon != 0);
+    impDanosViales = danosViales.any((d) =>
+        d.viaPuente.trim().isNotEmpty ||
+        d.tramo.trim().isNotEmpty ||
+        d.danoParcial ||
+        d.danoTotal ||
+        d.kmDanio > 0 ||
+        d.necesidadesInmediatas.trim().isNotEmpty ||
+        d.observaciones.trim().isNotEmpty ||
+        d.fotografia != null ||
+        d.fotos.isNotEmpty ||
+        d.coordenadaLat != 0 ||
+        d.coordenadaLon != 0);
+    impDanosInfraPublica = danosInfraPublica.any((d) =>
+        d.tipoEstructura.trim().isNotEmpty ||
+        d.comunidad.trim().isNotEmpty ||
+        d.danoParcial ||
+        d.danoTotal ||
+        d.observaciones.trim().isNotEmpty ||
+        d.fotografia != null ||
+        d.fotos.isNotEmpty ||
+        d.coordenadaLat != 0 ||
+        d.coordenadaLon != 0);
+    impServiciosBasicos = serviciosBasicos.any((s) =>
+        s.afectado ||
+        s.danoParcial ||
+        s.danoTotal ||
+        s.necesidadesInmediatas.trim().isNotEmpty ||
+        s.observaciones.trim().isNotEmpty ||
+        s.fotografia != null ||
+        s.fotos.isNotEmpty ||
+        s.coordenadaLat != 0 ||
+        s.coordenadaLon != 0);
+    impUnidadesEducativas = unidadesEducativas.any((u) =>
+        u.nombreEstablecimiento.trim().isNotEmpty ||
+        u.comunidad.trim().isNotEmpty ||
+        u.danoParcial ||
+        u.danoTotal ||
+        u.suspensionClases == true ||
+        u.perdidaMaterial == true ||
+        u.funcionaAlbergue == true ||
+        u.estudiantes > 0 ||
+        u.profesores > 0 ||
+        u.administrativos > 0 ||
+        u.observaciones.trim().isNotEmpty ||
+        u.fotografia != null ||
+        u.fotos.isNotEmpty ||
+        u.coordenadaLat != 0 ||
+        u.coordenadaLon != 0);
+    impDanosVivienda = danosVivienda.any((d) =>
+        d.comunidad.trim().isNotEmpty ||
+        d.danoParcial > 0 ||
+        d.danoTotal > 0 ||
+        d.necesidadesInmediatas.trim().isNotEmpty ||
+        d.observaciones.trim().isNotEmpty ||
+        d.fotografia != null ||
+        d.fotos.isNotEmpty ||
+        d.coordenadaLat != 0 ||
+        d.coordenadaLon != 0);
+    impDanosAgricultura = danosAgricultura.any((d) =>
+        d.tipoCultivo.trim().isNotEmpty ||
+        d.hectareasAfectadas > 0 ||
+        d.hectareasPerdidas > 0 ||
+        d.necesidadesInmediatas.trim().isNotEmpty ||
+        d.observaciones.trim().isNotEmpty ||
+        d.fotografia != null ||
+        d.fotos.isNotEmpty ||
+        d.coordenadaLat != 0 ||
+        d.coordenadaLon != 0);
+    impDanosPecuarios = danosPecuarios.any((d) =>
+        d.especie.trim().isNotEmpty ||
+        d.raza.trim().isNotEmpty ||
+        d.animalesAfectados > 0 ||
+        d.animalesMuertos > 0 ||
+        d.necesidadesInmediatas.trim().isNotEmpty ||
+        d.fotografia != null ||
+        d.fotos.isNotEmpty ||
+        d.coordenadaLat != 0 ||
+        d.coordenadaLon != 0);
+    impInfraProductiva = infraProductiva.any((d) =>
+        d.tipo.trim().isNotEmpty ||
+        d.danoParcial > 0 ||
+        d.danoTotal > 0 ||
+        d.fotografia != null ||
+        d.fotos.isNotEmpty ||
+        d.coordenadaLat != 0 ||
+        d.coordenadaLon != 0);
+    impPrimeraRespuesta =
+        (necesidadPrimeraRespuesta?.tieneDatos ?? false);
+    impNecesidadSalud =
+        (necesidadSalud?.tieneDatos ?? false);
+    impNecesidadHumanitaria =
+        (necesidadHumanitaria?.tieneDatos ?? false);
+
+    // Flags "gruesos": derivados de los datos reales para que la vista y los
+    // avisos de sección del preview sean consistentes con el contenido
+    // (se alinean con los criterios que usan los renderers).
+    impPoblacion = impImpactoPoblacion || impPrimeraRespuesta;
+    impSalud = impSaludEstablecimientos || impNecesidadSalud;
+    impInfraestructura = impDanosViales || impDanosInfraPublica;
+    impServicios = impServiciosBasicos;
+    impEducacion = impUnidadesEducativas;
+    impVivienda = impDanosVivienda;
+    impAgropecuario =
+        impDanosAgricultura || impDanosPecuarios || impInfraProductiva;
+    impProteccion = proteccion.any((g) => g.tieneDatos);
+    impNecesidades = impNecesidadHumanitaria;
   }
 
   static List<Map<String, String>> _parseSeccionesEliminadas(dynamic json) {
@@ -1981,6 +2174,19 @@ class EdanLocalidad {
         'imp_agropecuario': impAgropecuario,
         'imp_proteccion': impProteccion,
         'imp_necesidades': impNecesidades,
+        'imp_impacto_poblacion': impImpactoPoblacion,
+        'imp_salud_establecimientos': impSaludEstablecimientos,
+        'imp_danos_viales': impDanosViales,
+        'imp_danos_infra_publica': impDanosInfraPublica,
+        'imp_servicios_basicos': impServiciosBasicos,
+        'imp_unidades_educativas': impUnidadesEducativas,
+        'imp_danos_vivienda': impDanosVivienda,
+        'imp_danos_agricultura': impDanosAgricultura,
+        'imp_danos_pecuarios': impDanosPecuarios,
+        'imp_infra_productiva': impInfraProductiva,
+        'imp_primera_respuesta': impPrimeraRespuesta,
+        'imp_necesidad_salud': impNecesidadSalud,
+        'imp_necesidad_humanitaria': impNecesidadHumanitaria,
         'impacto_poblacion': impactoPoblacion.map((e) => e.toJson()).toList(),
         if (necesidadPrimeraRespuesta != null)
           'necesidad_primera_respuesta': necesidadPrimeraRespuesta!.toJson(),
@@ -2035,6 +2241,19 @@ class EdanLocalidad {
         'imp_agropecuario': impAgropecuario,
         'imp_proteccion': impProteccion,
         'imp_necesidades': impNecesidades,
+        'imp_impacto_poblacion': impImpactoPoblacion,
+        'imp_salud_establecimientos': impSaludEstablecimientos,
+        'imp_danos_viales': impDanosViales,
+        'imp_danos_infra_publica': impDanosInfraPublica,
+        'imp_servicios_basicos': impServiciosBasicos,
+        'imp_unidades_educativas': impUnidadesEducativas,
+        'imp_danos_vivienda': impDanosVivienda,
+        'imp_danos_agricultura': impDanosAgricultura,
+        'imp_danos_pecuarios': impDanosPecuarios,
+        'imp_infra_productiva': impInfraProductiva,
+        'imp_primera_respuesta': impPrimeraRespuesta,
+        'imp_necesidad_salud': impNecesidadSalud,
+        'imp_necesidad_humanitaria': impNecesidadHumanitaria,
         'impacto_poblacion': _impactoPoblacionApi(),
         if (necesidadPrimeraRespuesta != null)
           'necesidad_primera_respuesta': necesidadPrimeraRespuesta!.toJson(),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../models/id_seccion_helper.dart';
 import 'edan_boton_sacar_foto.dart';
 
 /// Página 06: Impacto en servicios básicos.
@@ -30,11 +31,16 @@ class _EdanPage06State extends State<EdanPage06> {
     super.initState();
     if (widget.localidad.serviciosBasicos.isEmpty) {
       widget.localidad.serviciosBasicos.addAll([
-        EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
-        EdanServicioBasicoDetalle(tipo: 'agua_potable'),
-        EdanServicioBasicoDetalle(tipo: 'alcantarillado'),
-        EdanServicioBasicoDetalle(tipo: 'gas_domiciliario'),
-        EdanServicioBasicoDetalle(tipo: 'telecomunicaciones'),
+        EdanServicioBasicoDetalle(
+            tipo: 'energia_electrica', idSeccion: nuevoIdServicioBasico()),
+        EdanServicioBasicoDetalle(
+            tipo: 'agua_potable', idSeccion: nuevoIdServicioBasico()),
+        EdanServicioBasicoDetalle(
+            tipo: 'alcantarillado', idSeccion: nuevoIdServicioBasico()),
+        EdanServicioBasicoDetalle(
+            tipo: 'gas_domiciliario', idSeccion: nuevoIdServicioBasico()),
+        EdanServicioBasicoDetalle(
+            tipo: 'telecomunicaciones', idSeccion: nuevoIdServicioBasico()),
       ]);
     }
   }
@@ -200,6 +206,8 @@ class _EdanPage06State extends State<EdanPage06> {
     final fotoLocal = s.fotos.isNotEmpty ? s.fotos.first : null;
     final completo = fotoLocal != null || (s.fotografia?.isNotEmpty ?? false);
     final coordsOk = s.coordenadaLat != 0 || s.coordenadaLon != 0;
+    final double prec = s.fotos.isNotEmpty ? s.fotos.first.precision : 0;
+    final Color color = completo ? AppColors.completed : AppColors.pending;
     final String textoCoords = coordsOk
         ? '${s.coordenadaLat.toStringAsFixed(6)}, ${s.coordenadaLon.toStringAsFixed(6)}'
         : 'Coordenadas: pendiente';
@@ -207,19 +215,15 @@ class _EdanPage06State extends State<EdanPage06> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          textoCoords,
-          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-        ),
-        const SizedBox(height: 8),
-        if (completo)
-          Row(
-            children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            if (completo)
               EdanFotoMiniatura(
                 foto: fotoLocal,
                 fotografia: s.fotografia,
-                width: 48,
-                height: 48,
+                width: 72,
+                height: 72,
                 onTap: () => EdanBotonSacarFoto.verFotoCompleta(
                   context,
                   fotos: s.fotos,
@@ -229,69 +233,112 @@ class _EdanPage06State extends State<EdanPage06> {
                   seccion: 'Servicios básicos',
                   onEliminada: () => setState(() {}),
                 ),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _cambiarFoto(s),
-                icon: const Icon(Icons.photo_camera_outlined,
-                    size: 18, color: Color(0xFF4CAF50)),
-                label: const Text(
-                  'Cambiar',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF4CAF50),
-                    fontWeight: FontWeight.w600,
+              )
+            else
+              GestureDetector(
+                onTap: () => _foto(s),
+                child: Container(
+                  width: 72,
+                  height: 72,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: color.withValues(alpha: 0.6)),
+                  ),
+                  child: Icon(
+                    Icons.photo_camera_outlined,
+                    size: 26,
+                    color: color,
                   ),
                 ),
               ),
-            ],
-          )
-        else
-          _chipRespaldo(
-            coordsOk: coordsOk,
-            onTap: () => _capturarRespaldo(s),
-          ),
+            if (!completo)
+              Positioned(
+                right: -4,
+                top: -4,
+                child: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: AppColors.pending,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 2),
+                  ),
+                  child: const Icon(
+                    Icons.warning_amber_rounded,
+                    size: 12,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _bannerFoto(
+          hasFoto: completo,
+          hayCoords: coordsOk,
+          coords: textoCoords,
+          prec: prec,
+          onTap: () => _foto(s),
+        ),
       ],
     );
   }
 
-  Widget _chipRespaldo({required bool coordsOk, required VoidCallback onTap}) {
-    const color = AppColors.pending;
-    final String texto = coordsOk
-        ? 'Coordenadas OK · falta foto'
-        : 'Falta coordenadas y foto';
+  Widget _bannerFoto({
+    required bool hasFoto,
+    required bool hayCoords,
+    required String coords,
+    required double prec,
+    required VoidCallback onTap,
+  }) {
+    final Color color = hasFoto ? AppColors.completed : AppColors.pending;
+    final String titulo = hasFoto
+        ? 'Foto OK'
+        : 'Sin foto — es importante sacar una foto';
+    final String subtitulo = hasFoto
+        ? (prec > 0 ? '$coords · ±${prec.toStringAsFixed(0)}m' : coords)
+        : 'Tocar para capturar coordenadas y tomar la foto';
     return Material(
       color: color.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: color.withValues(alpha: 0.4)),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
-              const Icon(Icons.warning_amber_rounded,
-                  size: 18, color: AppColors.pending),
+              Icon(
+                hasFoto ? Icons.check_circle_outline : Icons.photo_camera_outlined,
+                size: 20,
+                color: color,
+              ),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  texto,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.pending,
-                  ),
-                ),
-              ),
-              const Text(
-                'Tocar para capturar',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: AppColors.pending,
-                  fontStyle: FontStyle.italic,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titulo,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitulo,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -301,25 +348,13 @@ class _EdanPage06State extends State<EdanPage06> {
     );
   }
 
-  Future<void> _capturarRespaldo(EdanServicioBasicoDetalle s) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _foto(EdanServicioBasicoDetalle s) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: s.fotos,
       latActual: s.coordenadaLat,
       lonActual: s.coordenadaLon,
-      onCoordenadasCapturadas: (lat, lon) {
-        s.coordenadaLat = lat;
-        s.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _cambiarFoto(EdanServicioBasicoDetalle s) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: s.fotos,
+      seccion: 'Servicios básicos',
       onCoordenadasCapturadas: (lat, lon) {
         s.coordenadaLat = lat;
         s.coordenadaLon = lon;

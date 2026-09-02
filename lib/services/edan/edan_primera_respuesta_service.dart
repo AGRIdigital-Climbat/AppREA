@@ -13,7 +13,7 @@ class EdanPrimeraRespuestaService extends EdanSeccionEnvioBase {
   @override
   List<Map<String, dynamic>> filasGuardar(EdanLocalidad l) {
     final pr = l.necesidadPrimeraRespuesta;
-    if (pr == null) return const [];
+    if (pr == null || !pr.tieneDatos) return const [];
     return [pr.toJson()];
   }
 }

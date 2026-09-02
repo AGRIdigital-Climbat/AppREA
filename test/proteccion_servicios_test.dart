@@ -440,7 +440,8 @@ void main() {
 
       expect(json['id_seccion'], 'sb_001_test');
       expect(json['tipo'], 'energia_electrica');
-      expect(json['afectado'], true);
+      expect(json.containsKey('afectado'), isFalse,
+          reason: 'afectado es estado local-only; no va al payload v2');
       expect(json['dano_parcial'], true);
       expect(json['dano_total'], false);
       expect(json['necesidades_inmediatas'], 'postes caídos');
@@ -499,7 +500,8 @@ void main() {
       final foto = EdanFoto(latitud: 0.0, longitud: 0.0);
       final data = item.toFotoData(foto);
 
-      expect(data['afectado'], true);
+      expect(data.containsKey('afectado'), isFalse,
+          reason: 'afectado es estado local-only; no va en toFotoData');
       expect(data['dano_parcial'], true);
       expect(data['dano_total'], false);
     });

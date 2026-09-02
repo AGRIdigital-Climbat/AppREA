@@ -16,7 +16,7 @@ class EdanNecesidadHumanitariaService extends EdanSeccionEnvioBase {
   @override
   List<Map<String, dynamic>> filasGuardar(EdanLocalidad l) {
     final nh = l.necesidadHumanitaria;
-    if (nh == null) return const [];
+    if (nh == null || !nh.tieneDatos) return const [];
     return [nh.toJson()];
   }
 

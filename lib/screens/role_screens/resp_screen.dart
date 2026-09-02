@@ -5,6 +5,8 @@ import '../../models/edan.dart';
 import '../../providers/connectivity_provider.dart';
 import '../../providers/reporte_provider.dart';
 import '../../services/localidad_sync_service.dart';
+import '../../services/sync_debug_config.dart';
+import '../../screens/sync_debug_screen.dart';
 import '../../widgets/perfil_tab.dart';
 import '../../widgets/asistente_ia.dart';
 import 'resp/resp_dashboard_tab.dart';
@@ -147,6 +149,18 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
         title: Text(_getTabTitle()),
         centerTitle: false,
         actions: [
+          if (kSyncDebugMode)
+            IconButton(
+              tooltip: 'Depuración Sync',
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const SyncDebugScreen(),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.bug_report_outlined, size: 20),
+            ),
           _buildSyncButton(),
           Consumer<ConnectivityProvider>(
             builder: (context, connectivity, child) {

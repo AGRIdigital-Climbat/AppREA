@@ -13,7 +13,7 @@ class EdanNecesidadSaludService extends EdanSeccionEnvioBase {
   @override
   List<Map<String, dynamic>> filasGuardar(EdanLocalidad l) {
     final ns = l.necesidadSalud;
-    if (ns == null) return const [];
+    if (ns == null || !ns.tieneDatos) return const [];
     return [ns.toApiJson()];
   }
 }

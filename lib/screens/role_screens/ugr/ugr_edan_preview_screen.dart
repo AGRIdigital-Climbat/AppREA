@@ -150,15 +150,17 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     final seccionesVisibles = <String>{
       '01',
       '13',
-      if (edan.localidades.any((l) => l.impPoblacion)) '03',
-      if (edan.localidades.any((l) => l.impSalud)) '04',
+      if (edan.localidades.any((l) =>
+          l.impImpactoPoblacion || l.impPrimeraRespuesta)) '03',
+      if (edan.localidades.any((l) =>
+          l.impSaludEstablecimientos || l.impNecesidadSalud)) '04',
       if (edan.localidades.any((l) => l.impInfraestructura)) '05',
       if (edan.localidades.any((l) => l.impServicios)) '06',
       if (edan.localidades.any((l) => l.impEducacion)) '07',
       if (edan.localidades.any((l) => l.impVivienda)) '08',
       if (edan.localidades.any((l) => l.impAgropecuario)) '09',
       if (edan.localidades.any((l) => l.impProteccion)) '10',
-      if (edan.localidades.any((l) => l.impNecesidades)) '11',
+      if (edan.localidades.any((l) => l.impNecesidadHumanitaria)) '11',
     };
     final incompletosVisibles = incompletos.keys
         .where((k) => seccionesVisibles.contains(k))
@@ -1009,7 +1011,9 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion03() {
-    final locs = edan.localidades.where((l) => l.impPoblacion).toList();
+    final locs = edan.localidades
+        .where((l) => l.impImpactoPoblacion || l.impPrimeraRespuesta)
+        .toList();
     return _DocSeccion(
       numero: '03',
       titulo: 'Impacto en la población',
@@ -1076,7 +1080,9 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion04() {
-    final locs = edan.localidades.where((l) => l.impSalud).toList();
+    final locs = edan.localidades
+        .where((l) => l.impSaludEstablecimientos || l.impNecesidadSalud)
+        .toList();
     return _DocSeccion(
       numero: '04',
       titulo: 'Impacto en la salud',
@@ -1449,7 +1455,8 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion11() {
-    final locs = edan.localidades.where((l) => l.impNecesidades).toList();
+    final locs =
+        edan.localidades.where((l) => l.impNecesidadHumanitaria).toList();
     return _DocSeccion(
       numero: '11',
       titulo: 'Necesidades humanitarias',

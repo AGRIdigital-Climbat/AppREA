@@ -6,6 +6,8 @@ import '../../models/edan.dart';
 import '../api_service.dart';
 import '../database_helper.dart';
 import '../edan_secciones_registry.dart';
+import '../sync_debug_config.dart';
+import '../sync_debug_collector.dart';
 
 /// Mínimo que cualquier sección EDAN (Modelo A, v20) debe exponer a su servicio
 /// de envío por sección: el descriptor de registro, la lista de filas del modelo
@@ -57,52 +59,90 @@ abstract class EdanSeccionEnvioBase<T> {
 
   // ========== Helper de carrete ==========
 
-  /// Sube las fotos locales de los ítems de esta sección usando `foto/subir`
-  /// (carrete) y guarda el path del servidor en `item.fotografia`.
-  /// [extraFiles] permite encolar varias fotos por ítem; el default sube la
-  /// primera foto de cada ítem que aún no tenga path de servidor.
+  /// Sube las fotos pendientes usando `foto/subir` (carrete).
+  /// Lee de `foto_pendiente WHERE subida=0` (solo las que faltan, con retry).
+  /// Después de subir, actualiza `fotografia` en la tabla de sección y en el
+  /// modelo en memoria.
   Future<void> subirFotosPendientes(EdanLocalidad localidad) async {
+    final pendientes = await _db.leerFotosPendientesSubida();
+    if (pendientes.isEmpty) return;
+
+    // Filtrar solo las fotos de esta sección y esta localidad.
+    final fotosSeccion = pendientes.where((f) {
+      return f['id_local'] == localidad.idLocal &&
+          f['id_seccion'] != null &&
+          (f['id_seccion'] as String).isNotEmpty;
+    }).toList();
+    if (fotosSeccion.isEmpty) return;
+
     final rutas = <String>[];
+    final idsFotos = <String>[];
     final idSecciones = <String>[];
-    final itemsConFoto = <(T, String, double, double)>[];
 
-    for (final item in itemsDe(localidad)) {
-      final fotos = fotosDe(item);
-      final fotografia = fotografiaDe(item);
-      final idSeccion = idSeccionDe(item);
-      if (idSeccion == null || idSeccion.isEmpty) continue;
-      if (fotos.isEmpty) continue;
-      if (fotografia != null && _esPathServer(fotografia)) continue;
+    for (final fotoRow in fotosSeccion) {
+      final ruta = fotoRow['ruta_local_archivo']?.toString();
+      final idSeccion = fotoRow['id_seccion']?.toString();
+      final idFoto = fotoRow['id_foto']?.toString();
+      if (ruta == null || idSeccion == null || idFoto == null) continue;
 
-      final foto = fotos.first;
-      final file = File(foto.ruta);
-      if (!await file.exists()) continue;
+      final file = File(ruta);
+      if (!await file.exists()) {
+        await _db.marcarErrorSubida(idFoto, 'Archivo local no encontrado');
+        continue;
+      }
 
-      rutas.add(foto.ruta);
+      rutas.add(ruta);
+      idsFotos.add(idFoto);
       idSecciones.add(idSeccion);
-      itemsConFoto.add((item, idSeccion, foto.latitud, foto.longitud));
     }
 
     if (rutas.isEmpty) return;
 
     final idEdan = localidad.idServer ?? localidad.idEdan;
-    final paths = await _api.subirFotosCarrete(
-      files: rutas,
-      idSecciones: idSecciones,
-      idLocal: localidad.idLocal,
-      idEdanLocalidad: idEdan,
-    );
-
-    for (final entry in itemsConFoto) {
-      final item = entry.$1;
-      final idSeccion = entry.$2;
-      final path = paths[idSeccion];
-      if (path != null && path.isNotEmpty) {
-        marcarSubida(item, path);
+    try {
+      if (kSyncDebugMode) {
+        SyncDebugCollector.instance.add(SyncApiEntry(
+          fase: SyncDebugCollector.instance.currentPhase,
+          metodo: 'PRE',
+          endpoint: 'Preparar fotos ${descriptor.rutaV2}',
+          requestBody: {'fotos': rutas.length, 'id_secciones': idSecciones},
+          fotos: rutas.map((r) => r.split('/').last).toList(),
+          localidadId: localidad.idLocal,
+          seccion: descriptor.rutaV2,
+        ));
       }
-    }
+      final paths = await _api.subirFotosCarrete(
+        files: rutas,
+        idSecciones: idSecciones,
+        idLocal: localidad.idLocal,
+        idEdanLocalidad: idEdan,
+      );
 
-    await _db.updateLocalidad(localidad);
+      for (var i = 0; i < idsFotos.length; i++) {
+        final idFoto = idsFotos[i];
+        final idSeccion = idSecciones[i];
+        final path = paths[idSeccion];
+        if (path != null && path.isNotEmpty) {
+          // Marcar en foto_pendiente.
+          await _db.marcarFotoSubida(idFoto, path);
+          // Actualizar en la tabla de sección.
+          await _db.marcarFotografiaSeccion(
+            descriptor.tablaSqlite,
+            localidad.idLocal!,
+            idSeccion,
+            path,
+          );
+        } else {
+          await _db.marcarErrorSubida(idFoto, 'Server no devolvió path');
+        }
+      }
+    } catch (e) {
+      // Marcar error en todas las fotos de este batch.
+      for (final idFoto in idsFotos) {
+        await _db.marcarErrorSubida(idFoto, e.toString());
+      }
+      debugPrint('[${descriptor.rutaV2}] Error subirFotos: $e');
+    }
   }
 
   // ========== Helper de envío ==========
@@ -148,6 +188,16 @@ abstract class EdanSeccionEnvioBase<T> {
       debugPrint('[${descriptor.rutaV2}] POST '
           '${descriptor.tipo == EdanSeccionTipo.unoAUno ? '1:1' : '1:N'} '
           '(${payload.length} filas)');
+      if (kSyncDebugMode) {
+        SyncDebugCollector.instance.add(SyncApiEntry(
+          fase: SyncDebugCollector.instance.currentPhase,
+          metodo: 'PRE',
+          endpoint: 'Preparar sección ${descriptor.rutaV2}',
+          requestBody: {'filas': payload.length, 'tipo': descriptor.tipo == EdanSeccionTipo.unoAUno ? '1:1' : '1:N'},
+          localidadId: idLocal,
+          seccion: descriptor.rutaV2,
+        ));
+      }
       await _api.enviarLocalidadSeccionV2(
         idLocalidad: idEdan,
         seccion: descriptor.rutaV2,
@@ -182,6 +232,17 @@ abstract class EdanSeccionEnvioBase<T> {
     json.remove('editado');
     json.remove('marcado_borrar');
     json.remove('insertada_en_server');
+    // Exponer la fecha local de edición como `fecha_modificacion` (LWW).
+    // El servidor aplica GREATEST(fecha_modificacion, :enviada); si no se envía
+    // usa NOW(). Se envía en ISO 8601 UTC (YYYY-MM-DDTHH:MM:SSZ / .sssZ).
+    final fechaLocal = json.remove('fecha_modificacion_local');
+    if (fechaLocal != null && fechaLocal.toString().isNotEmpty) {
+      var iso = fechaLocal.toString();
+      if (!iso.endsWith('Z') && !iso.contains('+') && iso.length > 10) {
+        iso = '${iso}Z';
+      }
+      json['fecha_modificacion'] = iso;
+    }
     // Mantener id_seccion (clave UPSERT)
     return json;
   }
@@ -216,7 +277,7 @@ abstract class EdanSeccionEnvioBase<T> {
     String idLocal,
     List<Map<String, dynamic>> filasEditadas,
   ) async {
-    final fotos = await _db.leerFotosPendientes();
+    final fotos = await _db.leerFotosPendientesSubida();
     final porIdSeccion = <String, Map<String, dynamic>>{};
     for (final foto in fotos) {
       final idSeccion = foto['id_seccion']?.toString();

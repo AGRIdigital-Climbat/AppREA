@@ -67,10 +67,11 @@ class EdanItemCard extends StatelessWidget {
         : tieneCoordenadas;
     final double lat = respaldo?.coordenadaLat ?? 0;
     final double lon = respaldo?.coordenadaLon ?? 0;
+    final double prec =
+        respaldo != null && respaldo!.fotos.isNotEmpty
+            ? respaldo!.fotos.first.precision
+            : 0;
     final bool hayCoords = lat != 0 || lon != 0;
-    final String textoCoords = hayCoords
-        ? '${lat.toStringAsFixed(6)}, ${lon.toStringAsFixed(6)}'
-        : 'Coordenadas: pendiente';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
@@ -92,8 +93,8 @@ class EdanItemCard extends StatelessWidget {
                   EdanFotoMiniatura(
                     foto: fotoLocal,
                     fotografia: respaldo?.fotografia,
-                    width: 48,
-                    height: 48,
+                    width: 72,
+                    height: 72,
                     onTap: () => EdanBotonSacarFoto.verFotoCompleta(
                       context,
                       fotos: respaldo?.fotos ?? const <EdanFoto>[],
@@ -105,15 +106,7 @@ class EdanItemCard extends StatelessWidget {
                     ),
                   )
                 else
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: PaletteScope.of(context).primary.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Icon(icono, size: 22, color: PaletteScope.of(context).primary),
-                  ),
+                  _miniaturaSinFoto(context, coordsOk: coordsOk),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -137,16 +130,6 @@ class EdanItemCard extends StatelessWidget {
                           ),
                         ),
                       ],
-                      if (onRespaldar != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          textoCoords,
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -162,62 +145,6 @@ class EdanItemCard extends StatelessWidget {
                             size: 20, color: Color(0xFF2196F3)),
                       ),
                     ),
-                    if (completo && onCambiarFoto != null) ...[
-                      InkWell(
-                        onTap: onCambiarFoto,
-                        borderRadius: BorderRadius.circular(8),
-                        child: const Padding(
-                          padding: EdgeInsets.all(4),
-                          child: Icon(Icons.photo_camera_outlined,
-                              size: 20, color: Color(0xFF4CAF50)),
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      const Text(
-                        'Cambiar',
-                        style: TextStyle(
-                          fontSize: 9,
-                          color: Color(0xFF4CAF50),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    if (onFoto != null) ...[
-                      InkWell(
-                        onTap: onFoto,
-                        borderRadius: BorderRadius.circular(8),
-                        child: Padding(
-                          padding: const EdgeInsets.all(4),
-                          child: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              const Icon(Icons.photo_camera_outlined,
-                                  size: 20, color: Color(0xFF4CAF50)),
-                              if (fotoCount != null && fotoCount! > 0)
-                                Positioned(
-                                  right: -6,
-                                  top: -6,
-                                  child: Container(
-                                    padding: const EdgeInsets.all(3),
-                                    decoration: const BoxDecoration(
-                                      color: Color(0xFF4CAF50),
-                                      shape: BoxShape.circle,
-                                    ),
-                                    child: Text(
-                                      '$fotoCount',
-                                      style: const TextStyle(
-                                        fontSize: 8,
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
                     InkWell(
                       onTap: onEliminar,
                       borderRadius: BorderRadius.circular(8),
@@ -231,56 +158,145 @@ class EdanItemCard extends StatelessWidget {
                 ),
               ],
             ),
-            if (onRespaldar != null && !completo) ...[
-              const SizedBox(height: 10),
-              _chipRespaldo(coordsOk: coordsOk),
-            ],
+            const SizedBox(height: 10),
+            _bannerFoto(
+              context,
+              hasFoto: completo,
+              hayCoords: hayCoords,
+              lat: lat,
+              lon: lon,
+              prec: prec,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _chipRespaldo({required bool coordsOk}) {
-    final Color color = AppColors.pending;
-    final String texto = coordsOk
-        ? 'Coordenadas OK · falta foto'
-        : 'Falta coordenadas y foto';
+  /// Zona de miniatura cuando NO hay foto: cuadro 72×72 con ícono de cámara y
+  /// badge ámbar que resalta que es importante sacar una foto.
+  Widget _miniaturaSinFoto(BuildContext context, {required bool coordsOk}) {
+    return GestureDetector(
+      onTap: onRespaldar,
+      child: Stack(
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: AppColors.pending.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppColors.pending.withValues(alpha: 0.6),
+              ),
+            ),
+            child: Icon(
+              Icons.photo_camera_outlined,
+              size: 26,
+              color: coordsOk ? AppColors.completed : AppColors.pending,
+            ),
+          ),
+          // Badge ámbar "sin foto"
+          Positioned(
+            right: -4,
+            top: -4,
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: AppColors.pending,
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
+              ),
+              child: const Icon(
+                Icons.warning_amber_rounded,
+                size: 12,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Banner amplio de estado de foto (siempre visible).
+  /// - Sin foto: ámbar, invita a sacarla (tap → onRespaldar).
+  /// - Con foto: verde, muestra coords/precisión (tap → onCambiarFoto).
+  Widget _bannerFoto(
+    BuildContext context, {
+    required bool hasFoto,
+    required bool hayCoords,
+    required double lat,
+    required double lon,
+    required double prec,
+  }) {
+    if (hasFoto) {
+      final String coords = hayCoords
+          ? '${lat.toStringAsFixed(6)}, ${lon.toStringAsFixed(6)}'
+          : 'Coordenadas: pendiente';
+      return _banner(
+        color: AppColors.completed,
+        icono: Icons.check_circle_outline,
+        titulo: 'Foto OK',
+        subtitulo: prec > 0 ? '$coords · ±${prec.toStringAsFixed(0)}m' : coords,
+        onTap: onCambiarFoto,
+      );
+    }
+    return _banner(
+      color: AppColors.pending,
+      icono: Icons.photo_camera_outlined,
+      titulo: 'Sin foto — es importante sacar una foto',
+      subtitulo: 'Tocar para capturar coordenadas y tomar la foto',
+      onTap: onRespaldar,
+    );
+  }
+
+  Widget _banner({
+    required Color color,
+    required IconData icono,
+    required String titulo,
+    required String subtitulo,
+    required VoidCallback? onTap,
+  }) {
     return Material(
       color: color.withValues(alpha: 0.08),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
         side: BorderSide(color: color.withValues(alpha: 0.4)),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(8),
-        onTap: onRespaldar,
+        borderRadius: BorderRadius.circular(10),
+        onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             children: [
-              const Icon(
-                Icons.warning_amber_rounded,
-                size: 18,
-                color: AppColors.pending,
-              ),
+              Icon(icono, size: 20, color: color),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  texto,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.pending,
-                  ),
-                ),
-              ),
-              const Text(
-                'Tocar para capturar',
-                style: TextStyle(
-                  fontSize: 10,
-                  color: AppColors.pending,
-                  fontStyle: FontStyle.italic,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      titulo,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: color,
+                      ),
+                    ),
+                    if (subtitulo.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitulo,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textSecondary,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ],

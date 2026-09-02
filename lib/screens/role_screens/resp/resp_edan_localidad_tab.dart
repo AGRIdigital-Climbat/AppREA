@@ -533,6 +533,8 @@ class _RespLocalidadCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
+              _buildSeccionBadges(context),
+              const SizedBox(height: 10),
               if (esPendienteEnvio)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -602,6 +604,50 @@ class _RespLocalidadCard extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSeccionBadges(BuildContext context) {
+    final l = localidad;
+    final labels = <String>[
+      if (l.impImpactoPoblacion) 'Población',
+      if (l.impSaludEstablecimientos || l.impNecesidadSalud) 'Salud',
+      if (l.impServiciosBasicos) 'Servicios',
+      if (l.impDanosViales || l.impDanosInfraPublica) 'Vías y puentes',
+      if (l.impUnidadesEducativas) 'Educación',
+      if (l.impDanosVivienda) 'Vivienda',
+      if (l.impDanosAgricultura || l.impDanosPecuarios || l.impInfraProductiva)
+        'Agropecuario',
+      if (l.impProteccion) 'Protección',
+      if (l.impNecesidadHumanitaria) 'Necesidades',
+    ];
+    if (labels.isEmpty) return const SizedBox.shrink();
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: labels
+          .map((t) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: PaletteScope.of(context)
+                      .primary
+                      .withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                      color: PaletteScope.of(context)
+                          .primary
+                          .withValues(alpha: 0.25)),
+                ),
+                child: Text(
+                  t,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ))
+          .toList(),
     );
   }
 

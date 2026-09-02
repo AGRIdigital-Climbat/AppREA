@@ -70,12 +70,12 @@ class _EdanPage04State extends State<EdanPage04> {
   }
 
   void _agregar() {
-    final est = EdanEstablecimientoSalud(idSeccion: generarIdSeccion('es'));
-    setState(() => widget.localidad.establecimientosSalud.add(est));
-    _editar(est);
+    final est = EdanEstablecimientoSalud(idSeccion: nuevoIdSaludEstablecimiento());
+    _editar(est, esNuevo: true);
   }
 
-  Future<void> _editar(EdanEstablecimientoSalud est) async {
+  Future<void> _editar(EdanEstablecimientoSalud est,
+      {bool esNuevo = false}) async {
     _nombre.text = est.nombreEstablecimiento;
     _comunidad.text = est.comunidad.isNotEmpty
         ? est.comunidad
@@ -91,7 +91,7 @@ class _EdanPage04State extends State<EdanPage04> {
         est.enfermerasAfectados > 0 ||
         est.otrosAfectados > 0;
 
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -158,17 +158,17 @@ class _EdanPage04State extends State<EdanPage04> {
           ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(ctx),
+                onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
             ElevatedButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Guardar'),
             ),
           ],
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
 
     setState(() {
       est.nombreEstablecimiento = _nombre.text;
@@ -180,6 +180,7 @@ class _EdanPage04State extends State<EdanPage04> {
       est.enfermerasAfectados =
           _personal ? int.tryParse(_enfermeras.text) ?? 0 : 0;
       est.otrosAfectados = _personal ? int.tryParse(_otros.text) ?? 0 : 0;
+      if (esNuevo) widget.localidad.establecimientosSalud.add(est);
     });
   }
 
@@ -193,25 +194,13 @@ class _EdanPage04State extends State<EdanPage04> {
     setState(() => widget.localidad.establecimientosSalud.remove(est));
   }
 
-  Future<void> _capturarRespaldo(EdanEstablecimientoSalud est) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _foto(EdanEstablecimientoSalud est) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: est.fotos,
       latActual: est.coordenadaLat,
       lonActual: est.coordenadaLon,
-      onCoordenadasCapturadas: (lat, lon) {
-        est.coordenadaLat = lat;
-        est.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _cambiarFoto(EdanEstablecimientoSalud est) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: est.fotos,
+      seccion: 'Salud',
       onCoordenadasCapturadas: (lat, lon) {
         est.coordenadaLat = lat;
         est.coordenadaLon = lon;
@@ -285,8 +274,8 @@ class _EdanPage04State extends State<EdanPage04> {
               icono: Icons.local_hospital_outlined,
               onEditar: () => _editar(e),
               onEliminar: () => _eliminar(e),
-              onRespaldar: () => _capturarRespaldo(e),
-              onCambiarFoto: () => _cambiarFoto(e),
+              onRespaldar: () => _foto(e),
+              onCambiarFoto: () => _foto(e),
               respaldo: e,
               seccionRespaldo: 'Salud',
               onFotoEliminada: () => setState(() {}),

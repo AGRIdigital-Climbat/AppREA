@@ -62,13 +62,17 @@ class EdanLocalidadesEnvioV2Service {
     return ok;
   }
 
-  /// Persiste a sus tablas (Modelo A) las secciones indicadas por [rutas],
-  /// marcándolas `editado=1` (candidatas a envío). Se usa al guardar en el
-  /// wizard: solo se marcan las secciones tocadas por la página actual.
+  /// Persiste a sus tablas (Modelo A) las secciones indicadas por [rutas].
+  ///
+  /// - [marcarEditado=true] (default): marca `editado=1` (candidatas a envío).
+  ///   Se usa al guardar en el wizard cuando el usuario hizo cambios.
+  /// - [marcarEditado=false]: marca `editado=0` y `insertada_en_server=1`.
+  ///   Se usa tras pull del servidor (datos nuevos, sin cambios locales).
   Future<void> guardarSecciones(
     EdanLocalidad localidad,
-    List<String> rutas,
-  ) async {
+    List<String> rutas, {
+    bool marcarEditado = true,
+  }) async {
     final idLocal = localidad.idLocal;
     if (idLocal == null || idLocal.isEmpty) return;
     for (final ruta in rutas) {
@@ -77,11 +81,123 @@ class EdanLocalidadesEnvioV2Service {
       if (desc == null || servicio == null) continue;
       try {
         final filas = servicio.filasGuardar(localidad);
-        await _db.guardarFilasSeccion(desc.tablaSqlite, idLocal, filas);
+        if (filas.isEmpty && desc.tipo == EdanSeccionTipo.unoAUno) {
+          // "Vaciado" de 1:1: si existía fila sincronizada, coordinarla para
+          // DELETE (el servidor es la ley; una 1:1 vacía no persiste fila).
+          await _marcarVaciado11(desc.tablaSqlite, idLocal);
+          debugPrint('[EnvioV2] guardarSecciones $ruta: vaciada (DELETE)');
+          continue;
+        }
+        await _db.guardarFilasSeccion(
+          desc.tablaSqlite,
+          idLocal,
+          filas,
+          marcarEditado: marcarEditado,
+        );
         debugPrint('[EnvioV2] guardarSecciones $ruta: ${filas.length} filas');
       } catch (e) {
         debugPrint('[EnvioV2] Error guardarSecciones $ruta: $e');
       }
+    }
+    if (marcarEditado) {
+      await _db.marcarCabeceraEditada(idLocal);
+    }
+  }
+
+  /// Coordina el "vaciado" de una sección 1:1: las filas existentes en SQLite
+  /// de esa sección que ya estén insertadas en el servidor se marcan para
+  /// DELETE (`marcado_borrar=1`); las que nunca se insertaron se eliminan
+  /// localmente. Así el servidor deja de tener la fila y su flag cae a false.
+  ///
+  /// NOTA: solo se llama cuando `filas.isEmpty` (el usuario vació la sección).
+  /// Con `?modo=comprimido`, si la sección vino del servidor con datos,
+  /// `filas` no estará vacía y este método NO se ejecuta.
+  Future<void> _marcarVaciado11(String tabla, String idLocal) async {
+    final filasExistentes = await _db.leerFilasSeccion(tabla, idLocal);
+    for (final fila in filasExistentes) {
+      final idSeccion = fila['id_seccion']?.toString();
+      if (idSeccion == null || idSeccion.isEmpty) continue;
+      final insertada = fila['insertada_en_server'] == 1;
+      if (insertada) {
+        await _db.marcarFilaSeccionBorrada(tabla, idSeccion);
+      } else {
+        await _db.eliminarFilaSeccion(tabla, idSeccion);
+      }
+    }
+  }
+
+  /// Puebla las tablas de sección (Modelo A) desde el `datos_json` de una
+  /// localidad recién descargada del servidor, con `editado=0` e
+  /// `insertada_en_server=1` (datos nuevos del server, sin cambios locales).
+  ///
+  /// **Primero borra** todas las filas viejas de las 14 tablas de sección
+  /// de esa localidad, para que solo queden las que el servidor devolvió
+  /// con `?modo=comprimido` (las que tienen datos reales).
+  ///
+  /// Se llama tras un PULL exitoso (sincronizarCentral o
+  /// recargarLocalidadesUsuario).
+  Future<void> popularSeccionesDesdeServer(EdanLocalidad localidad) async {
+    final idLocal = localidad.idLocal;
+    if (idLocal == null || idLocal.isEmpty) return;
+
+    // 1. Borrar todo lo viejo de las 14 tablas de sección.
+    await _db.limpiarSeccionesLocalidad(idLocal);
+
+    // 2. Escribir solo las secciones que vienen del server (las que tienen datos).
+    for (final ruta in EdanSeccionesRegistry.rutasV2Todas()) {
+      final desc = EdanSeccionesRegistry.porRuta(ruta);
+      final servicio = EdanSeccionesEnvioFactory.servicioDeRuta(ruta);
+      if (desc == null || servicio == null) continue;
+      try {
+        final filas = servicio.filasGuardar(localidad);
+        if (filas.isEmpty) continue;
+        await _db.guardarFilasSeccion(
+          desc.tablaSqlite,
+          idLocal,
+          filas,
+          marcarEditado: false,
+        );
+        // 3. Registrar fotos del server en foto_pendiente (para descarga offline).
+        if (desc.usaFoto) {
+          await _registrarFotosServer(localidad, filas);
+        }
+        debugPrint('[EnvioV2] popularSeccionesDesdeServer $ruta: ${filas.length} filas (editado=0)');
+      } catch (e) {
+        debugPrint('[EnvioV2] Error popularSeccionesDesdeServer $ruta: $e');
+      }
+    }
+    await _db.sincronizarFlagEditadoCabecera(idLocal);
+  }
+
+  /// Registra en foto_pendiente las fotos que vienen del server (path /uploads/)
+  /// para que sean descargadas por descargarFotosEdan().
+  Future<void> _registrarFotosServer(
+    EdanLocalidad localidad,
+    List<Map<String, dynamic>> filas,
+  ) async {
+    final idLocal = localidad.idLocal;
+    if (idLocal == null) return;
+    for (final fila in filas) {
+      final fotografia = fila['fotografia']?.toString();
+      final idSeccion = fila['id_seccion']?.toString();
+      if (fotografia == null || fotografia.isEmpty) continue;
+      if (!fotografia.startsWith('/uploads/')) continue;
+      if (idSeccion == null || idSeccion.isEmpty) continue;
+      // Verificar si ya existe en foto_pendiente con el mismo path.
+      final existente = await _db.buscarFotoPorSeccion(idSeccion);
+      if (existente != null &&
+          existente['path_servidor'].toString() == fotografia) {
+        continue;
+      }
+      await _db.insertarFotoPendiente(
+        idLocal: idLocal,
+        idEdanLocalidad: localidad.idServer ?? localidad.idEdan,
+        idSeccion: idSeccion,
+        rutaLocalArchivo: '',
+        lat: 0,
+        lon: 0,
+        pathServidor: fotografia,
+      );
     }
   }
 

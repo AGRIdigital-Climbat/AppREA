@@ -24,7 +24,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 20,
+      version: 24,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -288,6 +288,7 @@ class DatabaseHelper {
         sincronizado INTEGER DEFAULT 0,
         pendiente_eliminacion INTEGER DEFAULT 0,
         pendiente_actualizacion INTEGER DEFAULT 0,
+        editado INTEGER DEFAULT 0,
         fecha_creacion TEXT NOT NULL,
         fecha_modificacion TEXT,
         intentos_sync INTEGER DEFAULT 0,
@@ -304,6 +305,13 @@ class DatabaseHelper {
         PRIMARY KEY (id_local, seccion)
       )
     ''');
+
+    // Instalación limpia: tablas de sección RESP con el esquema v21 (alineado
+    // al backend v2). Las tablas base (UGR) ya se crearon arriba.
+    // Primero creamos las 14 tablas base (v20) y luego recreamos las 5 que
+    // requieren el esquema v21 corregido.
+    await _crearTablasSeccionV20(db);
+    await _recrearTablasSeccionV21(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -567,6 +575,53 @@ class DatabaseHelper {
     if (oldVersion < 20) {
       await _crearTablasSeccionV20(db);
     }
+    // v21: alinear las tablas de sección RESP con el schema v2 del backend.
+    // Recrea desde cero las 5 tablas cuyas columnas no coinciden con las claves
+    // que el modelo emite (causa de `DatabaseException: no column named` en
+    // guardarFilasSeccion). Se conservan las columnas de edición/sync
+    // (`editado`, `marcado_borrar`, `insertada_en_server`). Rod 6 UGR intacto.
+    if (oldVersion < 21) {
+      await _recrearTablasSeccionV21(db);
+    }
+    // v22: extender foto_pendiente con tracking de descarga y retry.
+    if (oldVersion < 22) {
+      await _migrarFotoPendienteV22(db);
+    }
+    // v23: columna editado en localidades_offline como flag único de pendiente.
+    if (oldVersion < 23) {
+      await db.execute('ALTER TABLE localidades_offline ADD COLUMN editado INTEGER NOT NULL DEFAULT 0');
+      // Backfill: sincronizado=0 o pendiente_actualizacion=1 → editado=1.
+      await db.execute('UPDATE localidades_offline SET editado = 1 WHERE sincronizado = 0');
+      await db.execute('UPDATE localidades_offline SET editado = 1 WHERE pendiente_actualizacion = 1');
+      // Backfill desde secciones: si alguna tabla tiene editado=1 para esa localidad.
+      for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+        await db.execute(
+          'UPDATE localidades_offline SET editado = 1 '
+          'WHERE id_local IN (SELECT DISTINCT id_local FROM $tabla WHERE editado = 1)',
+        );
+      }
+    }
+    // v24: fecha_modificacion_local en cada tabla de sección (LWW por fila).
+    // La app compara fecha a fecha con el servidor en el pull y envía la fecha
+    // en cada POST de sección (GREATEST en el server). Columna opcional para
+    // instalaciones nuevas (ya existe en CREATE TABLE) y backfill en las viejas.
+    if (oldVersion < 24) {
+      for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+        // Idempotente: solo agrega la columna si no existe aún (una versión
+        // vieja que se migra en cascada ya la creó en su CREATE TABLE).
+        final columnas = await db.rawQuery('PRAGMA table_info($tabla)');
+        final nombres = columnas.map((c) => c['name'] as String).toSet();
+        if (!nombres.contains('fecha_modificacion_local')) {
+          await db.execute(
+            'ALTER TABLE $tabla ADD COLUMN fecha_modificacion_local TEXT',
+          );
+        }
+        await db.execute(
+          'UPDATE $tabla SET fecha_modificacion_local = datetime(\'now\') '
+          'WHERE fecha_modificacion_local IS NULL',
+        );
+      }
+    }
   }
 
   /// Crea las 14 tablas de sección v2 (Modelo A) + carrete de fotos.
@@ -589,7 +644,8 @@ class DatabaseHelper {
         observaciones TEXT,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -610,7 +666,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -631,7 +688,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -650,7 +708,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -668,7 +727,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -690,7 +750,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -708,7 +769,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -727,7 +789,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -747,7 +810,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -766,7 +830,8 @@ class DatabaseHelper {
         coordenada_lon REAL,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     // ===== Secciones 1:N sin foto =====
@@ -783,7 +848,8 @@ class DatabaseHelper {
         observaciones TEXT,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     // ===== Secciones 1:1 (objeto único por localidad) =====
@@ -798,7 +864,8 @@ class DatabaseHelper {
         observaciones TEXT,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -811,7 +878,8 @@ class DatabaseHelper {
         observaciones TEXT,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     await db.execute('''
@@ -839,7 +907,8 @@ class DatabaseHelper {
         obs_banos TEXT,
         editado INTEGER DEFAULT 0,
         marcado_borrar INTEGER DEFAULT 0,
-        insertada_en_server INTEGER DEFAULT 0
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
       )
     ''');
     // ===== Carrete de fotos (desacopla binarios del guardado de sección) =====
@@ -853,9 +922,161 @@ class DatabaseHelper {
         coordenada_lat REAL,
         coordenada_lon REAL,
         subida INTEGER DEFAULT 0,
-        path_servidor TEXT
+        path_servidor TEXT,
+        descargada INTEGER DEFAULT 0,
+        ruta_descarga TEXT,
+        intentos_subida INTEGER DEFAULT 0,
+        intentos_descarga INTEGER DEFAULT 0,
+        ultimo_error TEXT
       )
     ''');
+  }
+
+  /// Migración v21: recrea desde cero las tablas de sección RESP cuyas columnas
+  /// no coincidían con las claves emitidas por el modelo (`toApiJson`), causa de
+  /// `DatabaseException: no column named ...` en `guardarFilasSeccion`.
+  /// Columnas alineadas al schema v2 del backend (schemas.py / OpenAPI v2):
+  ///   - seccion_salud_establecimientos : + enfermeras_afectadas, otros_afectados
+  ///   - seccion_servicios_basicos      : - afectado (campo local, ya no se emite)
+  ///   - seccion_unidades_educativas    : docentes->profesores, + administrativos,
+  ///                                      - nivel_educativo (schema v2 no lo usa)
+  ///   - seccion_proteccion             : + total, reposicion_documentos, - grupo_vulnerable
+  ///   - seccion_necesidad_salud        : - botiquines (campo local, ya no se emite)
+  /// Se conservan las columnas de edición/sync (`editado`, `marcado_borrar`,
+  /// `insertada_en_server`) para saber qué filas reenviar al editar.
+  /// NOTA: recrear pierde las filas locales pendientes de envío de estas 5 tablas.
+  /// Rol 6 UGR (localidades_offline/datos_json/localidad_seccion_sync) intacto.
+  Future<void> _recrearTablasSeccionV21(Database db) async {
+    await db.execute('DROP TABLE IF EXISTS seccion_salud_establecimientos');
+    await db.execute('''
+      CREATE TABLE seccion_salud_establecimientos (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        nombre_establecimiento TEXT,
+        comunidad TEXT,
+        nivel_atencion TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        medicos_afectados INTEGER,
+        enfermeras_afectadas INTEGER,
+        otros_afectados INTEGER,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
+      )
+    ''');
+
+    await db.execute('DROP TABLE IF EXISTS seccion_servicios_basicos');
+    await db.execute('''
+      CREATE TABLE seccion_servicios_basicos (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        tipo TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        necesidades_inmediatas TEXT,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
+      )
+    ''');
+
+    await db.execute('DROP TABLE IF EXISTS seccion_unidades_educativas');
+    await db.execute('''
+      CREATE TABLE seccion_unidades_educativas (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        nombre_establecimiento TEXT,
+        comunidad TEXT,
+        dano_parcial INTEGER,
+        dano_total INTEGER,
+        suspension_clases INTEGER,
+        perdida_material INTEGER,
+        funciona_albergue INTEGER,
+        estudiantes INTEGER,
+        profesores INTEGER,
+        administrativos INTEGER,
+        observaciones TEXT,
+        fotografia TEXT,
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
+      )
+    ''');
+
+    await db.execute('DROP TABLE IF EXISTS seccion_proteccion');
+    await db.execute('''
+      CREATE TABLE seccion_proteccion (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        id_grupo_vulnerable_catalogo INTEGER,
+        mujeres INTEGER,
+        hombres INTEGER,
+        total INTEGER,
+        apoyo_psicologico INTEGER,
+        reposicion_documentos INTEGER,
+        observaciones TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
+      )
+    ''');
+
+    await db.execute('DROP TABLE IF EXISTS seccion_necesidad_salud');
+    await db.execute('''
+      CREATE TABLE seccion_necesidad_salud (
+        id_seccion TEXT PRIMARY KEY,
+        id_local TEXT,
+        id_edan_localidad INTEGER,
+        numero_personas INTEGER,
+        otras_necesidades TEXT,
+        observaciones TEXT,
+        editado INTEGER DEFAULT 0,
+        marcado_borrar INTEGER DEFAULT 0,
+        insertada_en_server INTEGER DEFAULT 0,
+        fecha_modificacion_local TEXT
+      )
+    ''');
+  }
+
+  /// Migración v22: agrega columnas de tracking de descarga y retry a
+  /// `foto_pendiente`. Las tablas existentes solo tienen `subida` y
+  /// `path_servidor`. Se agregan: `descargada`, `ruta_descarga`,
+  /// `intentos_subida`, `intentos_descarga`, `ultimo_error`.
+  Future<void> _migrarFotoPendienteV22(Database db) async {
+    final columnas = await db.rawQuery('PRAGMA table_info(foto_pendiente)');
+    final existentes = columnas.map((c) => c['name'] as String).toSet();
+    if (!existentes.contains('descargada')) {
+      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN descargada INTEGER DEFAULT 0');
+    }
+    if (!existentes.contains('ruta_descarga')) {
+      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN ruta_descarga TEXT');
+    }
+    if (!existentes.contains('intentos_subida')) {
+      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN intentos_subida INTEGER DEFAULT 0');
+    }
+    if (!existentes.contains('intentos_descarga')) {
+      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN intentos_descarga INTEGER DEFAULT 0');
+    }
+    if (!existentes.contains('ultimo_error')) {
+      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN ultimo_error TEXT');
+    }
   }
 
   Future<void> _onOpen(Database db) async {
@@ -1718,6 +1939,7 @@ class DatabaseHelper {
     loc.sincronizado = _toBool(row['sincronizado']);
     loc.pendienteEliminacion = _toBool(row['pendiente_eliminacion']);
     loc.pendienteActualizacion = _toBool(row['pendiente_actualizacion']);
+    loc.editado = _toBool(row['editado']);
     if (row['fecha_modificacion'] != null) {
       loc.fechaModificacion = row['fecha_modificacion'] as String;
     }
@@ -1753,6 +1975,7 @@ class DatabaseHelper {
     final db = await database;
     final now = DateTime.now().toIso8601String();
     localidad.fechaModificacion = now;
+    localidad.recalcularFlagsImpacto();
     final row = {
       'id_local': localidad.idLocal ?? _generateUuid(),
       'id_server': localidad.idServer,
@@ -1789,6 +2012,7 @@ class DatabaseHelper {
       'sincronizado': 0,
       'pendiente_eliminacion': 0,
       'pendiente_actualizacion': localidad.pendienteActualizacion ? 1 : 0,
+      'editado': 1,
       'fecha_creacion': now,
       'fecha_modificacion': now,
       'intentos_sync': 0,
@@ -1849,7 +2073,7 @@ class DatabaseHelper {
     final db = await database;
     final result = await db.rawQuery(
       'SELECT COUNT(*) AS total FROM localidades_offline '
-      'WHERE (sincronizado = 0 AND pendiente_eliminacion = 0) '
+      'WHERE (editado = 1 AND pendiente_eliminacion = 0) '
       'OR pendiente_eliminacion = 1',
     );
     if (result.isEmpty) return 0;
@@ -1888,6 +2112,7 @@ class DatabaseHelper {
   }) {
     final fecha = fechaModificacion ?? DateTime.now().toIso8601String();
     l.fechaModificacion = fecha;
+    l.recalcularFlagsImpacto();
     return {
       'id_server': l.idServer,
       'id_edan': l.idEdan,
@@ -1924,6 +2149,7 @@ class DatabaseHelper {
           (pendienteActualizacion ?? l.pendienteActualizacion) ? 1 : 0,
       'pendiente_eliminacion':
           (pendienteEliminacion ?? l.pendienteEliminacion) ? 1 : 0,
+      'editado': l.editado ? 1 : 0,
       'fecha_modificacion': fecha,
     };
   }
@@ -1946,6 +2172,7 @@ class DatabaseHelper {
         'sincronizado': 1,
         'pendiente_eliminacion': 0,
         'pendiente_actualizacion': 0,
+        'editado': 0,
         'intentos_sync': 0,
         'ultimo_error': null,
         'fecha_modificacion': DateTime.now().toIso8601String(),
@@ -1970,10 +2197,45 @@ class DatabaseHelper {
         'sincronizado': 1,
         'pendiente_eliminacion': 0,
         'pendiente_actualizacion': 0,
+        'editado': 0,
         'intentos_sync': 0,
         'ultimo_error': null,
         'fecha_modificacion': fechaModificacion,
       },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  /// Marca la cabecera de una localidad con editado=1.
+  Future<void> marcarCabeceraEditada(String idLocal) async {
+    final db = await database;
+    await db.update(
+      'localidades_offline',
+      {'editado': 1},
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  /// Recalcula el flag editado de la cabecera: 1 si alguna tabla de sección
+  /// tiene al menos una fila con editado=1 para [idLocal]; 0 en caso contrario.
+  Future<void> sincronizarFlagEditadoCabecera(String idLocal) async {
+    final db = await database;
+    var editado = 0;
+    for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+      final maps = await db.rawQuery(
+        'SELECT 1 FROM $tabla WHERE id_local = ? AND editado = 1 LIMIT 1',
+        [idLocal],
+      );
+      if (maps.isNotEmpty) {
+        editado = 1;
+        break;
+      }
+    }
+    await db.update(
+      'localidades_offline',
+      {'editado': editado},
       where: 'id_local = ?',
       whereArgs: [idLocal],
     );
@@ -2044,6 +2306,19 @@ class DatabaseHelper {
     );
   }
 
+  /// Limpia la marca `modificada=1` solo para las rutas específicas enviadas.
+  Future<void> clearSeccionesModificadas(String idLocal, Set<String> rutas) async {
+    final db = await database;
+    for (final ruta in rutas) {
+      await db.update(
+        'localidad_seccion_sync',
+        {'modificada': 0},
+        where: 'id_local = ? AND seccion = ?',
+        whereArgs: [idLocal, ruta],
+      );
+    }
+  }
+
   /// Secciones marcadas como modificadas localmente (candidatas a subir).
   Future<List<String>> getSeccionesModificadas(String idLocal) async {
     final db = await database;
@@ -2092,6 +2367,7 @@ class DatabaseHelper {
     row['id_server'] = idServer ?? localidad.idServer;
     row['pendiente_actualizacion'] = 0;
     row['pendiente_eliminacion'] = 0;
+    row['editado'] = 0;
     final result = await db.update(
       'localidades_offline',
       row,
@@ -2176,28 +2452,55 @@ class DatabaseHelper {
 
   // ========== Tablas de sección (Modelo A v20) ==========
 
-  /// Guarda (upsert por `id_seccion`) las filas de una sección en su tabla,
-  /// marcándolas `editado=1` (candidatas a envío). Si [idEdanLocalidad] no es
-  /// null, lo propaga a las filas recién escritas (tras subir la cabecera).
+  /// Guarda (upsert por `id_seccion`) las filas de una sección en su tabla.
+  ///
+  /// - [marcarEditado=true] (default): marca `editado=1` → candidata a envío
+  ///   (usado por el wizard al guardar cambios del usuario).
+  /// - [marcarEditado=false]: marca `editado=0` → sincronizada con servidor
+  ///   (usado tras pull con `?modo=comprimido`).
+  ///
+  /// Si [idEdanLocalidad] no es null, lo propaga a las filas recién escritas.
   Future<void> guardarFilasSeccion(
     String tabla,
     String idLocal,
     List<Map<String, dynamic>> filas, {
     int? idEdanLocalidad,
+    bool marcarEditado = true,
   }) async {
     final db = await database;
     final batch = db.batch();
+    final editadoValor = marcarEditado ? 1 : 0;
     for (final fila in filas) {
       final idSeccion = fila['id_seccion']?.toString();
       if (idSeccion == null || idSeccion.isEmpty) continue;
       final row = Map<String, dynamic>.from(fila);
       row['id_local'] = idLocal;
       if (idEdanLocalidad != null) row['id_edan_localidad'] = idEdanLocalidad;
-      row['editado'] = 1;
-      // No sobrescribir marcado_borrar ni insertada_en_server existentes.
+      row['editado'] = editadoValor;
+      // Determinar insertada_en_server:
+      // - marcarEditado=false (datos del servidor tras pull): ya existen,
+      //   marcar siempre insertada_en_server=1.
+      // - marcarEditado=true (cambios locales): mantener la bandera si la fila
+      //   ya estaba sincronizada en el server, o 0 si es nueva (INSERT).
+      if (!marcarEditado) {
+        row['insertada_en_server'] = 1;
+      } else {
+        final existente = await db.query(
+          tabla,
+          columns: ['insertada_en_server'],
+          where: 'id_seccion = ?',
+          whereArgs: [idSeccion],
+          limit: 1,
+        );
+        row['insertada_en_server'] = (existente.isNotEmpty &&
+                existente.first['insertada_en_server'] == 1)
+            ? 1
+            : 0;
+      }
       row.remove('marcado_borrar');
-      row.remove('insertada_en_server');
       row.remove('_fecha_modificacion');
+      row['fecha_modificacion_local'] =
+          DateTime.now().toUtc().toIso8601String();
       batch.insert(
         tabla,
         row,
@@ -2222,6 +2525,56 @@ class DatabaseHelper {
       whereArgs: [idLocal],
     );
     return maps;
+  }
+
+  /// Lee TODAS las filas de una sección para una localidad (sin filtrar por
+  /// editado/borrado). Se usa para detectar el "vaciado" de una sección 1:1:
+  /// si quedó vacía pero existía una fila sincronizada, hay que marcarla
+  /// para DELETE en el próximo envío.
+  Future<List<Map<String, dynamic>>> leerFilasSeccion(
+    String tabla,
+    String idLocal,
+  ) async {
+    final db = await database;
+    return db.query(
+      tabla,
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  /// Elimina TODAS las filas de las 14 tablas de sección para una localidad.
+  /// Se llama antes de `popularSeccionesDesdeServer` tras un PULL con
+  /// `?modo=comprimido` para que solo queden en SQLite las secciones que
+  /// el servidor devolvió (las que tienen datos reales).
+  Future<void> limpiarSeccionesLocalidad(String idLocal) async {
+    final db = await database;
+    final batch = db.batch();
+    for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+      batch.delete(
+        tabla,
+        where: 'id_local = ?',
+        whereArgs: [idLocal],
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  /// Actualiza el campo `fotografia` de una fila de sección (para guardar el
+  /// path del server después de subir la foto).
+  Future<void> marcarFotografiaSeccion(
+    String tabla,
+    String idLocal,
+    String idSeccion,
+    String fotografia,
+  ) async {
+    final db = await database;
+    await db.update(
+      tabla,
+      {'fotografia': fotografia},
+      where: 'id_local = ? AND id_seccion = ?',
+      whereArgs: [idLocal, idSeccion],
+    );
   }
 
   /// Marca una fila de sección como sincronizada (editado=0, insertada en
@@ -2335,6 +2688,8 @@ class DatabaseHelper {
 
   /// Registra una foto local pendiente de subir. Si [idFoto] ya existe lo
   /// reemplaza; de lo contrario lo genera.
+  /// Si [pathServidor] se provee, la foto viene del server (descargada=0,
+  /// path_servidor=pathServidor) para que sea descargada offline.
   Future<String> insertarFotoPendiente({
     String? idFoto,
     String? idLocal,
@@ -2343,6 +2698,7 @@ class DatabaseHelper {
     required String rutaLocalArchivo,
     double? lat,
     double? lon,
+    String? pathServidor,
   }) async {
     final db = await database;
     final idFotoFinal = idFoto ?? generarIdLocal();
@@ -2356,17 +2712,39 @@ class DatabaseHelper {
         'ruta_local_archivo': rutaLocalArchivo,
         'coordenada_lat': lat,
         'coordenada_lon': lon,
-        'subida': 0,
+        'subida': pathServidor != null ? 0 : 0,
+        'descargada': pathServidor != null ? 0 : 1,
+        'path_servidor': pathServidor,
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
     return idFotoFinal;
   }
 
-  /// Fotos pendientes de subir (cualquiera de las localidades dadas o todas).
-  Future<List<Map<String, dynamic>>> leerFotosPendientes() async {
+  /// Fotos pendientes de subir (con retry: intentos < [maxIntentos]).
+  Future<List<Map<String, dynamic>>> leerFotosPendientesSubida({
+    int maxIntentos = 3,
+  }) async {
     final db = await database;
-    return await db.query('foto_pendiente', where: 'subida = 0');
+    return await db.query(
+      'foto_pendiente',
+      where: 'subida = 0 AND intentos_subida < ?',
+      whereArgs: [maxIntentos],
+    );
+  }
+
+  /// Fotos pendientes de descarga (con retry: intentos < [maxIntentos]).
+  Future<List<Map<String, dynamic>>> leerFotosPendientesDescarga({
+    int maxIntentos = 3,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'foto_pendiente',
+      where: 'descargada = 0 AND path_servidor IS NOT NULL '
+          'AND path_servidor != "" '
+          'AND intentos_descarga < ?',
+      whereArgs: [maxIntentos],
+    );
   }
 
   /// Marca una foto como subida guardando el path del servidor.
@@ -2374,10 +2752,70 @@ class DatabaseHelper {
     final db = await database;
     await db.update(
       'foto_pendiente',
-      {'subida': 1, 'path_servidor': pathServidor},
+      {
+        'subida': 1,
+        'path_servidor': pathServidor,
+        'intentos_subida': 0,
+        'ultimo_error': null,
+      },
       where: 'id_foto = ?',
       whereArgs: [idFoto],
     );
+  }
+
+  /// Marca una foto como descargada con el path local.
+  Future<void> marcarFotoDescargada(
+    String idFoto,
+    String rutaDescarga,
+  ) async {
+    final db = await database;
+    await db.update(
+      'foto_pendiente',
+      {
+        'descargada': 1,
+        'ruta_descarga': rutaDescarga,
+        'intentos_descarga': 0,
+        'ultimo_error': null,
+      },
+      where: 'id_foto = ?',
+      whereArgs: [idFoto],
+    );
+  }
+
+  /// Incrementa el contador de intentos de subida y registra el error.
+  Future<void> marcarErrorSubida(String idFoto, String error) async {
+    final db = await database;
+    await db.rawUpdate('''
+      UPDATE foto_pendiente
+      SET intentos_subida = intentos_subida + 1,
+          ultimo_error = ?
+      WHERE id_foto = ?
+    ''', [error, idFoto]);
+  }
+
+  /// Incrementa el contador de intentos de descarga y registra el error.
+  Future<void> marcarErrorDescarga(String idFoto, String error) async {
+    final db = await database;
+    await db.rawUpdate('''
+      UPDATE foto_pendiente
+      SET intentos_descarga = intentos_descarga + 1,
+          ultimo_error = ?
+      WHERE id_foto = ?
+    ''', [error, idFoto]);
+  }
+
+  /// Busca foto_pendiente por id_seccion (para关联ar con la tabla de sección).
+  Future<Map<String, dynamic>?> buscarFotoPorSeccion(
+    String idSeccion,
+  ) async {
+    final db = await database;
+    final maps = await db.query(
+      'foto_pendiente',
+      where: 'id_seccion = ?',
+      whereArgs: [idSeccion],
+      limit: 1,
+    );
+    return maps.isEmpty ? null : maps.first;
   }
 
   int _toInt(dynamic value) {

@@ -12,6 +12,8 @@ import '../models/provincia.dart';
 import '../models/municipio.dart';
 import '../models/usuario.dart';
 import '../services/debug_log.dart';
+import 'sync_debug_config.dart';
+import 'sync_debug_collector.dart';
 
 class ApiService {
   static final ApiService _instance = ApiService._();
@@ -326,23 +328,57 @@ class ApiService {
       final encodedPath = Uri.encodeFull(serverPath);
       final url = '${ApiConfig.baseUrl}/upload/descargar/$encodedPath';
       debugPrint('[downloadImage] GET $url');
+      final sw = Stopwatch()..start();
       final response = await http.get(
         Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 30));
+      sw.stop();
       debugPrint('[downloadImage] status=${response.statusCode} '
           'bytes=${response.bodyBytes.length}');
       if (response.statusCode >= 200 && response.statusCode < 300) {
         final file = File(savePath);
         await file.parent.create(recursive: true);
         await file.writeAsBytes(response.bodyBytes);
+        if (kSyncDebugMode) {
+          SyncDebugCollector.instance.add(SyncApiEntry(
+            fase: SyncDebugCollector.instance.currentPhase,
+            metodo: 'GET',
+            endpoint: url,
+            responseBody: {'bytes': response.bodyBytes.length, 'savedTo': savePath.split('/').last},
+            statusCode: response.statusCode,
+            duracion: sw.elapsed,
+            fotos: [serverPath.split('/').last],
+          ));
+        }
         return savePath;
       }
       debugPrint('[downloadImage] Error ${response.statusCode}: '
           '${response.body.substring(0, response.body.length.clamp(0, 200))}');
+      if (kSyncDebugMode) {
+        SyncDebugCollector.instance.add(SyncApiEntry(
+          fase: SyncDebugCollector.instance.currentPhase,
+          metodo: 'GET',
+          endpoint: url,
+          statusCode: response.statusCode,
+          duracion: sw.elapsed,
+          error: 'HTTP ${response.statusCode}',
+          fotos: [serverPath.split('/').last],
+        ));
+      }
       return null;
     } catch (e) {
       debugPrint('[downloadImage] Exception: $e');
+      if (kSyncDebugMode) {
+        SyncDebugCollector.instance.add(SyncApiEntry(
+          fase: SyncDebugCollector.instance.currentPhase,
+          metodo: 'GET',
+          endpoint: '${ApiConfig.baseUrl}/upload/descargar/...',
+          duracion: null,
+          error: e.toString(),
+          fotos: [serverPath.split('/').last],
+        ));
+      }
       return null;
     }
   }
@@ -493,6 +529,8 @@ class ApiService {
     assert(files.length == idSecciones.length,
         'files e idSecciones deben tener la misma longitud');
 
+    final sw = Stopwatch()..start();
+
     Future<http.Response> doUpload() async {
       final request = http.MultipartRequest(
         'POST',
@@ -529,7 +567,22 @@ class ApiService {
     }
 
     final response = await _requestWithRetry(doUpload);
+    sw.stop();
     final body = await _handleResponse(response);
+    if (kSyncDebugMode) {
+      final paths = _extractCarretePaths(body);
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'POST',
+        endpoint: '${ApiConfig.edanLocalidadesEndpoint}/foto/subir',
+        requestBodyRaw: 'multipart: ${files.length} archivos, id_secciones=[${idSecciones.join(", ")}], id_local=$idLocal',
+        responseBody: {'paths': paths},
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        fotos: files.map((f) => f.split('/').last).toList(),
+        localidadId: idLocal,
+      ));
+    }
     return _extractCarretePaths(body);
   }
 
@@ -960,16 +1013,32 @@ class ApiService {
     bool? soloHuerfanas,
     int skip = 0,
     int limit = 50,
+    bool modoComprimido = true,
   }) async {
     final params = <String>['id_usuario=$idUsuario', 'skip=$skip', 'limit=$limit'];
     if (soloHuerfanas != null) params.add('solo_huerfanas=$soloHuerfanas');
+    params.add('modo=${modoComprimido ? "comprimido" : "completo"}');
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/mis-reportes?${params.join('&')}';
+    final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
       http.get(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/mis-reportes?${params.join('&')}'),
+        Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
     );
+    sw.stop();
     final body = await _handleResponse(response);
+    if (kSyncDebugMode) {
+      final data = body['data'];
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'GET',
+        endpoint: url,
+        responseBody: {'count': data is List ? data.length : 0},
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+      ));
+    }
     return _extractDataList(body);
   }
 
@@ -983,13 +1052,27 @@ class ApiService {
   }) async {
     final params = <String>['skip=$skip', 'limit=$limit'];
     if (idUsuario != null) params.add('id_usuario=$idUsuario');
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/mis-estados?${params.join('&')}';
+    final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
       http.get(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/mis-estados?${params.join('&')}'),
+        Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 30))
     );
+    sw.stop();
     final body = await _handleResponse(response);
+    if (kSyncDebugMode) {
+      final data = body['data'];
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'GET',
+        endpoint: url,
+        responseBody: {'count': data is List ? data.length : 0, 'preview': data is List && data.isNotEmpty ? data.first : null},
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+      ));
+    }
     return _extractDataList(body);
   }
 
@@ -1143,19 +1226,73 @@ class ApiService {
   Future<Map<String, dynamic>> enviarLocalidadCabeceraV2(
     Map<String, dynamic> cabecera,
   ) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/cabecera';
+    final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
       http.post(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/cabecera'),
+        Uri.parse(url),
         headers: _headers,
         body: jsonEncode(cabecera),
       ).timeout(const Duration(seconds: 30))
     );
-    final body = await _handleResponse(response);
+    sw.stop();
+    var body = <String, dynamic>{};
+    try {
+      body = await _handleResponse(response);
+    } catch (e) {
+      _registrarFalloCabecera(url, cabecera, response, sw.elapsed, e);
+      rethrow;
+    }
     DebugLog.instance.i('cabeceraV2 OK status=${response.statusCode} '
         'id_local=${cabecera['id_local']}');
+    if (kSyncDebugMode) {
+      final data = body['data'];
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'POST',
+        endpoint: url,
+        requestBody: cabecera,
+        responseBody: data is Map ? Map<String, dynamic>.from(data) : body,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        localidadId: cabecera['id_local']?.toString(),
+        seccion: 'cabecera',
+      ));
+    }
     final data = body['data'];
     if (data is Map) return Map<String, dynamic>.from(data);
     return Map<String, dynamic>.from(body);
+  }
+
+  /// Registra en el panel de debug una cabecera que falló, para que el error
+  /// no quede oculto. No lanza; solo instrumenta.
+  void _registrarFalloCabecera(
+    String url,
+    Map<String, dynamic> cabecera,
+    http.Response response,
+    Duration duracion,
+    Object error,
+  ) {
+    if (!kSyncDebugMode) return;
+    Map<String, dynamic>? errBody;
+    if (response.body.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) errBody = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    SyncDebugCollector.instance.add(SyncApiEntry(
+      fase: SyncDebugCollector.instance.currentPhase,
+      metodo: 'POST',
+      endpoint: url,
+      requestBody: cabecera,
+      responseBody: errBody,
+      statusCode: response.statusCode,
+      duracion: duracion,
+      error: error.toString(),
+      localidadId: cabecera['id_local']?.toString(),
+      seccion: 'cabecera',
+    ));
   }
 
   /// Envía una sección (1:N como array o 1:1 como objeto único) de una
@@ -1165,19 +1302,107 @@ class ApiService {
     required String seccion,
     required dynamic payload,
   }) async {
-    final response = await _requestWithRetry(() =>
-      http.post(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion'),
-        headers: _headers,
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 90))
-    );
-    final body = await _handleResponse(response);
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion';
+    final sw = Stopwatch()..start();
+    http.Response response;
+    try {
+      response = await _requestWithRetry(() =>
+        http.post(
+          Uri.parse(url),
+          headers: _headers,
+          body: jsonEncode(payload),
+        ).timeout(const Duration(seconds: 90))
+      );
+    } catch (e) {
+      _registrarFalloSeccionSinRespuesta(url, idLocalidad, seccion, payload,
+          sw.elapsed, e);
+      rethrow;
+    }
+    sw.stop();
+    var body = <String, dynamic>{};
+    try {
+      body = await _handleResponse(response);
+    } catch (e) {
+      _registrarFalloSeccion(url, idLocalidad, seccion, payload,
+          response, sw.elapsed, e);
+      rethrow;
+    }
     DebugLog.instance.i('seccionV2 OK $seccion status=${response.statusCode} '
         'localidad=$idLocalidad');
+    if (kSyncDebugMode) {
+      final data2 = body['data'];
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'POST',
+        endpoint: url,
+        requestBody: payload is List ? {'items': payload.length, 'preview': payload.isNotEmpty ? payload.first : null} : payload as Map<String, dynamic>?,
+        responseBody: data2 is Map ? Map<String, dynamic>.from(data2) : body,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        localidadId: idLocalidad.toString(),
+        seccion: seccion,
+      ));
+    }
     final data = body['data'];
     if (data is Map) return Map<String, dynamic>.from(data);
     return Map<String, dynamic>.from(body);
+  }
+
+  /// Registra en el panel de debug una sección que falló (4xx/5xx o error de
+  /// red), para que el error deje de estar oculto. No lanza; solo instrumenta.
+  void _registrarFalloSeccion(
+    String url,
+    int idLocalidad,
+    String seccion,
+    dynamic payload,
+    http.Response response,
+    Duration duracion,
+    Object error,
+  ) {
+    if (!kSyncDebugMode) return;
+    Map<String, dynamic>? errBody;
+    if (response.body.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) errBody = Map<String, dynamic>.from(decoded);
+      } catch (_) {}
+    }
+    SyncDebugCollector.instance.add(SyncApiEntry(
+      fase: SyncDebugCollector.instance.currentPhase,
+      metodo: 'POST',
+      endpoint: url,
+      requestBody: payload is List ? {'items': payload.length, 'preview': payload.isNotEmpty ? payload.first : null} : payload as Map<String, dynamic>?,
+      responseBody: errBody,
+      statusCode: response.statusCode,
+      duracion: duracion,
+      error: error.toString(),
+      localidadId: idLocalidad.toString(),
+      seccion: seccion,
+    ));
+  }
+
+  /// Registra en el panel de debug una sección que falló ANTES de obtener una
+  /// respuesta HTTP (error de red, timeout o `jsonEncode` del payload), para
+  /// que el fallo quede visible aunque no haya `statusCode`. No lanza.
+  void _registrarFalloSeccionSinRespuesta(
+    String url,
+    int idLocalidad,
+    String seccion,
+    dynamic payload,
+    Duration duracion,
+    Object error,
+  ) {
+    if (!kSyncDebugMode) return;
+    SyncDebugCollector.instance.add(SyncApiEntry(
+      fase: SyncDebugCollector.instance.currentPhase,
+      metodo: 'POST',
+      endpoint: url,
+      requestBody: payload is List ? {'items': payload.length, 'preview': payload.isNotEmpty ? payload.first : null} : payload as Map<String, dynamic>?,
+      duracion: duracion,
+      error: error.toString(),
+      localidadId: idLocalidad.toString(),
+      seccion: seccion,
+    ));
   }
 
   /// Mapea un id_local (UUID) al id_edan_localidad del servidor.
@@ -1202,13 +1427,27 @@ class ApiService {
     required String seccion,
     required String idSeccion,
   }) async {
-    await _requestWithRetry(() =>
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/'
+        '$idLocalidad/$seccion/seccion/$idSeccion';
+    final sw = Stopwatch()..start();
+    final response = await _requestWithRetry(() =>
       http.delete(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/'
-            '$idLocalidad/$seccion/seccion/$idSeccion'),
+        Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
     );
+    sw.stop();
+    if (kSyncDebugMode) {
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'DELETE',
+        endpoint: url,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        localidadId: idLocalidad.toString(),
+        seccion: seccion,
+      ));
+    }
   }
 
   Future<List<Map<String, dynamic>>> getConsolidarPendientes({
@@ -1318,25 +1557,57 @@ class ApiService {
     return Map<String, dynamic>.from(body['data']);
   }
 
-  Future<Map<String, dynamic>> getLocalidadById(int idLocalidad) async {
+  Future<Map<String, dynamic>> getLocalidadById(
+    int idLocalidad, {
+    bool modoComprimido = true,
+  }) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad?modo=${modoComprimido ? "comprimido" : "completo"}';
+    final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
       http.get(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad'),
+        Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
     );
+    sw.stop();
     final body = await _handleResponse(response);
+    if (kSyncDebugMode) {
+      final data = body['data'];
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'GET',
+        endpoint: url,
+        responseBody: data is Map ? Map<String, dynamic>.from(data) : {'count': data is List ? data.length : 0},
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        localidadId: idLocalidad.toString(),
+      ));
+    }
     return Map<String, dynamic>.from(body['data']);
   }
 
   Future<Map<String, dynamic>> deleteLocalidad(int idLocalidad) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad';
+    final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
       http.delete(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad'),
+        Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
     );
+    sw.stop();
     final body = await _handleResponse(response);
+    if (kSyncDebugMode) {
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'DELETE',
+        endpoint: url,
+        responseBody: body,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        localidadId: idLocalidad.toString(),
+      ));
+    }
     return Map<String, dynamic>.from(body);
   }
 

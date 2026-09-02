@@ -46,18 +46,18 @@ class _EdanPage08State extends State<EdanPage08> {
   }
 
   void _agregar() {
-    final v = EdanDanoVivienda(idSeccion: generarIdSeccion('dv'));
-    setState(() => widget.localidad.danosVivienda.add(v));
-    _editar(v);
+    final v = EdanDanoVivienda(idSeccion: nuevoIdDanoVivienda());
+    _editar(v, esNuevo: true);
   }
 
-  Future<void> _editar(EdanDanoVivienda v) async {
+  Future<void> _editar(EdanDanoVivienda v,
+      {bool esNuevo = false}) async {
     _comunidad.text = v.comunidad;
     _parcial.text = v.danoParcial > 0 ? '${v.danoParcial}' : '';
     _total.text = v.danoTotal > 0 ? '${v.danoTotal}' : '';
     _nec.text = v.necesidadesInmediatas;
 
-    await showDialog<void>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocal) => AlertDialog(
@@ -89,41 +89,30 @@ class _EdanPage08State extends State<EdanPage08> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx), child: const Text('Guardar')),
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
           ],
         ),
       ),
     );
-    if (!mounted) return;
+    if (!mounted || saved != true) return;
 
     setState(() {
       v.comunidad = _comunidad.text;
       v.danoParcial = int.tryParse(_parcial.text) ?? 0;
       v.danoTotal = int.tryParse(_total.text) ?? 0;
       v.necesidadesInmediatas = _nec.text;
+      if (esNuevo) widget.localidad.danosVivienda.add(v);
     });
   }
 
-  Future<void> _capturarRespaldo(EdanDanoVivienda v) async {
-    final ok = await EdanBotonSacarFoto.capturarRespaldo(
+  Future<void> _foto(EdanDanoVivienda v) async {
+    final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: v.fotos,
       latActual: v.coordenadaLat,
       lonActual: v.coordenadaLon,
-      onCoordenadasCapturadas: (lat, lon) {
-        v.coordenadaLat = lat;
-        v.coordenadaLon = lon;
-      },
-    );
-    if (!ok || !mounted) return;
-    setState(() {});
-  }
-
-  Future<void> _cambiarFoto(EdanDanoVivienda v) async {
-    final ok = await EdanBotonSacarFoto.cambiarFoto(
-      context,
-      fotos: v.fotos,
+      seccion: 'Viviendas',
       onCoordenadasCapturadas: (lat, lon) {
         v.coordenadaLat = lat;
         v.coordenadaLon = lon;
@@ -170,8 +159,8 @@ class _EdanPage08State extends State<EdanPage08> {
                 icono: Icons.home_outlined,
                 onEditar: () => _editar(v),
                 onEliminar: () => _eliminar(v),
-                onRespaldar: () => _capturarRespaldo(v),
-                onCambiarFoto: () => _cambiarFoto(v),
+                onRespaldar: () => _foto(v),
+                onCambiarFoto: () => _foto(v),
                 respaldo: v,
                 seccionRespaldo: 'Viviendas',
                 onFotoEliminada: () => setState(() {}),

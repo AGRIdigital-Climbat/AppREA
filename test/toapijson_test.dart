@@ -168,4 +168,107 @@ void main() {
       expect(item['observaciones'], equals('Requieren medicamentos'));
     });
   });
+
+  group('flags imp_* 1:1 por sección', () {
+    test('toJson emite los 13 flags nuevos', () {
+      final localidad = EdanLocalidad(
+        impImpactoPoblacion: true,
+        impSaludEstablecimientos: true,
+        impDanosViales: true,
+        impDanosInfraPublica: true,
+        impServiciosBasicos: true,
+        impUnidadesEducativas: true,
+        impDanosVivienda: true,
+        impDanosAgricultura: true,
+        impDanosPecuarios: true,
+        impInfraProductiva: true,
+        impPrimeraRespuesta: true,
+        impNecesidadSalud: true,
+        impNecesidadHumanitaria: true,
+      );
+
+      final json = localidad.toJson();
+
+      expect(json['imp_impacto_poblacion'], isTrue);
+      expect(json['imp_salud_establecimientos'], isTrue);
+      expect(json['imp_danos_viales'], isTrue);
+      expect(json['imp_danos_infra_publica'], isTrue);
+      expect(json['imp_servicios_basicos'], isTrue);
+      expect(json['imp_unidades_educativas'], isTrue);
+      expect(json['imp_danos_vivienda'], isTrue);
+      expect(json['imp_danos_agricultura'], isTrue);
+      expect(json['imp_danos_pecuarios'], isTrue);
+      expect(json['imp_infra_productiva'], isTrue);
+      expect(json['imp_primera_respuesta'], isTrue);
+      expect(json['imp_necesidad_salud'], isTrue);
+      expect(json['imp_necesidad_humanitaria'], isTrue);
+    });
+
+    test('round-trip fromJson preserva los 13 flags', () {
+      final json = {
+        'id_local': 'test-flags-001',
+        'localidad': 'Comunidad Ejemplo',
+        'imp_impacto_poblacion': true,
+        'imp_salud_establecimientos': false,
+        'imp_danos_viales': true,
+        'imp_danos_infra_publica': false,
+        'imp_servicios_basicos': true,
+        'imp_unidades_educativas': false,
+        'imp_danos_vivienda': true,
+        'imp_danos_agricultura': false,
+        'imp_danos_pecuarios': true,
+        'imp_infra_productiva': false,
+        'imp_primera_respuesta': true,
+        'imp_necesidad_salud': false,
+        'imp_necesidad_humanitaria': true,
+      };
+
+      final localidad = EdanLocalidad.fromJson(json);
+
+      expect(localidad.impImpactoPoblacion, isTrue);
+      expect(localidad.impSaludEstablecimientos, isFalse);
+      expect(localidad.impDanosViales, isTrue);
+      expect(localidad.impDanosInfraPublica, isFalse);
+      expect(localidad.impServiciosBasicos, isTrue);
+      expect(localidad.impUnidadesEducativas, isFalse);
+      expect(localidad.impDanosVivienda, isTrue);
+      expect(localidad.impDanosAgricultura, isFalse);
+      expect(localidad.impDanosPecuarios, isTrue);
+      expect(localidad.impInfraProductiva, isFalse);
+      expect(localidad.impPrimeraRespuesta, isTrue);
+      expect(localidad.impNecesidadSalud, isFalse);
+      expect(localidad.impNecesidadHumanitaria, isTrue);
+    });
+
+    test('recalcularFlagsImpacto deriva los flags de las secciones con datos', () {
+      final localidad = EdanLocalidad();
+      localidad.establecimientosSalud = [
+        EdanEstablecimientoSalud(
+          idSeccion: 'es-1',
+          nombreEstablecimiento: 'Centro de salud',
+          danoTotal: true,
+        ),
+      ];
+      localidad.danosViales = [
+        EdanDanoVial(
+          idSeccion: 'dv-1',
+          viaPuente: 'Puente principal',
+          danoParcial: true,
+        ),
+      ];
+      localidad.necesidadSalud = EdanNecesidadSalud(numeroPersonas: 40);
+      localidad.necesidadHumanitaria = EdanNecesidadHumanitaria(alimentos: true);
+
+      localidad.recalcularFlagsImpacto();
+
+      expect(localidad.impSaludEstablecimientos, isTrue);
+      expect(localidad.impDanosViales, isTrue);
+      expect(localidad.impNecesidadSalud, isTrue);
+      expect(localidad.impNecesidadHumanitaria, isTrue);
+      expect(localidad.impDanosInfraPublica, isFalse);
+      expect(localidad.impServiciosBasicos, isFalse);
+      expect(localidad.impDanosVivienda, isFalse);
+      expect(localidad.impUnidadesEducativas, isFalse);
+    });
+  });
 }
