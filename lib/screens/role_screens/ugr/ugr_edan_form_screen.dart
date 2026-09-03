@@ -558,42 +558,10 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
     _edan.totalFamiliasDamnificadas = _intDe(_familiasDamnificadasController);
     for (final localidad in _edan.localidades) {
       _normalizarLocalidad(localidad);
-      for (final item in localidad.impactoPoblacion) {
-        item.idSeccion ??= generarIdSeccion('im');
-      }
-      localidad.necesidadPrimeraRespuesta?.idSeccion ??= generarIdSeccion('pr');
-      for (final item in localidad.establecimientosSalud) {
-        item.idSeccion ??= generarIdSeccion('sv');
-      }
-      localidad.necesidadSalud?.idSeccion ??= generarIdSeccion('sn');
-      for (final item in localidad.danosViales) {
-        item.idSeccion ??= generarIdSeccion('dv');
-      }
-      for (final item in localidad.danosInfraPublica) {
-        item.idSeccion ??= generarIdSeccion('di');
-      }
-      for (final item in localidad.serviciosBasicos) {
-        item.idSeccion ??= generarIdSeccion('sb');
-      }
-      for (final item in localidad.unidadesEducativas) {
-        item.idSeccion ??= generarIdSeccion('ue');
-      }
-      for (final item in localidad.danosVivienda) {
-        item.idSeccion ??= generarIdSeccion('vv');
-      }
-      for (final item in localidad.danosAgricultura) {
-        item.idSeccion ??= generarIdSeccion('da');
-      }
-      for (final item in localidad.danosPecuarios) {
-        item.idSeccion ??= generarIdSeccion('dp');
-      }
-      for (final item in localidad.infraProductiva) {
-        item.idSeccion ??= generarIdSeccion('ip');
-      }
-      for (final item in localidad.proteccion) {
-        item.idSeccion ??= generarIdSeccion('po');
-      }
-      localidad.necesidadHumanitaria?.idSeccion ??= generarIdSeccion('nh');
+      // id_seccion NO se genera aquí. Se asigna UNA sola vez, únicamente si el
+      // ítem tiene datos y carece de id, en EdanLocalidadesEnvioV2Service.
+      // guardarSecciones (la fuente de la persistencia). Los ids que ya existen
+      // (servidor o guardado previo) se conservan.
     }
     return _edan;
   }
@@ -1416,7 +1384,7 @@ class _UgrEdanFormScreenState extends State<UgrEdanFormScreen> {
                    cantidad: l.establecimientosSalud.length,
                     onAgregar: () {
                         final item = EdanEstablecimientoSalud()
-                          ..idSeccion = generarIdSeccion('sv')
+                          ..idSeccion = generarIdSeccion('es')
                           ..comunidad = l.etiquetaLugar;
                         setState(() {
                           l.establecimientosSalud.add(item);

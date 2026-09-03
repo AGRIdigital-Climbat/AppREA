@@ -1,4 +1,4 @@
-import 'dart:convert';
+﻿import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -8,9 +8,10 @@ import '../../../../providers/reporte_provider.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
+import '../../../../services/edan/edan_documento_sync_service.dart';
 import '../../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../../services/edan_secciones_registry.dart';
-import '../../../../services/localidad_sync_service.dart';
+import '../../../../services/edan/edan_sync_respo_service.dart';
 import 'edan_navigation_bar.dart';
 import 'edan_page01.dart';
 import 'edan_page02.dart';
@@ -85,6 +86,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     _pageController = PageController();
     _pages = _construirPaginas();
     _precargarCatalogo();
+    // Al abrir borrador existente, sincroniza flags del modelo desde SQLite.
+    _sincronizarFlagsDesdeSeccionesActivas();
     // Snapshot inicial (post-frame) para comparar cambios reales al guardar/
     // salir sin modificar nada. Se excluyen los campos volátiles de sync.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -428,6 +431,52 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _reconstruyendo = false);
   }
 
+  /// Lee `localidad_secciones_activas` en SQLite y sobreescribe los flags
+  /// del modelo. Se llama al abrir un borrador existente para que las páginas
+  /// del wizard reflejen exactamente lo que está guardado.
+  Future<void> _sincronizarFlagsDesdeSeccionesActivas() async {
+    final idLocal = _localidad.idLocal;
+    if (idLocal == null) return;
+
+    // FIX Duplicacion: recargar arrays desde las tablas de seccion SQLite
+    // antes de sincronizar flags. Si el usuario quito items del array 1:N,
+    // el modelo en datos_json podria tener items fantasma; SQLite es la
+    // fuente canonical gracias al cleanup en guardarSecciones.
+    final sincV2 = EdanLocalidadesEnvioV2Service();
+    await sincV2.cargarSeccionesDesdeSQLite(_localidad);
+
+    final activas = await _db.leerSeccionesActivas(idLocal);
+    if (activas.isEmpty || !mounted) return;
+
+    final flags = EdanSeccionesRegistry.construirFlagsDesdeActivas(activas);
+    _localidad
+      ..impPoblacion = flags['imp_poblacion'] ?? _localidad.impPoblacion
+      ..impSalud = flags['imp_salud'] ?? _localidad.impSalud
+      ..impInfraestructura = flags['imp_infraestructura'] ?? _localidad.impInfraestructura
+      ..impServicios = flags['imp_servicios'] ?? _localidad.impServicios
+      ..impEducacion = flags['imp_educacion'] ?? _localidad.impEducacion
+      ..impVivienda = flags['imp_vivienda'] ?? _localidad.impVivienda
+      ..impAgropecuario = flags['imp_agropecuario'] ?? _localidad.impAgropecuario
+      ..impProteccion = flags['imp_proteccion'] ?? _localidad.impProteccion
+      ..impNecesidades = flags['imp_necesidades'] ?? _localidad.impNecesidades
+      ..impImpactoPoblacion = flags['imp_impacto_poblacion'] ?? _localidad.impImpactoPoblacion
+      ..impPrimeraRespuesta = flags['imp_primera_respuesta'] ?? _localidad.impPrimeraRespuesta
+      ..impSaludEstablecimientos = flags['imp_salud_establecimientos'] ?? _localidad.impSaludEstablecimientos
+      ..impNecesidadSalud = flags['imp_necesidad_salud'] ?? _localidad.impNecesidadSalud
+      ..impDanosViales = flags['imp_danos_viales'] ?? _localidad.impDanosViales
+      ..impDanosInfraPublica = flags['imp_danos_infra_publica'] ?? _localidad.impDanosInfraPublica
+      ..impServiciosBasicos = flags['imp_servicios_basicos'] ?? _localidad.impServiciosBasicos
+      ..impUnidadesEducativas = flags['imp_unidades_educativas'] ?? _localidad.impUnidadesEducativas
+      ..impDanosVivienda = flags['imp_danos_vivienda'] ?? _localidad.impDanosVivienda
+      ..impDanosAgricultura = flags['imp_danos_agricultura'] ?? _localidad.impDanosAgricultura
+      ..impDanosPecuarios = flags['imp_danos_pecuarios'] ?? _localidad.impDanosPecuarios
+      ..impInfraProductiva = flags['imp_infra_productiva'] ?? _localidad.impInfraProductiva
+      ..impNecesidadHumanitaria = flags['imp_necesidad_humanitaria'] ?? _localidad.impNecesidadHumanitaria;
+
+    // Reconstruye las paginas con los flags actualizados desde SQLite.
+    rebuild();
+  }
+
   Future<void> _next() async {
     if (_saving) return;
     final actual = _pages[_currentPage];
@@ -565,8 +614,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     final conectado = await ConnectivityService().checkNow();
     if (!conectado) return _GuardadoResult.sinConexion;
 
-    final ok = await EdanLocalidadesEnvioV2Service()
-        .enviarLocalidad(_localidad, soloRutas: modificadas.toSet());
+    final ok = await EdanDocumentoSyncService()
+        .enviarLocalidadDocumento(_localidad);
       if (ok) {
         _localidad
           ..editado = false
@@ -574,7 +623,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         await _db.updateLocalidad(_localidad);
         // Limpiar las marcas de modificada para las rutas enviadas.
         await _db.clearSeccionesModificadas(idLocal, modificadas.toSet());
-        LocalidadSyncService.instance.recargarPendientes();
+        EdanSyncRespoService.instance.recargarPendientes();
         return _GuardadoResult.enviado;
       }
     return _GuardadoResult.fallo;
@@ -621,12 +670,15 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
 
   /// Pregunta al usuario antes de salir del formulario (atrás/gesto del sistema).
   Future<void> _confirmarSalir() async {
+    final hayCambios = _huboCambios();
     final salir = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('¿Salir del formulario?'),
-        content: const Text(
-          'Tiene cambios sin guardar. Puede guardar el borrador antes de salir.',
+        content: Text(
+          hayCambios
+              ? 'Tiene cambios sin guardar. Puede guardar el borrador antes de salir.'
+              : 'No se realizaron cambios. ¿Desea salir?',
         ),
         actions: [
           TextButton(
@@ -637,10 +689,11 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
             onPressed: () => Navigator.pop(ctx, 'salir'),
             child: const Text('Salir'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, 'guardar'),
-            child: const Text('Salir y guardar'),
-          ),
+          if (hayCambios)
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, 'guardar'),
+              child: const Text('Salir y guardar'),
+            ),
         ],
       ),
     );
@@ -682,8 +735,13 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     // Si hay conexión, envío inmediato al servidor (secciones v2 + fotos).
     final conectado = await ConnectivityService().checkNow();
     if (conectado) {
-      final ok = await EdanLocalidadesEnvioV2Service()
-          .enviarLocalidad(_localidad);
+      final docSync = EdanDocumentoSyncService();
+      // PRIORIDAD: procesar cola de deletes offline PRIMERO
+      await docSync.procesarColaDeletes();
+      // Eliminar filas marcadas con marcado_borrar=1
+      await docSync.eliminarFilasAntesDelPush(_localidad);
+      // Enviar documento completo (fotos + POST/PUT)
+      final ok = await docSync.enviarLocalidadDocumento(_localidad);
       if (ok && _localidad.idLocal != null) {
         _localidad
           ..editado = false
@@ -691,7 +749,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         await _db.updateLocalidad(_localidad);
         // Limpiar las marcas de modificada (ya se enviaron todas).
         await _db.marcarTodasSeccionesSincronizadas(_localidad.idLocal!);
-        LocalidadSyncService.instance.recargarPendientes();
+        EdanSyncRespoService.instance.recargarPendientes();
       }
     }
 

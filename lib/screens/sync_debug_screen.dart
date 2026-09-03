@@ -371,6 +371,12 @@ class _ApiEntryCardState extends State<_ApiEntryCard> {
         children: [
           // Full endpoint
           _buildDetailRow('Endpoint completo', entry.endpoint, palette),
+          if (entry.detalleDiagnostico != null)
+            _buildJsonSection(
+              'Diagnóstico por localidad',
+              entry.detalleDiagnostico!,
+              palette,
+            ),
           if (entry.statusCode != null)
             _buildDetailRow('Status HTTP', '${entry.statusCode}', palette),
           if (entry.localidadId != null)

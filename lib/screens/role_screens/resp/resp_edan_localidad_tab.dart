@@ -5,8 +5,9 @@ import '../../../models/edan.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
-import '../../../services/edan/edan_localidades_envio_v2_service.dart';
-import '../../../services/localidad_sync_service.dart';
+import '../../../services/edan/edan_documento_sync_service.dart';
+import '../../../services/edan/edan_sync_respo_service.dart';
+import '../../../widgets/edan_json_preview_dialog.dart';
 import 'edan/edan_form_wizard.dart';
 import '../ugr/ugr_edan_preview_screen.dart';
 import '../ugr/ugr_route.dart';
@@ -202,7 +203,7 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
       localidad.idEdanLocalidadEstado = estadoDestino.id;
 
       sincronizada =
-          await EdanLocalidadesEnvioV2Service().enviarLocalidad(localidad);
+          await EdanDocumentoSyncService().enviarLocalidadDocumento(localidad);
 
       if (sincronizada) {
         localidad.estadoLocalidad = estadoDestino;
@@ -256,7 +257,7 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
     return Column(
       children: [
         ValueListenableBuilder<bool>(
-          valueListenable: LocalidadSyncService.instance.sincronizandoMunicipio,
+          valueListenable: EdanSyncRespoService.instance.sincronizandoMunicipio,
           builder: (context, sincronizando, _) => sincronizando
               ? _buildSyncMunicipioBanner(primary)
               : const SizedBox.shrink(),
@@ -465,6 +466,7 @@ class _RespLocalidadCard extends StatelessWidget {
           : null,
       child: InkWell(
         onTap: onTap,
+        onLongPress: () => EdanJsonPreviewDialog.show(context, localidad),
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),

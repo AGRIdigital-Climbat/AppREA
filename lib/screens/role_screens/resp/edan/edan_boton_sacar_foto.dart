@@ -6,8 +6,11 @@ import 'package:geolocator/geolocator.dart';
 import '../../../../config/api_config.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/api_service.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
+import '../../../../services/edan_secciones_registry.dart';
 import '../../../../services/image_service.dart';
 import '../../../../services/location_service.dart';
 import '../../../../services/permission_service.dart';
@@ -126,13 +129,15 @@ class EdanBotonSacarFoto {
   static Future<bool> mostrarSheetFoto(
     BuildContext context, {
     required List<EdanFoto> fotos,
-    required double latActual,
-    required double lonActual,
-    required void Function(double lat, double lon) onCoordenadasCapturadas,
+    double latActual = 0,
+    double lonActual = 0,
+    double precisionMinima = 30,
     String? seccion,
     String? idLocal,
     String? idSeccion,
-    double precisionMinima = 30,
+    int? idEdanLocalidad,
+    required void Function(double lat, double lon) onCoordenadasCapturadas,
+    void Function(String savedPath)? onFotoGuardada,
   }) async {
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -149,6 +154,7 @@ class EdanBotonSacarFoto {
         idLocal: idLocal,
         idSeccion: idSeccion,
         onCoordenadasCapturadas: onCoordenadasCapturadas,
+        onFotoGuardada: onFotoGuardada,
       ),
     );
     return saved ?? false;
@@ -164,6 +170,7 @@ class EdanBotonSacarFoto {
     required double precision,
     String? idLocal,
     String? idSeccion,
+    int? idEdanLocalidad,
   }) async {
     final hasPermission = await PermissionService.requestCameraPermission();
     if (!hasPermission) {
@@ -179,13 +186,17 @@ class EdanBotonSacarFoto {
       longitud: longitud,
       precision: precision,
     ));
-    // Registrar en foto_pendiente para tracking de sync.
+
+    // Registrar en foto_pendiente_v2 para tracking de sync. Rápido, sin subir:
+    // así el bottom sheet cierra al instante y la subida ocurre en segundo plano.
+    String? idFoto;
     if (idLocal != null && idSeccion != null) {
       try {
-        await DatabaseHelper.instance.insertarFotoPendiente(
+        idFoto = await DatabaseHelper.instance.insertarFotoPendienteV2(
           idLocal: idLocal,
           idSeccion: idSeccion,
           rutaLocalArchivo: savedPath,
+          pathServidor: null,
           lat: latitud,
           lon: longitud,
         );
@@ -193,7 +204,73 @@ class EdanBotonSacarFoto {
         debugPrint('[FotoPendiente] Error al registrar foto: $e');
       }
     }
+
+    // Lanzar la subida en segundo plano (no bloqueante). El bottom sheet ya
+    // puede cerrarse; al completar se marca la foto como subida (para que el
+    // sync no la reprocese) y se actualiza la columna fotografia.
+    if (idLocal != null && idSeccion != null &&
+        ConnectivityService().isConnected) {
+      _subirFotoEnSegundoPlano(
+        savedPath,
+        idLocal,
+        idSeccion,
+        idFoto,
+        idEdanLocalidad,
+      );
+    }
+
     return true;
+  }
+
+  /// Sube una foto de respaldo en segundo plano (fire-and-forget, sin bloquear
+  /// la UI). Al completar marca la foto pendiente como subida ([idFoto]) y
+  /// actualiza la columna `fotografia` de la tabla de sección con el path del
+  /// servidor. Si falla, registra el error y el sync la reintentará.
+  static void _subirFotoEnSegundoPlano(
+    String savedPath,
+    String idLocal,
+    String idSeccion,
+    String? idFoto,
+    int? idEdanLocalidad,
+  ) async {
+    try {
+      final paths = await ApiService.instance.subirFotosCarrete(
+        files: [savedPath],
+        idSecciones: [idSeccion],
+        idLocal: idLocal,
+        idEdanLocalidad: idEdanLocalidad,
+      );
+      final serverPath = paths[idSeccion];
+      if (serverPath == null || serverPath.isEmpty) {
+        debugPrint('[Foto] Upload background sin path para $idSeccion');
+        if (idFoto != null) {
+          await DatabaseHelper.instance
+              .marcarFotoErrorV2(idFoto, 'Server no devolvió path');
+        }
+        return;
+      }
+      debugPrint('[Foto] Upload background OK: $serverPath');
+      if (idFoto != null) {
+        await DatabaseHelper.instance.marcarFotoSubidaV2(idFoto, serverPath);
+      }
+      final tabla = await EdanSeccionesRegistry.buscarTablaPorIdSeccion(
+        idSeccion,
+        DatabaseHelper.instance,
+      );
+      if (tabla.isNotEmpty) {
+        await DatabaseHelper.instance.marcarFotografiaSeccion(
+          tabla,
+          idLocal,
+          idSeccion,
+          serverPath,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Foto] Upload background falló: $e');
+      if (idFoto != null) {
+        await DatabaseHelper.instance.marcarFotoErrorV2(idFoto, e.toString());
+      }
+    }
   }
 
   /// Visor a pantalla completa de la foto con zoom (InteractiveViewer),
@@ -513,6 +590,7 @@ class _SheetFoto extends StatefulWidget {
   final String? idLocal;
   final String? idSeccion;
   final void Function(double lat, double lon) onCoordenadasCapturadas;
+  final void Function(String savedPath)? onFotoGuardada;
 
   const _SheetFoto({
     required this.fotos,
@@ -523,6 +601,7 @@ class _SheetFoto extends StatefulWidget {
     this.idLocal,
     this.idSeccion,
     required this.onCoordenadasCapturadas,
+    this.onFotoGuardada,
   });
 
   @override
@@ -540,12 +619,11 @@ class _SheetFotoState extends State<_SheetFoto> {
   @override
   void initState() {
     super.initState();
-    if (widget.latActual != 0 || widget.lonActual != 0) {
-      _lat = widget.latActual;
-      _lon = widget.lonActual;
-    } else {
-      _capturarCoordenadas();
-    }
+    // Seguridad: siempre se solicitan coordenadas GPS frescas al abrir el
+    // bottom sheet, sin reutilizar las ya guardadas en el ítem. Así la foto
+    // (si se toma) queda siempre asociada a una posición capturada en este
+    // momento y no a una anterior.
+    _capturarCoordenadas();
   }
 
   Future<void> _capturarCoordenadas() async {
@@ -576,28 +654,29 @@ class _SheetFotoState extends State<_SheetFoto> {
 
   /// Devuelve true si se completó una captura (nueva o reemplazada) con
   /// coordenadas frescas [lat]/[lon].
-  Future<bool> _tomarFoto({bool recapturarCoordenadas = false}) async {
-    if (recapturarCoordenadas) {
-      setState(() => _capturando = true);
-      final pos = await EdanBotonSacarFoto.capturarCoordenadas(
-        context,
-        precisionMinima: widget.precisionMinima,
-      );
-      if (!mounted) return false;
-      if (pos == null) {
-        setState(() {
-          _capturando = false;
-          _reintentar = true;
-        });
-        return false;
-      }
+  Future<bool> _tomarFoto() async {
+    // Seguridad: siempre se recapturan coordenadas GPS frescas justo antes de
+    // tomar la foto. La foto queda asociada a la posición capturada en ese
+    // momento, nunca a una previa del ítem.
+    setState(() => _capturando = true);
+    final pos = await EdanBotonSacarFoto.capturarCoordenadas(
+      context,
+      precisionMinima: widget.precisionMinima,
+    );
+    if (!mounted) return false;
+    if (pos == null) {
       setState(() {
-        _lat = pos.latitude;
-        _lon = pos.longitude;
-        _prec = pos.accuracy;
         _capturando = false;
+        _reintentar = true;
       });
+      return false;
     }
+    setState(() {
+      _lat = pos.latitude;
+      _lon = pos.longitude;
+      _prec = pos.accuracy;
+      _capturando = false;
+    });
     final lat = _lat;
     final lon = _lon;
     if (lat == null || lon == null) return false;
@@ -615,6 +694,9 @@ class _SheetFotoState extends State<_SheetFoto> {
     setState(() => _sacando = false);
     if (ok) {
       widget.onCoordenadasCapturadas(lat, lon);
+      if (widget.fotos.isNotEmpty) {
+        widget.onFotoGuardada?.call(widget.fotos.first.ruta);
+      }
       Navigator.of(context).pop(true);
     }
     return ok;
@@ -648,7 +730,7 @@ class _SheetFotoState extends State<_SheetFoto> {
               subtitle: const Text('Se recapturarán las coordenadas por seguridad'),
               onTap: () {
                 Navigator.of(menuCtx).pop();
-                _tomarFoto(recapturarCoordenadas: true);
+                _tomarFoto();
               },
             ),
             ListTile(

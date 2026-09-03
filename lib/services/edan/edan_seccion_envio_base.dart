@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../../models/edan.dart';
+import '../../models/id_seccion_helper.dart';
 import '../api_service.dart';
 import '../database_helper.dart';
 import '../edan_secciones_registry.dart';
@@ -145,81 +146,6 @@ abstract class EdanSeccionEnvioBase<T> {
     }
   }
 
-  // ========== Helper de envío ==========
-
-  /// Envía las filas `editado=1` de esta sección a su endpoint v2.
-  /// - 1:N → array directo (aunque haya un solo ítem). NUNCA `{"items":[]}`.
-  /// - 1:1 → objeto único.
-  /// Tras éxito marca cada fila `editado=0` (+ `insertada_en_server=1`).
-  Future<bool> enviar(EdanLocalidad localidad) async {
-    final idLocal = localidad.idLocal;
-    final idEdan = localidad.idServer ?? localidad.idEdan;
-    if (idLocal == null || idEdan == null) {
-      debugPrint('[${descriptor.rutaV2}] sin idLocal/idEdan: omite envío');
-      return false;
-    }
-
-    final filasEditadas = await _db.leerFilasEditadas(
-      descriptor.tablaSqlite,
-      idLocal,
-    );
-    if (filasEditadas.isEmpty) {
-      debugPrint('[${descriptor.rutaV2}] sin filas editadas');
-      return true;
-    }
-
-    // Asociar el path del carrete (foto_pendiente) a la fila enviar.
-    await _asociarPathsCarrete(idLocal, filasEditadas);
-
-    final payload = filasEditadas
-        .map((row) => _filaConFoto(row, () => filaDesdeRow(row)))
-        .toList();
-
-    final body = descriptor.tipo == EdanSeccionTipo.unoAUno
-        ? (payload.isNotEmpty ? payload.first : null)
-        : payload;
-
-    if (body == null) {
-      debugPrint('[${descriptor.rutaV2}] sin payload');
-      return true;
-    }
-
-    try {
-      debugPrint('[${descriptor.rutaV2}] POST '
-          '${descriptor.tipo == EdanSeccionTipo.unoAUno ? '1:1' : '1:N'} '
-          '(${payload.length} filas)');
-      if (kSyncDebugMode) {
-        SyncDebugCollector.instance.add(SyncApiEntry(
-          fase: SyncDebugCollector.instance.currentPhase,
-          metodo: 'PRE',
-          endpoint: 'Preparar sección ${descriptor.rutaV2}',
-          requestBody: {'filas': payload.length, 'tipo': descriptor.tipo == EdanSeccionTipo.unoAUno ? '1:1' : '1:N'},
-          localidadId: idLocal,
-          seccion: descriptor.rutaV2,
-        ));
-      }
-      await _api.enviarLocalidadSeccionV2(
-        idLocalidad: idEdan,
-        seccion: descriptor.rutaV2,
-        payload: body,
-      );
-      for (final row in filasEditadas) {
-        final idSeccion = row['id_seccion']?.toString();
-        if (idSeccion != null && idSeccion.isNotEmpty) {
-          await _db.marcarFilaSeccionSincronizada(
-            descriptor.tablaSqlite,
-            idSeccion,
-          );
-        }
-      }
-      debugPrint('[${descriptor.rutaV2}] OK');
-      return true;
-    } catch (e) {
-      debugPrint('[${descriptor.rutaV2}] Error: $e');
-      return false;
-    }
-  }
-
   /// Devuelve el payload de la API a partir de una fila SQLite. La
   /// implementación por defecto reutiliza [filaApi] sobre un ítem construido
   /// desde la fila, pero para la mayoría de secciones basta con [filaDesdeRow].
@@ -233,76 +159,15 @@ abstract class EdanSeccionEnvioBase<T> {
     json.remove('marcado_borrar');
     json.remove('insertada_en_server');
     // Exponer la fecha local de edición como `fecha_modificacion` (LWW).
-    // El servidor aplica GREATEST(fecha_modificacion, :enviada); si no se envía
-    // usa NOW(). Se envía en ISO 8601 UTC (YYYY-MM-DDTHH:MM:SSZ / .sssZ).
+    // Bolivia: UTC-4 fijo. El dispositivo ya viene ajustado.
     final fechaLocal = json.remove('fecha_modificacion_local');
     if (fechaLocal != null && fechaLocal.toString().isNotEmpty) {
-      var iso = fechaLocal.toString();
-      if (!iso.endsWith('Z') && !iso.contains('+') && iso.length > 10) {
-        iso = '${iso}Z';
-      }
-      json['fecha_modificacion'] = iso;
+      json['fecha_modificacion'] = EdanLocalidad.toBoliviaIso(
+        fechaLocal.toString(),
+      );
     }
     // Mantener id_seccion (clave UPSERT)
     return json;
-  }
-
-  /// Reinyecta `fotografia` (path servidor o null explícito) y coordenadas GPS
-  /// en una fila (Vía B, grupos mixtos). Siempre incluye `fotografia` para no
-  /// borrar la foto del servidor; con foto, las coordenadas son obligatorias.
-  Map<String, dynamic> _filaConFoto(
-    Map<String, dynamic> row,
-    Map<String, dynamic> Function() build,
-  ) {
-    final json = build();
-    if (!descriptor.usaFoto) return json;
-    final path = row['fotografia']?.toString();
-    final tienePathServer = path != null && path.isNotEmpty && _esPathServer(path);
-    json['fotografia'] = tienePathServer ? path : row['fotografia'];
-    final lat = (row['coordenada_lat'] is num)
-        ? (row['coordenada_lat'] as num).toDouble()
-        : 0.0;
-    final lon = (row['coordenada_lon'] is num)
-        ? (row['coordenada_lon'] as num).toDouble()
-        : 0.0;
-    json['coordenada_lat'] = (lat != 0 || lon != 0) ? lat : null;
-    json['coordenada_lon'] = (lat != 0 || lon != 0) ? lon : null;
-    return json;
-  }
-
-  /// Asocia los paths del carrete (`foto_pendiente.path_servidor`) a las filas
-  /// que van a enviarse, según `id_seccion`. Actualiza `fotografia` en BD y en
-  /// las filas (manteniéndolas `editado=1`) sin borrar el binario pendiente.
-  Future<void> _asociarPathsCarrete(
-    String idLocal,
-    List<Map<String, dynamic>> filasEditadas,
-  ) async {
-    final fotos = await _db.leerFotosPendientesSubida();
-    final porIdSeccion = <String, Map<String, dynamic>>{};
-    for (final foto in fotos) {
-      final idSeccion = foto['id_seccion']?.toString();
-      final path = foto['path_servidor']?.toString() ?? '';
-      if (idSeccion == null || idSeccion.isEmpty || path.isEmpty) continue;
-      porIdSeccion[idSeccion] = foto;
-    }
-
-    final aActualizar = <Map<String, dynamic>>[];
-    for (final fila in filasEditadas) {
-      final idSeccion = fila['id_seccion']?.toString();
-      final foto = porIdSeccion[idSeccion];
-      if (idSeccion == null || foto == null) continue;
-      final path = foto['path_servidor'].toString();
-      fila['fotografia'] = path;
-      aActualizar.add(fila);
-      await _db.marcarFotoSubida(foto['id_foto'].toString(), path);
-    }
-    if (aActualizar.isNotEmpty) {
-      await _db.guardarFilasSeccion(
-        descriptor.tablaSqlite,
-        idLocal,
-        aActualizar,
-      );
-    }
   }
 
   // ========== Accesores opcionales (para secciones con foto / 1:N) ==========
@@ -312,6 +177,34 @@ abstract class EdanSeccionEnvioBase<T> {
   void marcarSubida(T item, String path) {}
   String? idSeccionDe(T item) => null;
 
-  static bool _esPathServer(String path) =>
-      path.trimLeft().startsWith('/uploads/');
+  /// Asigna `id_seccion` a los ítems 1:N que están por persistir (los que
+  /// [debeGuardar] devuelve true) y que todavía no tienen id.
+  ///
+  /// Regla: `id_seccion` SOLO se genera aquí (al guardar) y únicamente si el
+  /// ítem carece de id. Los ítems con id existente (servidor o guardado previo)
+  /// se conservan tal cual; nunca se regeneran ni se reemplazan.
+  void asignarIdSeccionSiFalta(EdanLocalidad localidad, String prefijo) {
+    for (final item in itemsDe(localidad)) {
+      if (!debeGuardar(item)) continue;
+      final actual = idSeccionDe(item);
+      if (actual == null || actual.isEmpty) {
+        _setIdSeccion(item, generarIdSeccion(prefijo));
+      }
+    }
+  }
+
+  static void _setIdSeccion(dynamic item, String id) {
+    if (item is EdanDanoInfraPublica) { item.idSeccion = id; return; }
+    if (item is EdanEstablecimientoSalud) { item.idSeccion = id; return; }
+    if (item is EdanDanoVial) { item.idSeccion = id; return; }
+    if (item is EdanDanoUnidadEducativa) { item.idSeccion = id; return; }
+    if (item is EdanDanoVivienda) { item.idSeccion = id; return; }
+    if (item is EdanDanoAgricultura) { item.idSeccion = id; return; }
+    if (item is EdanDanoPecuario) { item.idSeccion = id; return; }
+    if (item is EdanInfraProductiva) { item.idSeccion = id; return; }
+    if (item is EdanServicioBasicoDetalle) { item.idSeccion = id; return; }
+    if (item is EdanGrupoVulnerable) { item.idSeccion = id; return; }
+    if (item is EdanImpactoPoblacion) { item.idSeccion = id; return; }
+    if (item is EdanGrupoEtario) { item.idSeccion = id; return; }
+  }
 }

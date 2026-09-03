@@ -522,10 +522,14 @@ class _EdanPage09State extends State<EdanPage09> {
       latActual: a.coordenadaLat,
       lonActual: a.coordenadaLon,
       seccion: 'Agricultura',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: a.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         a.coordenadaLat = lat;
         a.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => a.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
@@ -538,10 +542,14 @@ class _EdanPage09State extends State<EdanPage09> {
       latActual: p.coordenadaLat,
       lonActual: p.coordenadaLon,
       seccion: 'Pecuario',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: p.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         p.coordenadaLat = lat;
         p.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => p.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
@@ -554,18 +562,26 @@ class _EdanPage09State extends State<EdanPage09> {
       latActual: i.coordenadaLat,
       lonActual: i.coordenadaLon,
       seccion: 'Infraestructura productiva',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: i.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => i.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
   }
 
   Future<void> _eliminarAgricultura(EdanDanoAgricultura a) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: a.idSeccion,
+      rutaV2: 'danos-agricultura',
+      tablaSqlite: 'seccion_danos_agricultura',
       titulo: '¿Eliminar cultivo?',
       mensaje: 'Se eliminará el registro de "${a.tipoCultivo}".',
     );
@@ -574,8 +590,12 @@ class _EdanPage09State extends State<EdanPage09> {
   }
 
   Future<void> _eliminarPecuario(EdanDanoPecuario p) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: p.idSeccion,
+      rutaV2: 'danos-pecuarios',
+      tablaSqlite: 'seccion_danos_pecuarios',
       titulo: '¿Eliminar especie?',
       mensaje: 'Se eliminará el registro de "${p.especie}".',
     );
@@ -584,8 +604,12 @@ class _EdanPage09State extends State<EdanPage09> {
   }
 
   Future<void> _eliminarInfra(EdanInfraProductiva i) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: i.idSeccion,
+      rutaV2: 'infra-productiva',
+      tablaSqlite: 'seccion_infra_productiva',
       titulo: '¿Eliminar infraestructura?',
       mensaje: 'Se eliminará el registro de "${i.tipo}" infraestructura productiva.',
     );

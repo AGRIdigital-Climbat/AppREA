@@ -5,6 +5,8 @@ import '../../../../models/edan.dart';
 import '../../../../models/id_seccion_helper.dart';
 import '../../../../providers/reporte_provider.dart';
 import '../../../../services/auth_service.dart';
+import '../../../../services/database_helper.dart';
+import '../../../../services/edan_secciones_registry.dart';
 import '../../../../widgets/custom_text_field.dart';
 
 /// Página 01: Datos generales de la localidad.
@@ -492,10 +494,23 @@ class _EdanPage01State extends State<EdanPage01> {
       ));
     }
 
+    Future<void> _syncSecciones(String checkboxKey, bool activar) async {
+      final secciones = EdanSeccionesRegistry.checkboxSecciones[checkboxKey];
+      if (secciones == null || l.idLocal == null) return;
+      final db = DatabaseHelper.instance;
+      if (activar) {
+        await db.activarSecciones(l.idLocal!, secciones);
+      } else {
+        await db.desactivarSecciones(l.idLocal!, secciones);
+      }
+    }
+
     add('En población', Icons.groups_outlined, l.impPoblacion, (v) {
       l.impPoblacion = v;
+      _syncSecciones('impPoblacion', v);
       if (v) {
         l.impProteccion = true;
+        _syncSecciones('impProteccion', true);
         if (l.impactoPoblacion.isEmpty) {
           final rp = context.read<ReporteProvider>();
           l.impactoPoblacion.add(EdanImpactoPoblacion(
@@ -517,14 +532,21 @@ class _EdanPage01State extends State<EdanPage01> {
         }
       } else {
         l.impProteccion = false;
+        _syncSecciones('impProteccion', false);
       }
     });
-    add('En salud', Icons.local_hospital_outlined, l.impSalud,
-        (v) => l.impSalud = v);
+    add('En salud', Icons.local_hospital_outlined, l.impSalud, (v) {
+      l.impSalud = v;
+      _syncSecciones('impSalud', v);
+    });
     add('En infraestructuras', Icons.location_city_outlined,
-        l.impInfraestructura, (v) => l.impInfraestructura = v);
+        l.impInfraestructura, (v) {
+      l.impInfraestructura = v;
+      _syncSecciones('impInfraestructura', v);
+    });
     add('En servicios básicos', Icons.home_work_outlined, l.impServicios, (v) {
       l.impServicios = v;
+      _syncSecciones('impServicios', v);
       if (v && l.serviciosBasicos.isEmpty) {
         l.serviciosBasicos.addAll([
           EdanServicioBasicoDetalle(
@@ -540,17 +562,25 @@ class _EdanPage01State extends State<EdanPage01> {
         ]);
       }
     });
-    add('En educación', Icons.school_outlined, l.impEducacion,
-        (v) => l.impEducacion = v);
-    add('En viviendas', Icons.home_outlined, l.impVivienda,
-        (v) => l.impVivienda = v);
-    add('En agropecuaria', Icons.agriculture_outlined, l.impAgropecuario,
-        (v) => l.impAgropecuario = v);
+    add('En educación', Icons.school_outlined, l.impEducacion, (v) {
+      l.impEducacion = v;
+      _syncSecciones('impEducacion', v);
+    });
+    add('En viviendas', Icons.home_outlined, l.impVivienda, (v) {
+      l.impVivienda = v;
+      _syncSecciones('impVivienda', v);
+    });
+    add('En agropecuaria', Icons.agriculture_outlined, l.impAgropecuario, (v) {
+      l.impAgropecuario = v;
+      _syncSecciones('impAgropecuario', v);
+    });
     add('Necesidades en protección', Icons.shield_outlined, l.impProteccion,
         (v) {
       l.impProteccion = v;
+      _syncSecciones('impProteccion', v);
       if (v) {
         l.impPoblacion = true;
+        _syncSecciones('impPoblacion', true);
         if (l.impactoPoblacion.isEmpty) {
           final rp = context.read<ReporteProvider>();
           l.impactoPoblacion.add(EdanImpactoPoblacion(
@@ -572,10 +602,14 @@ class _EdanPage01State extends State<EdanPage01> {
         }
       } else {
         l.impPoblacion = false;
+        _syncSecciones('impPoblacion', false);
       }
     });
     add('Necesidades humanitarias', Icons.volunteer_activism_outlined,
-        l.impNecesidades, (v) => l.impNecesidades = v);
+        l.impNecesidades, (v) {
+      l.impNecesidades = v;
+      _syncSecciones('impNecesidades', v);
+    });
     return items;
   }
 

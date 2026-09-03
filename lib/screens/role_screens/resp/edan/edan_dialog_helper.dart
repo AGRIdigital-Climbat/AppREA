@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
+import '../../../../models/edan.dart';
+import '../../../../services/connectivity_service.dart';
+import '../../../../services/database_helper.dart';
+import '../../../../services/edan/edan_documento_sync_service.dart';
 import '../../../../widgets/custom_text_field.dart';
 
 /// Muestra un diálogo de confirmación antes de eliminar un ítem.
@@ -33,7 +37,75 @@ Future<bool> confirmarEliminacion(
   return ok == true;
 }
 
-/// Muestra un diálogo para crear/editar un ítem de una sección del EDAN.
+/// Confirma la eliminación, luego borra de SQLite y de la cola offline.
+/// Si hay internet, llama a la API DELETE directamente.
+/// Si no hay internet, guarda en `pendientes_eliminar` para el próximo sync.
+/// Muestra SnackBar con el resultado.
+Future<bool> eliminarItemSeccion(
+  BuildContext context, {
+  required EdanLocalidad localidad,
+  required String? idSeccion,
+  required String rutaV2,
+  required String tablaSqlite,
+  required String titulo,
+  required String mensaje,
+}) async {
+  if (idSeccion == null || idSeccion.isEmpty) return false;
+  final ok = await confirmarEliminacion(context, titulo: titulo, mensaje: mensaje);
+  if (!ok) return false;
+
+  final db = DatabaseHelper.instance;
+  final idLocal = localidad.idLocal;
+
+  // 1. SQLite DELETE — siempre (el item desaparece de la UI de inmediato)
+  if (idLocal != null) {
+    try {
+      await db.eliminarFilaSeccion(tablaSqlite, idSeccion);
+    } catch (e) {
+      debugPrint('[Eliminar] Error SQLite DELETE $idSeccion: $e');
+    }
+  }
+
+  // 2. Mover el borrado a la cola offline de seguridad y, si hay conexión,
+  //    ejecutarlo en el momento. La cola (procesarColaDeletes) ya distingue
+  //    un 404 (item inexistente en el servidor) y lo descarta como resuelto.
+  if (idLocal != null) {
+    try {
+      await db.agregarPendienteEliminar(
+        idLocal: idLocal,
+        idServer: localidad.idServer,
+        idSeccion: idSeccion,
+        rutaV2: rutaV2,
+        tablaSqlite: tablaSqlite,
+        insertadaEnServer: true,
+      );
+    } catch (e) {
+      debugPrint('[Eliminar] Error guardando pendiente $idSeccion: $e');
+    }
+  }
+
+  // 3. Si hay internet, procesar en el momento los deletes en cola
+  //    (incluido este). Un 404 se descarta como ya resuelto.
+  final conectado = await ConnectivityService().checkNow();
+  if (conectado && idLocal != null) {
+    await EdanDocumentoSyncService().procesarColaDeletes();
+  }
+
+  // 4. SnackBar de feedback
+  if (context.mounted) {
+    final texto = conectado
+        ? 'Eliminado exitoso'
+        : 'Eliminado (se sincronizará al conectar)';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(texto),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  return true;
+}
 /// [campos] define los campos del formulario; al confirmar devuelve un mapa
 /// con los valores introducidos.
 Future<Map<String, String>?> showEdanItemDialog({

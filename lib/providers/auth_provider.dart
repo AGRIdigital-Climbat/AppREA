@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/auth_service.dart';
 import '../services/edan_sync_service.dart';
-import '../services/localidad_sync_service.dart';
+import '../services/edan/edan_sync_respo_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService.instance;
@@ -114,7 +114,7 @@ class AuthProvider extends ChangeNotifier {
         usuarioId: userId,
       );
     } else if (_authService.idRol == 7) {
-      LocalidadSyncService.instance.recargarLocalidadesUsuario(
+      EdanSyncRespoService.instance.recargarLocalidades(
         idUsuario: userId,
       );
     }

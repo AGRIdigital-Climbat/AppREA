@@ -185,8 +185,12 @@ class _EdanPage04State extends State<EdanPage04> {
   }
 
   Future<void> _eliminar(EdanEstablecimientoSalud est) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: est.idSeccion,
+      rutaV2: 'salud-establecimientos',
+      tablaSqlite: 'seccion_salud_establecimientos',
       titulo: '¿Eliminar establecimiento?',
       mensaje: 'Se eliminará el registro de salud "${est.nombreEstablecimiento}".',
     );
@@ -201,10 +205,14 @@ class _EdanPage04State extends State<EdanPage04> {
       latActual: est.coordenadaLat,
       lonActual: est.coordenadaLon,
       seccion: 'Salud',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: est.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         est.coordenadaLat = lat;
         est.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => est.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});

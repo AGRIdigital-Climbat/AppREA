@@ -58,7 +58,9 @@ class _EdanPage07State extends State<EdanPage07> {
   Future<void> _editar(EdanDanoUnidadEducativa u,
       {bool esNuevo = false}) async {
     _nombre.text = u.nombreEstablecimiento;
-    _comunidad.text = u.comunidad;
+    _comunidad.text = u.comunidad.isNotEmpty
+        ? u.comunidad
+        : widget.localidad.nombre;
     _estudiantes.text = u.estudiantes > 0 ? '${u.estudiantes}' : '';
     _profesores.text = u.profesores > 0 ? '${u.profesores}' : '';
     _administrativos.text = u.administrativos > 0 ? '${u.administrativos}' : '';
@@ -81,7 +83,7 @@ class _EdanPage07State extends State<EdanPage07> {
                 const SizedBox(height: 6),
                 TextField(controller: _nombre),
                 const SizedBox(height: 12),
-                _campoTitulo('Comunidad'),
+                _campoTitulo('Localidad'),
                 const SizedBox(height: 6),
                 TextField(controller: _comunidad),
                 const SizedBox(height: 12),
@@ -135,18 +137,26 @@ class _EdanPage07State extends State<EdanPage07> {
       latActual: u.coordenadaLat,
       lonActual: u.coordenadaLon,
       seccion: 'Educación',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: u.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         u.coordenadaLat = lat;
         u.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => u.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
   }
 
   Future<void> _eliminar(EdanDanoUnidadEducativa u) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: u.idSeccion,
+      rutaV2: 'unidades-educativas',
+      tablaSqlite: 'seccion_unidades_educativas',
       titulo: '¿Eliminar unidad educativa?',
       mensaje: 'Se eliminará el registro "${u.nombreEstablecimiento}".',
     );

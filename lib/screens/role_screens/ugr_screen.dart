@@ -13,7 +13,7 @@ import 'ugr/ugr_edan_tab.dart';
 import 'ugr/ugr_guia_tab.dart';
 import 'ugr/ugr_localidades_tab.dart';
 import 'ugr/ugr_route.dart';
-import 'resp/resp_edan_form_screen.dart';
+import 'resp/edan/edan_form_wizard.dart';
 import 'resp/resp_mapa_tab.dart';
 
 class UgrScreen extends StatefulWidget {
@@ -390,7 +390,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
             FloatingActionButton(
               onPressed: () async {
                 final creado = await Navigator.of(context).push<bool>(
-                  ugrRoute(const RespEdanFormScreen()),
+                  ugrRoute(EdanFormWizard(), palette: Palettes.rea),
                 );
                 if (creado == true && mounted) {
                   _localidadesTabKey.currentState?.refresh();

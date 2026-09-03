@@ -4,7 +4,7 @@ import '../../config/theme.dart';
 import '../../models/edan.dart';
 import '../../providers/connectivity_provider.dart';
 import '../../providers/reporte_provider.dart';
-import '../../services/localidad_sync_service.dart';
+import '../../services/edan/edan_sync_respo_service.dart';
 import '../../services/sync_debug_config.dart';
 import '../../screens/sync_debug_screen.dart';
 import '../../widgets/perfil_tab.dart';
@@ -41,7 +41,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       _wasOnline = connectivity.isConnected;
       connectivity.addListener(_onConnectivityChanged);
       connectivity.initialize();
-      LocalidadSyncService.instance.recargarPendientes();
+      EdanSyncRespoService.instance.recargarPendientes();
       context.read<ReporteProvider>().initializeResp();
     });
   }
@@ -56,7 +56,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      LocalidadSyncService.instance.recargarPendientes();
+      EdanSyncRespoService.instance.recargarPendientes();
     }
   }
 
@@ -66,7 +66,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       _sincronizar(auto: true);
     }
     _wasOnline = online;
-    LocalidadSyncService.instance.recargarPendientes();
+    EdanSyncRespoService.instance.recargarPendientes();
   }
 
   @override
@@ -237,7 +237,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
             case 2:
               _mapaTabKey.currentState?.refresh();
           }
-          LocalidadSyncService.instance.recargarPendientes();
+          EdanSyncRespoService.instance.recargarPendientes();
         },
         selectedItemColor: palette.primary,
         unselectedItemColor: AppColors.textSecondary,
@@ -277,12 +277,12 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   Widget _buildSyncButton() {
     return ListenableBuilder(
       listenable: Listenable.merge([
-        LocalidadSyncService.instance.pendientes,
-        LocalidadSyncService.instance.sincronizando,
+        EdanSyncRespoService.instance.pendientes,
+        EdanSyncRespoService.instance.sincronizando,
       ]),
       builder: (context, _) {
-        final pendientes = LocalidadSyncService.instance.pendientes.value;
-        final sincronizando = LocalidadSyncService.instance.sincronizando.value;
+        final pendientes = EdanSyncRespoService.instance.pendientes.value;
+        final sincronizando = EdanSyncRespoService.instance.sincronizando.value;
         return IconButton(
           tooltip: sincronizando
               ? 'Sincronizando...'
@@ -307,7 +307,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sincronizar({bool auto = false}) async {
-    if (LocalidadSyncService.instance.isSyncing) return;
+    if (EdanSyncRespoService.instance.isSyncing) return;
     if (!(_connectivity?.isConnected ?? true)) {
       if (!auto && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -320,12 +320,12 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       return;
     }
 
-    final result = await LocalidadSyncService.instance.sincronizar();
+    final result = await EdanSyncRespoService.instance.sincronizar();
     if (!mounted) return;
 
     _dashboardTabKey.currentState?.refresh();
     _edanTabKey.currentState?.refresh();
-    LocalidadSyncService.instance.recargarPendientes();
+    EdanSyncRespoService.instance.recargarPendientes();
 
     if (auto &&
         result.exito &&

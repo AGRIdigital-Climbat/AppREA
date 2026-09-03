@@ -450,12 +450,12 @@ void main() {
       expect(json['coordenada_lon'], closeTo(-68.1532, 0.0001));
     });
 
-    test('NO incluye fotografia', () {
+    test('SÍ incluye fotografia (backend la espera)', () {
       final item = EdanServicioBasicoDetalle(
         tipo: 'agua_potable',
         danoParcial: true,
       );
-      expect(item.toApiJson().containsKey('fotografia'), isFalse);
+      expect(item.toApiJson().containsKey('fotografia'), isTrue);
     });
 
     test('NO incluye fotos array', () {
@@ -467,9 +467,10 @@ void main() {
       expect(item.toApiJson().containsKey('fotos'), isFalse);
     });
 
-    test('sin idSeccion → NO incluye id_seccion', () {
+    test('sin idSeccion → incluye id_seccion (null) + fecha_modificacion', () {
       final item = EdanServicioBasicoDetalle(tipo: 'gas_domiciliario', danoParcial: true);
-      expect(item.toApiJson().containsKey('id_seccion'), isFalse);
+      expect(item.toApiJson().containsKey('id_seccion'), isTrue);
+      expect(item.toApiJson().containsKey('fecha_modificacion'), isTrue);
     });
   });
 

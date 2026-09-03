@@ -16,6 +16,10 @@ class EdanSaludEstablecimientosService
       l.establecimientosSalud;
 
   @override
+  Map<String, dynamic> filaApi(EdanEstablecimientoSalud item) =>
+      item.toApiJson();
+
+  @override
   List<EdanFoto> fotosDe(EdanEstablecimientoSalud item) => item.fotos;
 
   @override

@@ -375,7 +375,7 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
           _Linea.par(
               'Nombre', e.nombreEstablecimiento.isEmpty ? 'Sin nombre' : e.nombreEstablecimiento),
           if (e.comunidad.trim().isNotEmpty)
-            _Linea.par('Comunidad', e.comunidad),
+            _Linea.par('Localidad', e.comunidad),
           if (e.nivelAtencion.trim().isNotEmpty)
             _Linea.par('Nivel de atención', e.nivelAtencion),
           if (e.danoTotal) _Linea.par('Estado', 'Daño total'),
@@ -440,7 +440,7 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
                   ? 'Sin especificar'
                   : i.tipoEstructura),
           if (i.comunidad.trim().isNotEmpty)
-            _Linea.par('Comunidad', i.comunidad),
+            _Linea.par('Localidad', i.comunidad),
           if (i.danoTotal) _Linea.par('Estado', 'Total'),
           if (i.danoParcial) _Linea.par('Estado', 'Parcial'),
           if (i.observaciones.trim().isNotEmpty)
@@ -480,7 +480,7 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
                 ? 'Sin nombre'
                 : u.nombreEstablecimiento),
         if (u.comunidad.trim().isNotEmpty)
-          _Linea.par('Comunidad', u.comunidad),
+          _Linea.par('Localidad', u.comunidad),
         if (u.danoTotal) _Linea.par('Estado', 'Total'),
         if (u.danoParcial) _Linea.par('Estado', 'Parcial'),
         if (u.totalAfectados > 0)
@@ -500,7 +500,7 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
     final lineas = <_Linea>[];
     for (final v in l.danosVivienda) {
       lineas.add(_Linea.subcard([
-        _Linea.par('Comunidad',
+        _Linea.par('Localidad',
             v.comunidad.isEmpty ? 'No especificada' : v.comunidad),
         if (v.danoParcial > 0) _Linea.par('Daño parcial', '${v.danoParcial}'),
         if (v.danoTotal > 0) _Linea.par('Daño total', '${v.danoTotal}'),

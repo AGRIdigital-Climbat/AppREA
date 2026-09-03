@@ -8,6 +8,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
 import '../services/debug_log.dart';
+import '../services/edan/edan_documento_sync_service.dart';
 import '../services/edan/edan_localidades_envio_v2_service.dart';
 import '../services/edan/edan_secciones_envio_factory.dart';
 import '../services/edan_secciones_registry.dart';
@@ -71,6 +72,7 @@ class LocalidadSyncService {
             _preservarEncabezado(localidad, existente);
             _mergeSecciones(existente, localidad);
             localidad.idLocal = idLocal;
+            localidad.deduplicarSecciones();
             await DatabaseHelper.instance.updateLocalidad(localidad);
             if (localidad.idServer != null) {
               await DatabaseHelper.instance.markLocalidadAsSynced(idLocal, localidad.idServer!);
@@ -303,7 +305,7 @@ class LocalidadSyncService {
 
       final db = DatabaseHelper.instance;
       final api = ApiService.instance;
-      final sincV2 = EdanLocalidadesEnvioV2Service(api: api, db: db);
+      final sincV2 = EdanLocalidadesEnvioV2Service(db: db);
       final srv = _EstadosServidor();
 
       // ===== Diagnóstico local: analizar estado ANTES de cualquier API =====
@@ -343,12 +345,33 @@ class LocalidadSyncService {
             'detalles': editados,
           },
         );
+        // Diagnóstico POR ÍTEM (localidad → secciones): estructura expandible
+        // en el panel de debug, para ver el detalle de cada localidad sucia.
+        for (final e in editados) {
+          SyncDebugCollector.instance.addDiagnosticoItemDetalle({
+            'id_local': e['id_local'],
+            'nombre': e['nombre'],
+            'editado': e['editado'],
+            'sincronizado': e['sincronizado'],
+            'id_server': e['id_server'],
+            'endpoint': e['id_server'] == null
+                ? 'POST /localidades/documento'
+                : 'PUT /localidades/${e['id_server']}/documento',
+            'metodo': e['id_server'] == null ? 'POST' : 'PUT',
+            'secciones_modificadas': e['secciones_modificadas'],
+          });
+        }
       }
 
       // ===== Fase 1: PUSH localidades con cambios locales (editado=1) =====
       // IMPORTANTE: Se envía PRIMERO para que el servidor tenga los datos
       // actualizados ANTES de comparar timestamps en el GET.
       if (kSyncDebugMode) SyncDebugCollector.instance.addFase('Fase 1: PUSH editados');
+
+      // -- Subfase 1a: Subir fotos pendientes ANTES del PUSH --
+      // El orden correcto es: fotos → datos → GET, porque el path de la foto
+      // (devuelto por /upload) debe estar en el JSON del documento al enviar.
+      final localidadesAEnviar = <EdanLocalidad>[];
       for (final local in locales) {
         final idLocal = local.idLocal;
         if (idLocal == null) continue;
@@ -357,16 +380,50 @@ class LocalidadSyncService {
             local.editado ||
             modificadas.isNotEmpty;
         if (!needPush) continue;
+        localidadesAEnviar.add(local);
+      }
+
+      if (localidadesAEnviar.isNotEmpty) {
+        if (kSyncDebugMode) SyncDebugCollector.instance.setPhase(
+            'Fase 1a: Subir fotos (${localidadesAEnviar.length} localidades)');
+        for (final local in localidadesAEnviar) {
+          final idLocal = local.idLocal;
+          if (idLocal == null) continue;
+          try {
+            for (final ruta in EdanSeccionesRegistry.rutasV2Todas()) {
+              final desc = EdanSeccionesRegistry.porRuta(ruta);
+              final servicio = EdanSeccionesEnvioFactory.servicioDeRuta(ruta);
+              if (servicio == null || desc == null || !desc.usaFoto) continue;
+              try {
+                await servicio.subirFotosPendientes(local);
+              } catch (e) {
+                debugPrint('[SyncC] Error subiendo fotos $ruta para $idLocal: $e');
+              }
+            }
+          } catch (e) {
+            debugPrint('[SyncC] Error en subfase fotos $idLocal: $e');
+          }
+        }
+      }
+
+      // -- Subfase 1b: PUSH documentos (fotos ya subidas) --
+      for (final local in localidadesAEnviar) {
+        final idLocal = local.idLocal;
+        if (idLocal == null) continue;
 
         try {
-          if (kSyncDebugMode) SyncDebugCollector.instance.setPhase('Fase 1: PUSH $idLocal');
+          // PRIORIDAD: procesar cola de deletes offline PRIMERO
+          final docSync = EdanDocumentoSyncService();
+          await docSync.procesarColaDeletes();
+          // Eliminar filas marcadas_borrar ANTES de construir el documento
+          await docSync.eliminarFilasAntesDelPush(local);
+
+          if (kSyncDebugMode) SyncDebugCollector.instance.setPhase('Fase 1b: PUSH $idLocal');
+          final modificadas = await db.getSeccionesModificadas(idLocal);
           final Set<String> soloRutas = modificadas.isNotEmpty
               ? modificadas.toSet()
               : EdanSeccionesRegistry.rutasV2Todas().toSet();
-          final ok = await sincV2.enviarLocalidad(
-            local,
-            soloRutas: soloRutas,
-          );
+          final ok = await docSync.enviarLocalidadDocumento(local, skipFotos: true);
           final idEdan = local.idServer;
           if (ok && idEdan != null) {
             await db.markLocalidadAsSyncedConFecha(
@@ -413,7 +470,16 @@ class LocalidadSyncService {
           if (idLocal == null) continue;
           try {
             if (loc.idServer != null) {
-              await api.deleteLocalidad(loc.idServer!);
+              // Delete todo-en-uno: si está consolidada en un EDAN ya no es
+              // huérfana → 403 → NO borramos la fila local (datos no se pierden).
+              final ok = await EdanDocumentoSyncService()
+                  .eliminarLocalidadDocumento(loc.idServer!);
+              if (!ok) {
+                debugPrint('[SyncC] Tombstone SKIP $idLocal (consolidada en EDAN)');
+                result.fallidos++;
+                result.exito = false;
+                continue;
+              }
               result.eliminados++;
               debugPrint('[SyncC] Tombstone DELETE server ${loc.idServer}');
             }
@@ -464,11 +530,12 @@ class LocalidadSyncService {
           }
           try {
             if (kSyncDebugMode) SyncDebugCollector.instance.setPhase('Fase 4: PULL $idLocal');
-            final detalle = await api.getLocalidadById(idServer);
+            final detalle = await api.obtenerDocumento('$idServer');
             final serverLoc = EdanLocalidad.fromJson(detalle);
             serverLoc.idLocal = idLocal;
             _preservarEncabezado(serverLoc, local);
             _mergeSecciones(local, serverLoc);
+            serverLoc.deduplicarSecciones();
             await db.reemplazarLocalidadDesdeServer(
               serverLoc,
               fechaServer: serverFecha,
@@ -493,14 +560,16 @@ class LocalidadSyncService {
         if (!needPush) continue;
 
         try {
+          final docSync = EdanDocumentoSyncService();
+          // PRIORIDAD: procesar cola de deletes offline PRIMERO
+          await docSync.procesarColaDeletes();
+          await docSync.eliminarFilasAntesDelPush(local);
+
           if (kSyncDebugMode) SyncDebugCollector.instance.setPhase('Fase 4: PUSH respaldo $idLocal');
           final Set<String> soloRutas = modificadas.isNotEmpty
               ? modificadas.toSet()
               : EdanSeccionesRegistry.rutasV2Todas().toSet();
-          final ok = await sincV2.enviarLocalidad(
-            local,
-            soloRutas: soloRutas,
-          );
+          final ok = await docSync.enviarLocalidadDocumento(local, skipFotos: true);
           final idEdan = local.idServer;
           if (ok && idEdan != null) {
             await db.markLocalidadAsSyncedConFecha(
@@ -534,7 +603,7 @@ class LocalidadSyncService {
         );
         if (existe) continue;
         try {
-          final detalle = await api.getLocalidadById(item.idEdan!);
+          final detalle = await api.obtenerDocumento('${item.idEdan}');
           final serverLoc = EdanLocalidad.fromJson(detalle);
           serverLoc.idLocal = item.idLocal ?? generateIdLocalTemporal();
           await db.insertLocalidad(serverLoc, usuarioId: userId);
@@ -557,12 +626,13 @@ class LocalidadSyncService {
           'act=${result.actualizados} cre=${result.creados} '
           'del=${result.eliminados} err=${result.fallidos}');
 
-      // ===== Fase 5: Sync de fotos (upload pendientes + download desde server) =====
-      if (kSyncDebugMode) SyncDebugCollector.instance.addFase('Fase 5: Sync Fotos');
+      // ===== Fase 5: Download de fotos desde server =====
+      // La subida de fotos ya se hizo en Fase 1a (antes del PUSH).
+      if (kSyncDebugMode) SyncDebugCollector.instance.addFase('Fase 5: Download Fotos');
       try {
-        await _sincronizarFotos();
+        await descargarFotosEdan();
       } catch (e) {
-        debugPrint('[SyncC] Error en sync de fotos: $e');
+        debugPrint('[SyncC] Error descargando fotos: $e');
       }
 
       return result;
@@ -602,47 +672,6 @@ class LocalidadSyncService {
     } catch (e) {
       debugPrint('Error recargando pendientes de localidades: $e');
     }
-  }
-
-  /// Sincroniza fotos: primero sube las pendientes del servidor, luego
-  /// descarga las que están en el servidor pero no localmente.
-  Future<void> _sincronizarFotos() async {
-    final db = DatabaseHelper.instance;
-    final userId = AuthService.instance.userId;
-    if (userId == null) return;
-
-    // Upload: fotos capturadas localmente que aún no están en el servidor.
-    final pendientesSubida = await db.leerFotosPendientesSubida();
-    if (pendientesSubida.isNotEmpty) {
-      debugPrint('[SyncFotos] ${pendientesSubida.length} fotos pendientes de subida');
-      // Agrupar por localidad para usar el servicio de secciones.
-      final porLocalidad = <String, List<Map<String, dynamic>>>{};
-      for (final f in pendientesSubida) {
-        final idLocal = f['id_local']?.toString() ?? '';
-        porLocalidad.putIfAbsent(idLocal, () => []).add(f);
-      }
-      for (final entry in porLocalidad.entries) {
-        try {
-          final loc = await db.getLocalidadByIdLocal(entry.key);
-          if (loc != null) {
-            for (final ruta in EdanSeccionesRegistry.rutasV2Todas()) {
-              final desc = EdanSeccionesRegistry.porRuta(ruta);
-              if (desc != null && desc.usaFoto) {
-                final svc = EdanSeccionesEnvioFactory.servicioDeRuta(ruta);
-                if (svc != null) {
-                  await svc.subirFotosPendientes(loc);
-                }
-              }
-            }
-          }
-        } catch (e) {
-          debugPrint('[SyncFotos] Error subida localidad ${entry.key}: $e');
-        }
-      }
-    }
-
-    // Download: fotos del servidor que necesitan ser descargadas offline.
-    await descargarFotosEdan();
   }
 
   /// Descarga las fotos de secciones EDAN que el servidor tiene pero el

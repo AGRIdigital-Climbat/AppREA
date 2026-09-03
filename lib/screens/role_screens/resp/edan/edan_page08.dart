@@ -52,7 +52,9 @@ class _EdanPage08State extends State<EdanPage08> {
 
   Future<void> _editar(EdanDanoVivienda v,
       {bool esNuevo = false}) async {
-    _comunidad.text = v.comunidad;
+    _comunidad.text = v.comunidad.isNotEmpty
+        ? v.comunidad
+        : widget.localidad.nombre;
     _parcial.text = v.danoParcial > 0 ? '${v.danoParcial}' : '';
     _total.text = v.danoTotal > 0 ? '${v.danoTotal}' : '';
     _nec.text = v.necesidadesInmediatas;
@@ -68,7 +70,7 @@ class _EdanPage08State extends State<EdanPage08> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _campoTitulo('Comunidad'),
+                _campoTitulo('Localidad'),
                 const SizedBox(height: 6),
                 TextField(controller: _comunidad),
                 const SizedBox(height: 12),
@@ -113,18 +115,26 @@ class _EdanPage08State extends State<EdanPage08> {
       latActual: v.coordenadaLat,
       lonActual: v.coordenadaLon,
       seccion: 'Viviendas',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: v.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         v.coordenadaLat = lat;
         v.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => v.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
   }
 
   Future<void> _eliminar(EdanDanoVivienda v) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: v.idSeccion,
+      rutaV2: 'danos-vivienda',
+      tablaSqlite: 'seccion_danos_vivienda',
       titulo: '¿Eliminar vivienda?',
       mensaje: 'Se eliminará el registro de daño en viviendas.',
     );
@@ -151,7 +161,7 @@ class _EdanPage08State extends State<EdanPage08> {
         ),
         const SizedBox(height: 10),
         ...l.danosVivienda.map((v) => EdanItemCard(
-                titulo: v.comunidad.isEmpty ? 'Comunidad' : v.comunidad,
+                titulo: v.comunidad.isEmpty ? widget.localidad.nombre : v.comunidad,
                 subtitulo: [
                   if (v.danoParcial > 0) '${v.danoParcial} parcial',
                   if (v.danoTotal > 0) '${v.danoTotal} total',

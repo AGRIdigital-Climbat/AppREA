@@ -1,3 +1,5 @@
+import 'database_helper.dart';
+
 /// Tipo de serialización de una sección en la API v2.
 enum EdanSeccionTipo { unoAUno, unoAN }
 
@@ -167,7 +169,71 @@ class EdanSeccionesRegistry {
   static List<String> tablasSqliteConFoto() =>
       secciones.where((s) => s.usaFoto).map((s) => s.tablaSqlite).toList();
 
+  /// Busca en las tablas con foto cuál contiene el [idSeccion] dado.
+  /// Retorna el nombre de la tabla o '' si no se encuentra.
+  static Future<String> buscarTablaPorIdSeccion(
+    String idSeccion,
+    DatabaseHelper db,
+  ) async {
+    final database = await db.database;
+    for (final desc in secciones.where((s) => s.usaFoto)) {
+      final tabla = desc.tablaSqlite;
+      final result = await database.query(
+        tabla,
+        columns: ['id_seccion'],
+        where: 'id_seccion = ?',
+        whereArgs: [idSeccion],
+        limit: 1,
+      );
+      if (result.isNotEmpty) return tabla;
+    }
+    return '';
+  }
+
   /// Rutas v2 que debe marcar una página dada del wizard.
   static List<String> rutasDePagina(String paginaWizard) =>
       paginasWizard[paginaWizard] ?? const [];
+
+  /// Mapping: checkbox de page01 → secciones que activa.
+  static const Map<String, List<String>> checkboxSecciones = {
+    'impPoblacion': ['impacto-poblacion', 'primera-respuesta'],
+    'impSalud': ['salud-establecimientos', 'necesidad-salud'],
+    'impInfraestructura': ['danos-viales', 'danos-infra-publica'],
+    'impServicios': ['servicios-basicos'],
+    'impEducacion': ['unidades-educativas'],
+    'impVivienda': ['danos-vivienda'],
+    'impAgropecuario': ['danos-agricultura', 'danos-pecuarios', 'infra-productiva'],
+    'impProteccion': ['proteccion'],
+    'impNecesidades': ['necesidad-humanitaria'],
+  };
+
+  /// Mapping: sección (ruta_v2) → flags imp_* que setea (alineado a backend IMP_FLAG_POR_TABLA).
+  static const Map<String, List<String>> seccionFlags = {
+    'impacto-poblacion': ['imp_impacto_poblacion', 'imp_poblacion'],
+    'primera-respuesta': ['imp_primera_respuesta', 'imp_poblacion'],
+    'salud-establecimientos': ['imp_salud_establecimientos', 'imp_salud'],
+    'necesidad-salud': ['imp_necesidad_salud', 'imp_salud', 'imp_necesidades'],
+    'danos-viales': ['imp_danos_viales', 'imp_infraestructura'],
+    'danos-infra-publica': ['imp_danos_infra_publica', 'imp_infraestructura'],
+    'servicios-basicos': ['imp_servicios_basicos', 'imp_servicios'],
+    'unidades-educativas': ['imp_unidades_educativas', 'imp_educacion'],
+    'danos-vivienda': ['imp_danos_vivienda', 'imp_vivienda'],
+    'danos-agricultura': ['imp_danos_agricultura', 'imp_agropecuario'],
+    'danos-pecuarios': ['imp_danos_pecuarios', 'imp_agropecuario'],
+    'infra-productiva': ['imp_infra_productiva', 'imp_agropecuario'],
+    'proteccion': ['imp_proteccion'],
+    'necesidad-humanitaria': ['imp_necesidad_humanitaria', 'imp_necesidades'],
+  };
+
+  /// Construye los 22 flags imp_* a partir de las secciones activas.
+  static Map<String, bool> construirFlagsDesdeActivas(List<String> activas) {
+    final flags = <String, bool>{};
+    for (final entry in seccionFlags.entries) {
+      final isActive = activas.contains(entry.key);
+      for (final flag in entry.value) {
+        flags[flag] = isActive || (flags[flag] ?? false);
+      }
+    }
+    return flags;
+  }
 }

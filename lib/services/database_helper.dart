@@ -24,7 +24,7 @@ class DatabaseHelper {
     final path = join(await getDatabasesPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 24,
+      version: 29,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -312,6 +312,16 @@ class DatabaseHelper {
     // requieren el esquema v21 corregido.
     await _crearTablasSeccionV20(db);
     await _recrearTablasSeccionV21(db);
+
+    // Tabla de secciones activas (checkboxes del wizard → secciones del JSON).
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS localidad_secciones_activas (
+        id_local TEXT NOT NULL,
+        seccion TEXT NOT NULL,
+        activa INTEGER DEFAULT 1,
+        PRIMARY KEY (id_local, seccion)
+      )
+    ''');
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -622,6 +632,125 @@ class DatabaseHelper {
         );
       }
     }
+    if (oldVersion < 25) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS localidad_secciones_activas (
+          id_local TEXT NOT NULL,
+          seccion TEXT NOT NULL,
+          activa INTEGER DEFAULT 1,
+          PRIMARY KEY (id_local, seccion)
+        )
+      ''');
+    }
+    if (oldVersion < 26) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS foto_pendiente_v2 (
+          id_foto TEXT PRIMARY KEY,
+          id_local TEXT NOT NULL,
+          id_seccion TEXT NOT NULL,
+          ruta_local_archivo TEXT,
+          path_servidor TEXT,
+          latitud REAL,
+          longitud REAL,
+          subida INTEGER DEFAULT 0,
+          descargada INTEGER DEFAULT 0,
+          intentos INTEGER DEFAULT 0,
+          ultimo_error TEXT,
+          fecha_creacion TEXT NOT NULL
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pendientes_eliminar (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          id_local TEXT NOT NULL,
+          id_server INTEGER,
+          id_seccion TEXT NOT NULL,
+          ruta_v2 TEXT NOT NULL,
+          tabla_sqlite TEXT NOT NULL,
+          insertada_en_server INTEGER DEFAULT 0,
+          sincronizado INTEGER DEFAULT 0,
+          fecha_creacion TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 27) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pendientes_eliminar (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          id_local TEXT NOT NULL,
+          id_server INTEGER,
+          id_seccion TEXT NOT NULL,
+          ruta_v2 TEXT NOT NULL,
+          tabla_sqlite TEXT NOT NULL,
+          insertada_en_server INTEGER DEFAULT 0,
+          sincronizado INTEGER DEFAULT 0,
+          fecha_creacion TEXT NOT NULL
+        )
+      ''');
+    }
+    if (oldVersion < 28) {
+      // Asegura que la tabla de cola de deletes offline exista. Cubre el caso
+      // de DBs inicializadas directamente en una versión alta (>= 26) cuyo
+      // onCreate no creaba `pendientes_eliminar`. Idempotente: no toca datos.
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS pendientes_eliminar (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          id_local TEXT NOT NULL,
+          id_server INTEGER,
+          id_seccion TEXT NOT NULL,
+          ruta_v2 TEXT NOT NULL,
+          tabla_sqlite TEXT NOT NULL,
+          insertada_en_server INTEGER DEFAULT 0,
+          sincronizado INTEGER DEFAULT 0,
+          fecha_creacion TEXT NOT NULL
+        )
+      ''');
+    }
+
+    if (oldVersion < 29) {
+      // Limpieza de duplicados por identidad de catálogo: un mismo grupo
+      // vulnerable / grupo etario no debe figurar más de una vez por
+      // localidad (aunque cada fila arrastre un id_seccion distinto).
+      // Se conserva la primera fila insertada (rowid más bajo).
+      await db.execute('''
+        DELETE FROM seccion_proteccion
+        WHERE id_local IS NOT NULL
+          AND id_grupo_vulnerable_catalogo IS NOT NULL
+          AND rowid NOT IN (
+            SELECT MIN(rowid)
+            FROM seccion_proteccion
+            WHERE id_local IS NOT NULL
+              AND id_grupo_vulnerable_catalogo IS NOT NULL
+            GROUP BY id_local, id_grupo_vulnerable_catalogo
+          )
+      ''');
+      await db.execute('''
+        DELETE FROM seccion_impacto_poblacion
+        WHERE id_local IS NOT NULL
+          AND id_grupo_etario IS NOT NULL
+          AND rowid NOT IN (
+            SELECT MIN(rowid)
+            FROM seccion_impacto_poblacion
+            WHERE id_local IS NOT NULL
+              AND id_grupo_etario IS NOT NULL
+            GROUP BY id_local, id_grupo_etario
+          )
+      ''');
+      // Índices UNIQUE: refuerzan la unicidad a nivel de BD para evitar que la
+      // raíz del problema (duplicados por id_seccion distinto sobre el mismo
+      // catálogo) vuelva a ocurrir. SQLite permite múltiples nulos, así que las
+      // filas sin catálogo no se ven afectadas.
+      await db.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_seccion_proteccion_grupo
+          ON seccion_proteccion (id_local, id_grupo_vulnerable_catalogo)
+          WHERE id_local IS NOT NULL AND id_grupo_vulnerable_catalogo IS NOT NULL
+      ''');
+      await db.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_seccion_impacto_grupo
+          ON seccion_impacto_poblacion (id_local, id_grupo_etario)
+          WHERE id_local IS NOT NULL AND id_grupo_etario IS NOT NULL
+      ''');
+    }
   }
 
   /// Crea las 14 tablas de sección v2 (Modelo A) + carrete de fotos.
@@ -930,6 +1059,23 @@ class DatabaseHelper {
         ultimo_error TEXT
       )
     ''');
+    // ===== foto_pendiente_v2: schema limpio para upload/download =====
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS foto_pendiente_v2 (
+        id_foto TEXT PRIMARY KEY,
+        id_local TEXT NOT NULL,
+        id_seccion TEXT NOT NULL,
+        ruta_local_archivo TEXT,
+        path_servidor TEXT,
+        latitud REAL,
+        longitud REAL,
+        subida INTEGER DEFAULT 0,
+        descargada INTEGER DEFAULT 0,
+        intentos INTEGER DEFAULT 0,
+        ultimo_error TEXT,
+        fecha_creacion TEXT NOT NULL
+      )
+    ''');
   }
 
   /// Migración v21: recrea desde cero las tablas de sección RESP cuyas columnas
@@ -1038,6 +1184,20 @@ class DatabaseHelper {
       )
     ''');
 
+    // Unicidad de catálogo en las secciones "caso especial" (protección e
+    // impacto): un mismo grupo no puede figurar DOS veces para la misma
+    // localidad, aunque cada fila arrastre un id_seccion distinto.
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_seccion_proteccion_grupo
+        ON seccion_proteccion (id_local, id_grupo_vulnerable_catalogo)
+        WHERE id_local IS NOT NULL AND id_grupo_vulnerable_catalogo IS NOT NULL
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_seccion_impacto_grupo
+        ON seccion_impacto_poblacion (id_local, id_grupo_etario)
+        WHERE id_local IS NOT NULL AND id_grupo_etario IS NOT NULL
+    ''');
+
     await db.execute('DROP TABLE IF EXISTS seccion_necesidad_salud');
     await db.execute('''
       CREATE TABLE seccion_necesidad_salud (
@@ -1051,6 +1211,20 @@ class DatabaseHelper {
         marcado_borrar INTEGER DEFAULT 0,
         insertada_en_server INTEGER DEFAULT 0,
         fecha_modificacion_local TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pendientes_eliminar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_local TEXT NOT NULL,
+        id_server INTEGER,
+        id_seccion TEXT NOT NULL,
+        ruta_v2 TEXT NOT NULL,
+        tabla_sqlite TEXT NOT NULL,
+        insertada_en_server INTEGER DEFAULT 0,
+        sincronizado INTEGER DEFAULT 0,
+        fecha_creacion TEXT NOT NULL
       )
     ''');
   }
@@ -1953,6 +2127,10 @@ class DatabaseHelper {
     if (loc.municipioNombre == null || loc.municipioNombre!.isEmpty) {
       loc.municipioNombre = row['municipio_nombre'] as String?;
     }
+    // Toda lectura desde SQLite pasa por aquí. Aplica la misma lógica de
+    // deduplicación por id_seccion que `construirDocumento`: une el modelo
+    // para que datos_json con duplicados nunca se propague a la UI.
+    loc.deduplicarSecciones();
     return loc;
   }
 
@@ -2030,7 +2208,7 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query(
       'localidades_offline',
-      where: 'usuario_id = ?',
+      where: 'usuario_id = ? AND pendiente_eliminacion = 0',
       whereArgs: [usuarioId],
       orderBy: 'fecha_creacion DESC',
     );
@@ -2112,7 +2290,6 @@ class DatabaseHelper {
   }) {
     final fecha = fechaModificacion ?? DateTime.now().toIso8601String();
     l.fechaModificacion = fecha;
-    l.recalcularFlagsImpacto();
     return {
       'id_server': l.idServer,
       'id_edan': l.idEdan,
@@ -2184,6 +2361,7 @@ class DatabaseHelper {
 
   /// Marca sincronizada conservando la fecha_modificacion del servidor
   /// (autoridad de tiempo para LWW). No la sobrescribe con DateTime.now().
+  /// NO toca pendiente_eliminacion — si está marcada para eliminar, se conserva.
   Future<int> markLocalidadAsSyncedConFecha(
     String idLocal,
     int idServer,
@@ -2195,7 +2373,6 @@ class DatabaseHelper {
       {
         'id_server': idServer,
         'sincronizado': 1,
-        'pendiente_eliminacion': 0,
         'pendiente_actualizacion': 0,
         'editado': 0,
         'intentos_sync': 0,
@@ -2384,7 +2561,6 @@ class DatabaseHelper {
       'localidades_offline',
       {
         'pendiente_eliminacion': 1,
-        'sincronizado': 0,
         'fecha_modificacion': DateTime.now().toIso8601String(),
       },
       where: 'id_local = ?',
@@ -2543,6 +2719,49 @@ class DatabaseHelper {
     );
   }
 
+  /// Elimina las filas de una tabla de secci�n que ya no est�n en el modelo
+  /// actual (las que el usuario quit� del array 1:N al guardar en el wizard).
+  ///
+  /// - Filas con `insertada_en_server=1` se marcan `marcado_borrar=1` para que
+  ///   el pr�ximo push las DELETE en el servidor.
+  /// - Filas con `insertada_en_server=0` se eliminan localmente (nunca llegaron
+  ///   al servidor).
+  ///
+  /// [idsAConserver] es el conjunto de `id_seccion` que S� est�n en el modelo
+  /// actual y no deben tocarse.
+  Future<void> limpiarFilasFaltantesEnSeccion(
+    String tabla,
+    String idLocal,
+    Set<String> idsAConserver,
+  ) async {
+    final db = await database;
+    final existentes = await db.query(
+      tabla,
+      columns: ['id_seccion', 'insertada_en_server'],
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+    for (final fila in existentes) {
+      final idSeccion = fila['id_seccion']?.toString() ?? '';
+      if (idSeccion.isEmpty || idsAConserver.contains(idSeccion)) continue;
+      final insertadaEnServer = fila['insertada_en_server'] == 1;
+      if (insertadaEnServer) {
+        await db.update(
+          tabla,
+          {'marcado_borrar': 1},
+          where: 'id_seccion = ?',
+          whereArgs: [idSeccion],
+        );
+      } else {
+        await db.delete(
+          tabla,
+          where: 'id_seccion = ?',
+          whereArgs: [idSeccion],
+        );
+      }
+    }
+  }
+
   /// Elimina TODAS las filas de las 14 tablas de sección para una localidad.
   /// Se llama antes de `popularSeccionesDesdeServer` tras un PULL con
   /// `?modo=comprimido` para que solo queden en SQLite las secciones que
@@ -2648,6 +2867,138 @@ class DatabaseHelper {
       where: 'id_seccion = ?',
       whereArgs: [idSeccion],
     );
+  }
+
+  // ========== Cola de deletes offline (pendientes_eliminar) ==========
+
+  /// Garantiza que la tabla `pendientes_eliminar` exista. Crea la tabla bajo
+  /// demanda si falta (por ejemplo, en bases inicializadas en una versión alta
+  /// cuyo onCreate/migración no la crearon). Idempotente y no borra datos.
+  Future<void> _asegurarPendientesEliminar() async {
+    final db = await database;
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS pendientes_eliminar (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id_local TEXT NOT NULL,
+        id_server INTEGER,
+        id_seccion TEXT NOT NULL,
+        ruta_v2 TEXT NOT NULL,
+        tabla_sqlite TEXT NOT NULL,
+        insertada_en_server INTEGER DEFAULT 0,
+        sincronizado INTEGER DEFAULT 0,
+        fecha_creacion TEXT NOT NULL
+      )
+    ''');
+  }
+
+  /// Registra un delete pendiente para procesarlo en el próximo sync.
+  Future<void> agregarPendienteEliminar({
+    required String idLocal,
+    int? idServer,
+    required String idSeccion,
+    required String rutaV2,
+    required String tablaSqlite,
+    required bool insertadaEnServer,
+  }) async {
+    await _asegurarPendientesEliminar();
+    final db = await database;
+    await db.insert('pendientes_eliminar', {
+      'id_local': idLocal,
+      'id_server': idServer,
+      'id_seccion': idSeccion,
+      'ruta_v2': rutaV2,
+      'tabla_sqlite': tablaSqlite,
+      'insertada_en_server': insertadaEnServer ? 1 : 0,
+      'sincronizado': 0,
+      'fecha_creacion': DateTime.now().toIso8601String(),
+    });
+  }
+
+  /// Lee todos los deletes pendientes no sincronizados.
+  Future<List<Map<String, dynamic>>> leerPendientesEliminar() async {
+    await _asegurarPendientesEliminar();
+    final db = await database;
+    return await db.query(
+      'pendientes_eliminar',
+      where: 'sincronizado = 0',
+      orderBy: 'fecha_creacion ASC',
+    );
+  }
+
+  /// Marca un delete pendiente como sincronizado.
+  Future<void> marcarPendienteEliminadoSincronizado(int id) async {
+    final db = await database;
+    await db.update(
+      'pendientes_eliminar',
+      {'sincronizado': 1},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Elimina un registro de la cola de pendientes (ya procesado).
+  Future<void> eliminarPendienteEliminar(int id) async {
+    final db = await database;
+    await db.delete(
+      'pendientes_eliminar',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // ========== Secciones activas (checkbox → secciones del JSON) ==========
+
+  /// Marca secciones como activas (1) para una localidad.
+  Future<void> activarSecciones(String idLocal, List<String> secciones) async {
+    final db = await database;
+    for (final s in secciones) {
+      await db.insert(
+        'localidad_secciones_activas',
+        {'id_local': idLocal, 'seccion': s, 'activa': 1},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+  }
+
+  /// Desmarca secciones (0) para una localidad.
+  Future<void> desactivarSecciones(String idLocal, List<String> secciones) async {
+    final db = await database;
+    for (final s in secciones) {
+      await db.update(
+        'localidad_secciones_activas',
+        {'activa': 0},
+        where: 'id_local = ? AND seccion = ?',
+        whereArgs: [idLocal, s],
+      );
+    }
+  }
+
+  /// Reemplaza el set completo de secciones activas ( para pull/sync).
+  Future<void> reemplazarSeccionesActivas(String idLocal, List<String> activas) async {
+    final db = await database;
+    await db.delete(
+      'localidad_secciones_activas',
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+    for (final s in activas) {
+      await db.insert(
+        'localidad_secciones_activas',
+        {'id_local': idLocal, 'seccion': s, 'activa': 1},
+      );
+    }
+  }
+
+  /// Lee las secciones activas de una localidad.
+  Future<List<String>> leerSeccionesActivas(String idLocal) async {
+    final db = await database;
+    final maps = await db.query(
+      'localidad_secciones_activas',
+      columns: ['seccion'],
+      where: 'id_local = ? AND activa = 1',
+      whereArgs: [idLocal],
+    );
+    return maps.map((m) => m['seccion'] as String).toList();
   }
 
   /// Propaga el `id_edan_localidad` a TODAS las secciones de una localidad
@@ -2811,6 +3162,107 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query(
       'foto_pendiente',
+      where: 'id_seccion = ?',
+      whereArgs: [idSeccion],
+      limit: 1,
+    );
+    return maps.isEmpty ? null : maps.first;
+  }
+
+  // =====================================================================
+  //  foto_pendiente_v2 — métodos para el nuevo schema limpio
+  // =====================================================================
+
+  /// Inserta una foto en la tabla v2.
+  Future<String> insertarFotoPendienteV2({
+    String? idFoto,
+    required String idLocal,
+    required String idSeccion,
+    String? rutaLocalArchivo,
+    String? pathServidor,
+    double? lat,
+    double? lon,
+  }) async {
+    final db = await database;
+    final idFotoFinal = idFoto ?? generarIdLocal();
+    await db.insert('foto_pendiente_v2', {
+      'id_foto': idFotoFinal,
+      'id_local': idLocal,
+      'id_seccion': idSeccion,
+      'ruta_local_archivo': rutaLocalArchivo,
+      'path_servidor': pathServidor,
+      'latitud': lat,
+      'longitud': lon,
+      'subida': 0,
+      'descargada': pathServidor != null && pathServidor.isNotEmpty ? 0 : 1,
+      'intentos': 0,
+      'fecha_creacion': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    return idFotoFinal;
+  }
+
+  /// Fotos pendientes de upload (subida = 0, intentos < 3).
+  Future<List<Map<String, dynamic>>> leerFotosPendientesUploadV2({
+    int maxIntentos = 3,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'foto_pendiente_v2',
+      where: 'subida = 0 AND intentos < ?',
+      whereArgs: [maxIntentos],
+    );
+  }
+
+  /// Fotos pendientes de download (descargada = 0, path_servidor existe).
+  Future<List<Map<String, dynamic>>> leerFotosPendientesDownloadV2({
+    int maxIntentos = 3,
+  }) async {
+    final db = await database;
+    return await db.query(
+      'foto_pendiente_v2',
+      where: 'descargada = 0 AND path_servidor IS NOT NULL '
+          'AND path_servidor != "" AND intentos < ?',
+      whereArgs: [maxIntentos],
+    );
+  }
+
+  /// Marca una foto como subida exitosamente.
+  Future<void> marcarFotoSubidaV2(String idFoto, String pathServidor) async {
+    final db = await database;
+    await db.update('foto_pendiente_v2', {
+      'subida': 1,
+      'path_servidor': pathServidor,
+      'intentos': 0,
+      'ultimo_error': null,
+    }, where: 'id_foto = ?', whereArgs: [idFoto]);
+  }
+
+  /// Marca una foto como descargada exitosamente.
+  Future<void> marcarFotoDescargadaV2(String idFoto, String rutaLocal) async {
+    final db = await database;
+    await db.update('foto_pendiente_v2', {
+      'descargada': 1,
+      'ruta_local_archivo': rutaLocal,
+      'intentos': 0,
+      'ultimo_error': null,
+    }, where: 'id_foto = ?', whereArgs: [idFoto]);
+  }
+
+  /// Registra error de upload/download e incrementa intentos.
+  Future<void> marcarFotoErrorV2(String idFoto, String error) async {
+    final db = await database;
+    await db.rawUpdate('''
+      UPDATE foto_pendiente_v2
+      SET intentos = intentos + 1, ultimo_error = ?
+      WHERE id_foto = ?
+    ''', [error, idFoto]);
+  }
+
+  /// Busca foto_v2 por id_seccion.
+  Future<Map<String, dynamic>?> buscarFotoV2PorSeccion(String idSeccion) async {
+    final db = await database;
+    final maps = await db.query(
+      'foto_pendiente_v2',
       where: 'id_seccion = ?',
       whereArgs: [idSeccion],
       limit: 1,

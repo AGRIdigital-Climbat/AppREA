@@ -355,10 +355,14 @@ class _EdanPage06State extends State<EdanPage06> {
       latActual: s.coordenadaLat,
       lonActual: s.coordenadaLon,
       seccion: 'Servicios básicos',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: s.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         s.coordenadaLat = lat;
         s.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => s.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});

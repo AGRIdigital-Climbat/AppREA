@@ -34,6 +34,7 @@ void main() {
                 heridos: 3,
                 desaparecidos: 0,
                 observaciones: 'Niños pequeños',
+                marcado: true,
               ),
               EdanGrupoEtario(
                 idSeccion: '1a036h9i1j4-659d55fg6h0k8',  // ID único diferente para este rango
@@ -42,6 +43,7 @@ void main() {
                 heridos: 2,
                 desaparecidos: 0,
                 observaciones: '',
+                marcado: true,
               ),
             ],
           ),
@@ -120,8 +122,8 @@ void main() {
       expect(item['id_seccion'], equals('1a035a2b4cd-659d1a8f9c3d1'));
       expect(item['tipo'], equals('energia_electrica'));
       expect(item['observaciones'], equals('3 postes en calle principal'));
-      expect(item.containsKey('fotografia'), isFalse,
-          reason: 'toApiJson() NO debe incluir fotografia (se sube vía con-foto)');
+      expect(item.containsKey('fotografia'), isTrue,
+          reason: 'toApiJson() SÍ debe incluir fotografia (backend la espera)');
       expect(item['coordenada_lat'], equals(-16.5045));
       expect(item['coordenada_lon'], equals(-68.1532));
     });

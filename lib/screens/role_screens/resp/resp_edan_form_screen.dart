@@ -15,8 +15,8 @@ import '../../../services/database_helper.dart';
 import '../../../services/edan_secciones_registry.dart';
 import '../../../services/image_service.dart';
 import '../../../services/location_service.dart';
-import '../../../services/edan/edan_localidades_envio_v2_service.dart';
-import '../../../services/localidad_sync_service.dart';
+import '../../../services/edan/edan_documento_sync_service.dart';
+import '../../../services/edan/edan_sync_respo_service.dart';
 import '../../../services/debug_log.dart';
 import '../../../services/permission_service.dart';
 import '../../../widgets/custom_text_field.dart';
@@ -584,10 +584,9 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
             'gruposProteccion=${localidad.proteccionParaEndpointDedicado().length} '
             'proteccionTotal=${localidad.proteccion.length}');
 
-        // Sincronización por secciones (API v2): sube fotos (carrete), cabecera
-        // y cada sección con su id_seccion. Grupos mixtos foto/sin foto.
-        final sincV2 = EdanLocalidadesEnvioV2Service();
-        final okV2 = await sincV2.enviarLocalidad(localidad);
+        // Sincronización todo-en-uno (API v2 `/documento`): sube el carrete
+        // de fotos, construye el documento compacto y hace POST/PUT.
+        final okV2 = await EdanDocumentoSyncService().enviarLocalidadDocumento(localidad);
         DebugLog.instance.i('Resultado envío V2: ok=$okV2');
 
         if (okV2) {
@@ -652,43 +651,10 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
       ..totalFamiliasAfectadas = _intDe(_familiasAfectadasController)
       ..totalFamiliasDamnificadas = _intDe(_familiasDamnificadasController);
     _normalizarLocalidad(localidad);
-    // Fallback: asegurar que TODAS las secciones tengan idSeccion
-    for (final item in localidad.impactoPoblacion) {
-      item.idSeccion ??= generarIdSeccion('im');
-    }
-    localidad.necesidadPrimeraRespuesta?.idSeccion ??= generarIdSeccion('pr');
-    for (final item in localidad.establecimientosSalud) {
-      item.idSeccion ??= generarIdSeccion('sv');
-    }
-    localidad.necesidadSalud?.idSeccion ??= generarIdSeccion('sn');
-    for (final item in localidad.danosViales) {
-      item.idSeccion ??= generarIdSeccion('dv');
-    }
-    for (final item in localidad.danosInfraPublica) {
-      item.idSeccion ??= generarIdSeccion('di');
-    }
-    for (final item in localidad.serviciosBasicos) {
-      item.idSeccion ??= generarIdSeccion('sb');
-    }
-    for (final item in localidad.unidadesEducativas) {
-      item.idSeccion ??= generarIdSeccion('ue');
-    }
-    for (final item in localidad.danosVivienda) {
-      item.idSeccion ??= generarIdSeccion('vv');
-    }
-    for (final item in localidad.danosAgricultura) {
-      item.idSeccion ??= generarIdSeccion('da');
-    }
-    for (final item in localidad.danosPecuarios) {
-      item.idSeccion ??= generarIdSeccion('dp');
-    }
-    for (final item in localidad.infraProductiva) {
-      item.idSeccion ??= generarIdSeccion('ip');
-    }
-    for (final item in localidad.proteccion) {
-      item.idSeccion ??= generarIdSeccion('po');
-    }
-    localidad.necesidadHumanitaria?.idSeccion ??= generarIdSeccion('nh');
+    // id_seccion NO se genera aquí. Se asigna UNA sola vez, únicamente si el
+    // ítem tiene datos y carece de id, en EdanLocalidadesEnvioV2Service.
+    // guardarSecciones (la fuente de la persistencia). Los ids que ya existen
+    // (servidor o guardado previo) se conservan.
     return localidad;
   }
 
@@ -727,21 +693,38 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
   /// vacía, fromJson la rellena con _proteccionPorDefecto(), que NO setea el
   /// catálogo. Si el usuario llena ese grupo, se enviaría sin
   /// id_grupo_vulnerable_catalogo y el servidor lo rechaza ("Field required").
-  /// Aquí se asigna el catálogo por posición (el catálogo tiene 8 items en el
-  /// mismo orden) siempre que falte.
+  /// Aquí se asigna el catálogo consultando por NOMBRE del grupo desde el
+  /// catálogo del provider (no por posición), para no depender del orden.
   void _reconciliarCatalogoProteccion(EdanLocalidad loc) {
     if (loc.proteccion.isEmpty) return;
     final catalogo = context.read<ReporteProvider>().gruposVulnerables;
     if (catalogo.isEmpty) return;
-    for (var i = 0; i < loc.proteccion.length; i++) {
-      final g = loc.proteccion[i];
-      if (g.idGrupoVulnerableCatalogo == null && i < catalogo.length) {
-        g.idGrupoVulnerableCatalogo = catalogo[i].idGrupoVulnerable;
-        DebugLog.instance.i('Reconciliado catálogo protección índice $i -> '
-            'idGrupoVulnerableCatalogo=${g.idGrupoVulnerableCatalogo} '
-            '(grupo "${catalogo[i].nombre}")');
+
+    // Tabla de resolución por nombre normalizado del catálogo.
+    final Map<String, int> idPorNombre = {};
+    for (final c in catalogo) {
+      final clave = _normalizarGrupo(c.nombre);
+      if (clave.isNotEmpty) idPorNombre[clave] = c.idGrupoVulnerable;
+    }
+    if (idPorNombre.isEmpty) return;
+
+    for (final g in loc.proteccion) {
+      if (g.idGrupoVulnerableCatalogo != null) continue; // ya resuelto
+      final clave = _normalizarGrupo(g.nombreGrupo ?? '');
+      if (clave.isEmpty) continue;
+      final idCat = idPorNombre[clave];
+      if (idCat != null) {
+        g.idGrupoVulnerableCatalogo = idCat;
+        DebugLog.instance.i('Reconciliado catálogo protección por nombre '
+            '"${g.nombreGrupo}" -> idGrupoVulnerableCatalogo=$idCat');
       }
     }
+  }
+
+  /// Normaliza una etiqueta de grupo para compararla con el catálogo
+  /// ignorando mayúsculas y espacios redundantes.
+  static String _normalizarGrupo(String nombre) {
+    return nombre.trim().replaceAll(RegExp(r'\s+'), ' ').toLowerCase();
   }
 
   void _toggle(String num) {
@@ -1380,7 +1363,7 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
                   cantidad: l.establecimientosSalud.length,
                    onAgregar: () => setState(() {
                         final item = EdanEstablecimientoSalud()
-                          ..idSeccion = generarIdSeccion('sv')
+                          ..idSeccion = generarIdSeccion('es')
                           ..comunidad = l.etiquetaLugar;
                        l.establecimientosSalud.add(item);
                        _focusNodeId = item.idSeccion;
@@ -2302,7 +2285,7 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
             '${DateTime.now().millisecondsSinceEpoch.toRadixString(16)}-${DateTime.now().microsecondsSinceEpoch.toRadixString(16)}';
         await db.insertLocalidad(localidad, usuarioId: userId);
       }
-      LocalidadSyncService.instance.recargarPendientes();
+      EdanSyncRespoService.instance.recargarPendientes();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

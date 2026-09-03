@@ -14,6 +14,46 @@ import '../models/usuario.dart';
 import '../services/debug_log.dart';
 import 'sync_debug_config.dart';
 import 'sync_debug_collector.dart';
+import 'auth_service.dart';
+
+/// Indica que no se puede eliminar la localidad porque está consolidada en
+/// un EDAN (id_edan NOT NULL). Regla de negocio del DELETE `/documento`:
+/// solo se borran localidades HUÉRFANAS. El móvil NO debe borrar la fila local.
+class LocalidadConsolidadaException implements Exception {
+  final int statusCode;
+  final String mensaje;
+  LocalidadConsolidadaException(this.statusCode, this.mensaje);
+  @override
+  String toString() => 'LocalidadConsolidadaException: $mensaje';
+}
+
+/// Estado de result de un DELETE de ítem de sección.
+enum SeccionDeleteStatus { success, notFound, error }
+
+/// Resultado de [ApiService.deleteSeccionItem]. Permite a los llamadores
+/// distinguir:
+///   - [SeccionDeleteStatus.success]: el servidor confirmó el borrado (200).
+///   - [SeccionDeleteStatus.notFound]: el ítem/sección no existe en el
+///     servidor (404) → es seguro borrarlo localmente y descartarlo de la cola.
+///   - [SeccionDeleteStatus.error]: otro error (5xx/red/4xx real) → reintentable.
+class DeleteSeccionResult {
+  final SeccionDeleteStatus status;
+  final int? statusCode;
+  final String detalle;
+
+  const DeleteSeccionResult({
+    required this.status,
+    this.statusCode,
+    this.detalle = '',
+  });
+
+  bool get success => status == SeccionDeleteStatus.success;
+  bool get notFound => status == SeccionDeleteStatus.notFound;
+  bool get error => status == SeccionDeleteStatus.error;
+
+  @override
+  String toString() => 'DeleteSeccionResult($status, $statusCode, $detalle)';
+}
 
 class ApiService {
   static final ApiService _instance = ApiService._();
@@ -508,16 +548,12 @@ class ApiService {
     return _handleResponse(response);
   }
 
-  /// Sube las fotos del "carrete" de una localidad EDAN (Modelo A).
-  /// `POST /api/v2/edan/localidades/foto/subir` multipart. Se suben UNA O VARIAS
-  /// fotos paralelamente a su `id_seccion`. Devuelve un mapa
-  /// `id_seccion -> path_servidor` a partir de `results[]`.
+  /// Sube fotos del carrete usando `POST /upload` (genérico, 1 foto por request).
+  /// Devuelve `id_seccion -> path_servidor`.
   ///
-  /// - [files] paths de archivos; [idSecciones] paralelos (misma longitud).
-  /// - `id_local` (UUID) y/o `id_edan_localidad` (int) resuelven el municipio;
-  ///   si vienen ambos el servidor valida coherencia (400 si no apuntan a la
-  ///   misma localidad).
-  /// - GPS es opcional en el carrete.
+  /// Cada foto se sube individualmente y el path devuelto se vincula
+  /// al `id_seccion` correspondiente. La vinculación real al documento
+  /// se hace al enviar `PUT /documento` con el campo `fotografia`.
   Future<Map<String, String>> subirFotosCarrete({
     required List<String> files,
     required List<String> idSecciones,
@@ -530,86 +566,71 @@ class ApiService {
         'files e idSecciones deben tener la misma longitud');
 
     final sw = Stopwatch()..start();
+    final allPaths = <String, String>{};
 
-    Future<http.Response> doUpload() async {
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/foto/subir'),
-      );
-      if (_token != null) {
-        request.headers['Authorization'] = 'Bearer $_token';
-      }
-      request.headers['Accept'] = 'application/json';
+    for (var i = 0; i < files.length; i++) {
+      final filePath = files[i];
+      final idSeccion = idSecciones[i];
 
-      if (idLocal != null && idLocal.isNotEmpty) {
-        request.fields['id_local'] = idLocal;
-      }
-      if (idEdanLocalidad != null) {
-        request.fields['id_edan_localidad'] = '$idEdanLocalidad';
-      }
-      if (lat != null) request.fields['coordenada_lat'] = '$lat';
-      if (lon != null) request.fields['coordenada_lon'] = '$lon';
+      Future<http.Response> doUpload() async {
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse('${ApiConfig.baseUrl}/upload'),
+        );
+        if (_token != null) {
+          request.headers['Authorization'] = 'Bearer $_token';
+        }
+        request.headers['Accept'] = 'application/json';
 
-      for (final idSeccion in idSecciones) {
-        request.fields['id_seccion'] = idSeccion;
-      }
-      for (final filePath in files) {
+        if (idEdanLocalidad != null) {
+          request.fields['id_municipio'] = '$idEdanLocalidad';
+        }
+        final userId = AuthService.instance.userId;
+        if (userId != null) {
+          request.fields['id_usuario'] = '$userId';
+        }
+
         final contentType = _getImageContentType(filePath);
         request.files.add(await http.MultipartFile.fromPath(
           'file',
           filePath,
           contentType: MediaType.parse(contentType),
         ));
+        final streamedResponse =
+            await request.send().timeout(const Duration(seconds: 60));
+        return http.Response.fromStream(streamedResponse);
       }
-      final streamedResponse =
-          await request.send().timeout(const Duration(seconds: 60));
-      return http.Response.fromStream(streamedResponse);
+
+      try {
+        final response = await _requestWithRetry(doUpload);
+        final body = await _handleResponse(response);
+        // /upload devuelve {"data": {"path": "/uploads/..."}}
+        final data = body['data'];
+        final path = data is Map ? data['path']?.toString() : null;
+        if (path != null && path.isNotEmpty) {
+          allPaths[idSeccion] = path;
+        }
+      } catch (e) {
+        debugPrint('[API] Error subiendo foto $idSeccion: $e');
+      }
     }
 
-    final response = await _requestWithRetry(doUpload);
     sw.stop();
-    final body = await _handleResponse(response);
     if (kSyncDebugMode) {
-      final paths = _extractCarretePaths(body);
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
         metodo: 'POST',
-        endpoint: '${ApiConfig.edanLocalidadesEndpoint}/foto/subir',
-        requestBodyRaw: 'multipart: ${files.length} archivos, id_secciones=[${idSecciones.join(", ")}], id_local=$idLocal',
-        responseBody: {'paths': paths},
-        statusCode: response.statusCode,
+        endpoint: '${ApiConfig.baseUrl}/upload',
+        requestBodyRaw: 'multipart: ${files.length} archivos, '
+            'id_secciones=[${idSecciones.join(", ")}], id_local=$idLocal',
+        responseBody: {'paths': allPaths},
+        statusCode: 200,
         duracion: sw.elapsed,
         fotos: files.map((f) => f.split('/').last).toList(),
         localidadId: idLocal,
       ));
     }
-    return _extractCarretePaths(body);
-  }
-
-  /// Extrae de la respuesta de `foto/subir` el mapa `id_seccion -> path`.
-  /// `results` puede estar en `body['results']` o `body['data']['results']`.
-  static Map<String, String> _extractCarretePaths(Map<String, dynamic> body) {
-    final paths = <String, String>{};
-    dynamic results;
-    final data = body['data'];
-    if (data is Map && data['results'] is List) {
-      results = data['results'];
-    } else if (body['results'] is List) {
-      results = body['results'];
-    }
-    if (results is List) {
-      for (final r in results) {
-        if (r is Map) {
-          final idSeccion = r['id_seccion']?.toString();
-          final path = r['path']?.toString();
-          if (idSeccion != null && idSeccion.isNotEmpty &&
-              path != null && path.isNotEmpty) {
-            paths[idSeccion] = path;
-          }
-        }
-      }
-    }
-    return paths;
+    return allPaths;
   }
 
   Future<void> deleteReporte(int id) async {
@@ -1076,83 +1097,6 @@ class ApiService {
     return _extractDataList(body);
   }
 
-  Future<List<Map<String, dynamic>>> getLocalidadesSyncPull({
-    required int idUsuario,
-    DateTime? fechaDesde,
-    int skip = 0,
-    int limit = 50,
-  }) async {
-    final params = <String>['id_usuario=$idUsuario', 'skip=$skip', 'limit=$limit'];
-    if (fechaDesde != null) params.add('fecha_desde=${fechaDesde.toIso8601String()}');
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync/pull?${params.join('&')}'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 30))
-    );
-    final body = await _handleResponse(response);
-    return _extractDataList(body);
-  }
-
-  Future<Map<String, dynamic>> syncLocalidades(List<Map<String, dynamic>> localidades) async {
-    try {
-      final response = await _requestWithRetry(() =>
-        http.post(
-          Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync'),
-          headers: _headers,
-          body: jsonEncode({'localidades': localidades}),
-        ).timeout(const Duration(seconds: 120))
-      );
-      final body = await _handleResponse(response);
-      DebugLog.instance.i('syncLocalidades status=${response.statusCode} '
-          'localidades=${localidades.length} keyCount=${localidades.isEmpty ? 0 : localidades.first.keys.length}');
-      return Map<String, dynamic>.from(body);
-    } catch (e, st) {
-      DebugLog.instance.e('syncLocalidades ERROR', e, st);
-      rethrow;
-    }
-  }
-
-  Future<Map<String, dynamic>> enviarLocalidadDirecta(Map<String, dynamic> localidadJson) async {
-    final respuesta = await syncLocalidades([localidadJson]);
-    final datos = respuesta['data'];
-    final items = datos is List ? datos : <dynamic>[];
-    if (items.isNotEmpty && items.first is Map) {
-      return Map<String, dynamic>.from(items.first);
-    }
-    return <String, dynamic>{};
-  }
-
-  Future<Map<String, dynamic>> editarLocalidadDirecta(int idServer, Map<String, dynamic> json) async {
-    final response = await _requestWithRetry(() =>
-      http.put(
-        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idServer'),
-        headers: _headers,
-        body: jsonEncode(json),
-      ).timeout(const Duration(seconds: 30))
-    );
-    final body = await _handleResponse(response);
-    final data = body['data'];
-    if (data is Map) return Map<String, dynamic>.from(data);
-    return Map<String, dynamic>.from(body);
-  }
-
-  Future<List<Map<String, dynamic>>> pullEstados({int? idUsuario, String? fechaDesde}) async {
-    final params = <String, String>{};
-    if (idUsuario != null) params['id_usuario'] = idUsuario.toString();
-    if (fechaDesde != null) params['fecha_desde'] = fechaDesde;
-    params['limit'] = '1000';
-    final uri = Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/sync/pull')
-        .replace(queryParameters: params);
-    final response = await _requestWithRetry(() =>
-      http.get(uri, headers: _headers).timeout(const Duration(seconds: 30))
-    );
-    final body = await _handleResponse(response);
-    final data = body['data'];
-    if (data is List) return data.cast<Map<String, dynamic>>();
-    return [];
-  }
-
   Future<Map<String, dynamic>> cambiarEstadoLocalidad(int idLocalidad, int idEstado) async {
     final response = await _requestWithRetry(() =>
       http.put(
@@ -1223,40 +1167,44 @@ class ApiService {
 
   /// Crea o actualiza la CABECERA de una localidad (UPSERT por id_local) y
   /// devuelve el `id_edan_localidad` del servidor. Debe llamarse primero.
-  Future<Map<String, dynamic>> enviarLocalidadCabeceraV2(
-    Map<String, dynamic> cabecera,
+  /// CREA una localidad completa desde un documento todo-en-uno (POST
+  /// `/localidades/documento`). `id_local` (UUID) es la clave de dedupe:
+  /// si ya existe, el servidor la actualiza; si no, la crea.
+  /// Devuelve el build de la localidad (contiene `id_edan_localidad`).
+  Future<Map<String, dynamic>> crearDocumento(
+    Map<String, dynamic> documento,
   ) async {
-    final url = '${ApiConfig.edanLocalidadesEndpoint}/cabecera';
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/documento';
     final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
       http.post(
         Uri.parse(url),
         headers: _headers,
-        body: jsonEncode(cabecera),
-      ).timeout(const Duration(seconds: 30))
+        body: jsonEncode(documento),
+      ).timeout(const Duration(seconds: 90))
     );
     sw.stop();
     var body = <String, dynamic>{};
     try {
       body = await _handleResponse(response);
     } catch (e) {
-      _registrarFalloCabecera(url, cabecera, response, sw.elapsed, e);
+      _registrarFalloDocumento(url, 'POST', documento, response, sw.elapsed, e);
       rethrow;
     }
-    DebugLog.instance.i('cabeceraV2 OK status=${response.statusCode} '
-        'id_local=${cabecera['id_local']}');
+    DebugLog.instance.i('documento POST OK status=${response.statusCode} '
+        'id_local=${documento['id_local']}');
     if (kSyncDebugMode) {
       final data = body['data'];
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
         metodo: 'POST',
         endpoint: url,
-        requestBody: cabecera,
+        requestBody: _resumenDocumento(documento),
         responseBody: data is Map ? Map<String, dynamic>.from(data) : body,
         statusCode: response.statusCode,
         duracion: sw.elapsed,
-        localidadId: cabecera['id_local']?.toString(),
-        seccion: 'cabecera',
+        localidadId: documento['id_local']?.toString(),
+        seccion: 'documento',
       ));
     }
     final data = body['data'];
@@ -1264,83 +1212,44 @@ class ApiService {
     return Map<String, dynamic>.from(body);
   }
 
-  /// Registra en el panel de debug una cabecera que falló, para que el error
-  /// no quede oculto. No lanza; solo instrumenta.
-  void _registrarFalloCabecera(
-    String url,
-    Map<String, dynamic> cabecera,
-    http.Response response,
-    Duration duracion,
-    Object error,
-  ) {
-    if (!kSyncDebugMode) return;
-    Map<String, dynamic>? errBody;
-    if (response.body.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(response.body);
-        if (decoded is Map) errBody = Map<String, dynamic>.from(decoded);
-      } catch (_) {}
-    }
-    SyncDebugCollector.instance.add(SyncApiEntry(
-      fase: SyncDebugCollector.instance.currentPhase,
-      metodo: 'POST',
-      endpoint: url,
-      requestBody: cabecera,
-      responseBody: errBody,
-      statusCode: response.statusCode,
-      duracion: duracion,
-      error: error.toString(),
-      localidadId: cabecera['id_local']?.toString(),
-      seccion: 'cabecera',
-    ));
-  }
-
-  /// Envía una sección (1:N como array o 1:1 como objeto único) de una
-  /// localidad v2. `payload` puede ser un `Map` o un `List<Map>`.
-  Future<Map<String, dynamic>> enviarLocalidadSeccionV2({
-    required int idLocalidad,
-    required String seccion,
-    required dynamic payload,
-  }) async {
-    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion';
+  /// ACTUALIZA una localidad existente desde el documento todo-en-uno
+  /// (PUT `/localidades/{id_local}/documento`). Usa `id_local` (UUID) en el
+  /// path — el backend lo resuelve vía `_resolve_localidad_id`.
+  Future<Map<String, dynamic>> actualizarDocumento(
+    String idLocal,
+    Map<String, dynamic> documento,
+  ) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocal/documento';
     final sw = Stopwatch()..start();
-    http.Response response;
-    try {
-      response = await _requestWithRetry(() =>
-        http.post(
-          Uri.parse(url),
-          headers: _headers,
-          body: jsonEncode(payload),
-        ).timeout(const Duration(seconds: 90))
-      );
-    } catch (e) {
-      _registrarFalloSeccionSinRespuesta(url, idLocalidad, seccion, payload,
-          sw.elapsed, e);
-      rethrow;
-    }
+    final response = await _requestWithRetry(() =>
+      http.put(
+        Uri.parse(url),
+        headers: _headers,
+        body: jsonEncode(documento),
+      ).timeout(const Duration(seconds: 90))
+    );
     sw.stop();
     var body = <String, dynamic>{};
     try {
       body = await _handleResponse(response);
     } catch (e) {
-      _registrarFalloSeccion(url, idLocalidad, seccion, payload,
-          response, sw.elapsed, e);
+      _registrarFalloDocumento(url, 'PUT', documento, response, sw.elapsed, e);
       rethrow;
     }
-    DebugLog.instance.i('seccionV2 OK $seccion status=${response.statusCode} '
-        'localidad=$idLocalidad');
+    DebugLog.instance.i('documento PUT OK status=${response.statusCode} '
+        'localidad=$idLocal');
     if (kSyncDebugMode) {
-      final data2 = body['data'];
+      final data = body['data'];
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
-        metodo: 'POST',
+        metodo: 'PUT',
         endpoint: url,
-        requestBody: payload is List ? {'items': payload.length, 'preview': payload.isNotEmpty ? payload.first : null} : payload as Map<String, dynamic>?,
-        responseBody: data2 is Map ? Map<String, dynamic>.from(data2) : body,
+        requestBody: _resumenDocumento(documento),
+        responseBody: data is Map ? Map<String, dynamic>.from(data) : body,
         statusCode: response.statusCode,
         duracion: sw.elapsed,
-        localidadId: idLocalidad.toString(),
-        seccion: seccion,
+        localidadId: documento['id_local']?.toString(),
+        seccion: 'documento',
       ));
     }
     final data = body['data'];
@@ -1348,13 +1257,288 @@ class ApiService {
     return Map<String, dynamic>.from(body);
   }
 
-  /// Registra en el panel de debug una sección que falló (4xx/5xx o error de
-  /// red), para que el error deje de estar oculto. No lanza; solo instrumenta.
-  void _registrarFalloSeccion(
+  /// OBTIENE la localidad completa como documento todo-en-uno (GET
+  /// `/localidades/{id}/documento`, SIEMPRE compacto). Acepta `id_local`
+  /// (UUID) o `id_edan_localidad` (int). Devuelve el build de la localidad.
+  Future<Map<String, dynamic>> obtenerDocumento(
+    String idLocalidad,
+  ) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/documento';
+    final sw = Stopwatch()..start();
+    final response = await _requestWithRetry(() =>
+      http.get(
+        Uri.parse(url),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 60))
+    );
+    sw.stop();
+    var body = <String, dynamic>{};
+    try {
+      body = await _handleResponse(response);
+    } catch (e) {
+      if (kSyncDebugMode) {
+        SyncDebugCollector.instance.add(SyncApiEntry(
+          fase: SyncDebugCollector.instance.currentPhase,
+          metodo: 'GET',
+          endpoint: url,
+          responseBody: null,
+          statusCode: response.statusCode,
+          duracion: sw.elapsed,
+          error: e.toString(),
+          localidadId: idLocalidad,
+          seccion: 'documento',
+        ));
+      }
+      rethrow;
+    }
+    DebugLog.instance.i('documento GET OK status=${response.statusCode} '
+        'localidad=$idLocalidad');
+    if (kSyncDebugMode) {
+      final data = body['data'];
+      SyncDebugCollector.instance.add(SyncApiEntry(
+        fase: SyncDebugCollector.instance.currentPhase,
+        metodo: 'GET',
+        endpoint: url,
+        responseBody: data is Map ? _resumenDocumento(Map<String, dynamic>.from(data)) : body,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        localidadId: idLocalidad,
+        seccion: 'documento',
+      ));
+    }
+    final data = body['data'];
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return Map<String, dynamic>.from(body);
+  }
+
+  /// ELIMINA físicamente la localidad completa (cabecera + flags + todas las
+  /// secciones) desde el documento todo-en-uno (DELETE
+  /// `/localidades/{id}/documento`). Acepta `id_local` (UUID) o
+  /// `id_edan_localidad` (int).
+  ///
+  /// Regla de negocio: SOLO se borra si la localidad es HUÉRFANA
+  /// (`id_edan` NULL). Si está consolidada en un EDAN, responde 403.
+  /// Devuelve el `MessageResponse` del servidor.
+  Future<Map<String, dynamic>> eliminarLocalidadDocumento(
+    Object idLocalidad,
+  ) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/documento';
+    final sw = Stopwatch()..start();
+    var body = <String, dynamic>{};
+    try {
+      final response = await _requestWithRetry(() =>
+        http.delete(
+          Uri.parse(url),
+          headers: _headers,
+        ).timeout(const Duration(seconds: 60))
+      );
+      sw.stop();
+      if (response.statusCode == 403) {
+        const detalle =
+            'La localidad está consolidada en un EDAN y no puede eliminarse.';
+        _registrarDocumentoDelete(
+          url: url,
+          idLocalidad: idLocalidad,
+          statusCode: response.statusCode,
+          duracion: sw.elapsed,
+          error: detalle,
+        );
+        throw LocalidadConsolidadaException(response.statusCode, detalle);
+      }
+      body = await _handleResponse(response);
+      DebugLog.instance.i('documento DELETE OK status=${response.statusCode} '
+          'localidad=$idLocalidad');
+      _registrarDocumentoDelete(
+        url: url,
+        idLocalidad: idLocalidad,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        responseBody: body,
+      );
+    } catch (e) {
+      debugPrint('[Documento] Error DELETE $idLocalidad: $e');
+      rethrow;
+    }
+    final data = body['data'];
+    if (data is Map) return Map<String, dynamic>.from(data);
+    return Map<String, dynamic>.from(body);
+  }
+
+  /// Registra en el panel de debug visual una llamada DELETE de localidad
+  /// completa (`.../documento`), incluido el caso 403 (consolidada en EDAN).
+  void _registrarDocumentoDelete({
+    required String url,
+    required Object idLocalidad,
+    required int? statusCode,
+    required Duration duracion,
+    Map<String, dynamic>? responseBody,
+    String? error,
+  }) {
+    if (!kSyncDebugMode) return;
+    SyncDebugCollector.instance.add(SyncApiEntry(
+      fase: SyncDebugCollector.instance.currentPhase,
+      metodo: 'DELETE',
+      endpoint: url,
+      responseBody: responseBody,
+      statusCode: statusCode,
+      duracion: duracion,
+      error: error,
+      localidadId: idLocalidad.toString(),
+      seccion: 'documento',
+    ));
+  }
+
+  /// Elimina un ítem individual de una sección 1:N por `id_seccion`.
+  /// `DELETE /localidades/{id_localidad}/{path}/seccion/{id_seccion}`
+  Future<DeleteSeccionResult> deleteSeccionItem({
+    required String idLocalidad,
+    required String rutaSeccion,
+    required String idSeccion,
+  }) async {
+    final url = '${ApiConfig.edanLocalidadesEndpoint}/'
+        '$idLocalidad/$rutaSeccion/seccion/$idSeccion';
+    final sw = Stopwatch()..start();
+    try {
+      final response = await _requestWithRetry(() =>
+        http.delete(
+          Uri.parse(url),
+          headers: _headers,
+        ).timeout(const Duration(seconds: 30))
+      );
+      sw.stop();
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        _registrarDeleteSeccion(
+          url: url,
+          idLocalidad: idLocalidad,
+          idSeccion: idSeccion,
+          statusCode: response.statusCode,
+          duracion: sw.elapsed,
+        );
+        return const DeleteSeccionResult(status: SeccionDeleteStatus.success);
+      }
+      // 404 → el ítem/sección no existe en el servidor: seguro de descartar
+      // el borrado localmente (nunca se subió, o ya no está).
+      if (response.statusCode == 404) {
+        final detalle = _detailDe(response.body);
+        debugPrint('[API] DELETE seccion $idSeccion → 404 (no existe): $detalle');
+        _registrarDeleteSeccion(
+          url: url,
+          idLocalidad: idLocalidad,
+          idSeccion: idSeccion,
+          statusCode: response.statusCode,
+          duracion: sw.elapsed,
+          error: detalle,
+        );
+        return DeleteSeccionResult(
+          status: SeccionDeleteStatus.notFound,
+          statusCode: response.statusCode,
+          detalle: detalle,
+        );
+      }
+      final detalle = _detailDe(response.body);
+      debugPrint('[API] DELETE seccion $idSeccion → ${response.statusCode}: $detalle');
+      _registrarDeleteSeccion(
+        url: url,
+        idLocalidad: idLocalidad,
+        idSeccion: idSeccion,
+        statusCode: response.statusCode,
+        duracion: sw.elapsed,
+        error: detalle,
+      );
+      return DeleteSeccionResult(
+        status: SeccionDeleteStatus.error,
+        statusCode: response.statusCode,
+        detalle: detalle,
+      );
+    } catch (e) {
+      sw.stop();
+      debugPrint('[API] Error DELETE seccion $idSeccion: $e');
+      _registrarDeleteSeccion(
+        url: url,
+        idLocalidad: idLocalidad,
+        idSeccion: idSeccion,
+        statusCode: null,
+        duracion: sw.elapsed,
+        error: e.toString(),
+      );
+      return DeleteSeccionResult(
+        status: SeccionDeleteStatus.error,
+        detalle: e.toString(),
+      );
+    }
+  }
+
+  /// Registra en el panel de debug visual una llamada DELETE de ítem de
+  /// sección (parte del botón de sincronizar).
+  void _registrarDeleteSeccion({
+    required String url,
+    required String idLocalidad,
+    required String idSeccion,
+    required int? statusCode,
+    required Duration duracion,
+    String? error,
+  }) {
+    if (!kSyncDebugMode) return;
+    SyncDebugCollector.instance.add(SyncApiEntry(
+      fase: SyncDebugCollector.instance.currentPhase,
+      metodo: 'DELETE',
+      endpoint: url,
+      statusCode: statusCode,
+      duracion: duracion,
+      error: error,
+      localidadId: idLocalidad,
+      seccion: idSeccion,
+    ));
+  }
+
+  /// Extrae el mensaje `detail`/`message`/`error` del body de un error HTTP.
+  String _detailDe(String body) {
+    if (body.isEmpty) return '';
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final d = decoded['detail'] ?? decoded['message'] ?? decoded['error'];
+        return d?.toString() ?? '';
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  /// Resumen ligero del documento para el panel de debug: cabecera + la cuenta
+  /// de filas por sección en lugar del JSON completo (evita logs gigantes).
+  Map<String, dynamic> _resumenDocumento(Map<String, dynamic> doc) {
+    final resumen = <String, dynamic>{};
+    const secciones = [
+      'impacto_poblacion', 'establecimientos_salud', 'danos_viales',
+      'danos_infra_publica', 'servicios_basicos', 'unidades_educativas',
+      'danos_vivienda', 'danos_agricultura', 'danos_pecuarios',
+      'infra_productiva', 'proteccion',
+    ];
+    for (final clave in [
+      'id_local', 'id_edan_localidad', 'localidad', 'id_municipio',
+      'fecha_modificacion', 'id_edan_localidad_estado', 'id_usuario',
+    ]) {
+      if (doc.containsKey(clave)) resumen[clave] = doc[clave];
+    }
+    for (final clave in secciones) {
+      final v = doc[clave];
+      if (v is List) {
+        resumen[clave] = v.length;
+      } else if (v is Map) {
+        resumen[clave] = 'objeto';
+      }
+    }
+    const objetos = ['necesidad_primera_respuesta', 'necesidad_salud', 'necesidad_humanitaria'];
+    for (final clave in objetos) {
+      if (doc[clave] is Map) resumen[clave] = 'objeto';
+    }
+    return resumen;
+  }
+
+  void _registrarFalloDocumento(
     String url,
-    int idLocalidad,
-    String seccion,
-    dynamic payload,
+    String metodo,
+    Map<String, dynamic> documento,
     http.Response response,
     Duration duracion,
     Object error,
@@ -1369,39 +1553,15 @@ class ApiService {
     }
     SyncDebugCollector.instance.add(SyncApiEntry(
       fase: SyncDebugCollector.instance.currentPhase,
-      metodo: 'POST',
+      metodo: metodo,
       endpoint: url,
-      requestBody: payload is List ? {'items': payload.length, 'preview': payload.isNotEmpty ? payload.first : null} : payload as Map<String, dynamic>?,
+      requestBody: _resumenDocumento(documento),
       responseBody: errBody,
       statusCode: response.statusCode,
       duracion: duracion,
       error: error.toString(),
-      localidadId: idLocalidad.toString(),
-      seccion: seccion,
-    ));
-  }
-
-  /// Registra en el panel de debug una sección que falló ANTES de obtener una
-  /// respuesta HTTP (error de red, timeout o `jsonEncode` del payload), para
-  /// que el fallo quede visible aunque no haya `statusCode`. No lanza.
-  void _registrarFalloSeccionSinRespuesta(
-    String url,
-    int idLocalidad,
-    String seccion,
-    dynamic payload,
-    Duration duracion,
-    Object error,
-  ) {
-    if (!kSyncDebugMode) return;
-    SyncDebugCollector.instance.add(SyncApiEntry(
-      fase: SyncDebugCollector.instance.currentPhase,
-      metodo: 'POST',
-      endpoint: url,
-      requestBody: payload is List ? {'items': payload.length, 'preview': payload.isNotEmpty ? payload.first : null} : payload as Map<String, dynamic>?,
-      duracion: duracion,
-      error: error.toString(),
-      localidadId: idLocalidad.toString(),
-      seccion: seccion,
+      localidadId: documento['id_local']?.toString(),
+      seccion: 'documento',
     ));
   }
 
@@ -1422,34 +1582,6 @@ class ApiService {
   }
 
   /// Elimina un ítem de una sección v2 por su id_seccion.
-  Future<void> eliminarLocalidadSeccionV2({
-    required int idLocalidad,
-    required String seccion,
-    required String idSeccion,
-  }) async {
-    final url = '${ApiConfig.edanLocalidadesEndpoint}/'
-        '$idLocalidad/$seccion/seccion/$idSeccion';
-    final sw = Stopwatch()..start();
-    final response = await _requestWithRetry(() =>
-      http.delete(
-        Uri.parse(url),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 15))
-    );
-    sw.stop();
-    if (kSyncDebugMode) {
-      SyncDebugCollector.instance.add(SyncApiEntry(
-        fase: SyncDebugCollector.instance.currentPhase,
-        metodo: 'DELETE',
-        endpoint: url,
-        statusCode: response.statusCode,
-        duracion: sw.elapsed,
-        localidadId: idLocalidad.toString(),
-        seccion: seccion,
-      ));
-    }
-  }
-
   Future<List<Map<String, dynamic>>> getConsolidarPendientes({
     required int idMunicipio,
     String estado = 'aprobado',
@@ -1555,60 +1687,6 @@ class ApiService {
     );
     final body = await _handleResponse(response);
     return Map<String, dynamic>.from(body['data']);
-  }
-
-  Future<Map<String, dynamic>> getLocalidadById(
-    int idLocalidad, {
-    bool modoComprimido = true,
-  }) async {
-    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad?modo=${modoComprimido ? "comprimido" : "completo"}';
-    final sw = Stopwatch()..start();
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse(url),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 15))
-    );
-    sw.stop();
-    final body = await _handleResponse(response);
-    if (kSyncDebugMode) {
-      final data = body['data'];
-      SyncDebugCollector.instance.add(SyncApiEntry(
-        fase: SyncDebugCollector.instance.currentPhase,
-        metodo: 'GET',
-        endpoint: url,
-        responseBody: data is Map ? Map<String, dynamic>.from(data) : {'count': data is List ? data.length : 0},
-        statusCode: response.statusCode,
-        duracion: sw.elapsed,
-        localidadId: idLocalidad.toString(),
-      ));
-    }
-    return Map<String, dynamic>.from(body['data']);
-  }
-
-  Future<Map<String, dynamic>> deleteLocalidad(int idLocalidad) async {
-    final url = '${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad';
-    final sw = Stopwatch()..start();
-    final response = await _requestWithRetry(() =>
-      http.delete(
-        Uri.parse(url),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 15))
-    );
-    sw.stop();
-    final body = await _handleResponse(response);
-    if (kSyncDebugMode) {
-      SyncDebugCollector.instance.add(SyncApiEntry(
-        fase: SyncDebugCollector.instance.currentPhase,
-        metodo: 'DELETE',
-        endpoint: url,
-        responseBody: body,
-        statusCode: response.statusCode,
-        duracion: sw.elapsed,
-        localidadId: idLocalidad.toString(),
-      ));
-    }
-    return Map<String, dynamic>.from(body);
   }
 
   Future<List<TipoLocalidad>> getTipoLocalidad() async {

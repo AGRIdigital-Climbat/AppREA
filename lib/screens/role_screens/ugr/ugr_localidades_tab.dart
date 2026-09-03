@@ -11,7 +11,9 @@ import 'ugr_edan_localidad_preview_screen.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_evento.dart';
 import 'ugr_route.dart';
-import '../resp/resp_edan_form_screen.dart';
+import '../resp/edan/edan_form_wizard.dart';
+import '../resp/edan/edan_dialog_helper.dart';
+import '../../../widgets/edan_json_preview_dialog.dart';
 
 enum _VistaLocalidades { todos, sinConsolidar, consolidadas }
 
@@ -795,6 +797,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       onDelete: esBorrador && esMia
           ? () => _eliminarLocalidad(localidad)
           : null,
+      onLongPress: () => EdanJsonPreviewDialog.show(context, localidad),
     );
   }
 
@@ -834,7 +837,10 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
   Future<void> _editarLocalidad(EdanLocalidad localidad) async {
     final result = await Navigator.of(context).push<bool>(
-      ugrRoute(RespEdanFormScreen(edanAEditar: Edan.desdeLocalidad(localidad))),
+      ugrRoute(
+        EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)),
+        palette: Palettes.rea,
+      ),
     );
     if (result == true && mounted) {
       await _cargarDatos();
@@ -873,9 +879,25 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
     if (confirm != true || !mounted) return;
 
+    final db = DatabaseHelper.instance;
+    final conectado = await ConnectivityService().checkNow();
     try {
-      if (localidad.sincronizado) {
-        await DatabaseHelper.instance.markLocalidadAsPendingDeletion(idLocal);
+      if (localidad.sincronizado && localidad.idServer != null && conectado) {
+        await ApiService.instance.deleteSeccionItem(
+          idLocalidad: '${localidad.idServer}',
+          rutaSeccion: 'api/v2/edan/localidades',
+          idSeccion: '${localidad.idServer}',
+        );
+        await db.deleteLocalidad(idLocal);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Localidad eliminada del servidor'),
+            backgroundColor: AppColors.aprobado,
+          ),
+        );
+      } else if (localidad.sincronizado) {
+        await db.markLocalidadAsPendingDeletion(idLocal);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -884,7 +906,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           ),
         );
       } else {
-        await DatabaseHelper.instance.deleteLocalidad(idLocal);
+        await db.deleteLocalidad(idLocal);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -1003,6 +1025,7 @@ class _LocalidadCard extends StatelessWidget {
   final VoidCallback? onRechazar;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+  final VoidCallback? onLongPress;
 
   const _LocalidadCard({
     required this.localidad,
@@ -1018,6 +1041,7 @@ class _LocalidadCard extends StatelessWidget {
     this.onRechazar,
     this.onEdit,
     this.onDelete,
+    this.onLongPress,
   });
 
   @override
@@ -1031,6 +1055,7 @@ class _LocalidadCard extends StatelessWidget {
       margin: EdgeInsets.zero,
       child: InkWell(
         onTap: modoConsolidacion && seleccionable ? onToggleSeleccion : onTap,
+        onLongPress: onLongPress,
         borderRadius: BorderRadius.circular(16),
         child: Padding(
           padding: const EdgeInsets.all(14),

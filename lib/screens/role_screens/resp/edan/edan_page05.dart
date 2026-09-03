@@ -100,10 +100,8 @@ class _EdanPage05State extends State<EdanPage05> {
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _RadioVial(valor: 'Carretera', etiqueta: 'Carretera'),
-                      _RadioVial(valor: 'Camino', etiqueta: 'Camino'),
-                      _RadioVial(valor: 'Túnel', etiqueta: 'Túnel'),
-                      _RadioVial(valor: 'Puente', etiqueta: 'Puente'),
+                      _RadioVial(valor: 'vía', etiqueta: 'Vía'),
+                      _RadioVial(valor: 'puente', etiqueta: 'Puente'),
                     ],
                   ),
                 ),
@@ -290,8 +288,12 @@ class _EdanPage05State extends State<EdanPage05> {
   }
 
   Future<void> _eliminarVial(EdanDanoVial v) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: v.idSeccion,
+      rutaV2: 'danos-viales',
+      tablaSqlite: 'seccion_danos_viales',
       titulo: '¿Eliminar vía o puente?',
       mensaje: 'Se eliminará el registro "${v.viaPuente}".',
     );
@@ -300,8 +302,12 @@ class _EdanPage05State extends State<EdanPage05> {
   }
 
   Future<void> _eliminarInfra(EdanDanoInfraPublica i) async {
-    final ok = await confirmarEliminacion(
+    final ok = await eliminarItemSeccion(
       context,
+      localidad: widget.localidad,
+      idSeccion: i.idSeccion,
+      rutaV2: 'danos-infra-publica',
+      tablaSqlite: 'seccion_danos_infra_publica',
       titulo: '¿Eliminar infraestructura?',
       mensaje: 'Se eliminará el registro de daño a infraestructura pública.',
     );
@@ -316,10 +322,14 @@ class _EdanPage05State extends State<EdanPage05> {
       latActual: v.coordenadaLat,
       lonActual: v.coordenadaLon,
       seccion: 'Vías y puentes',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: v.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         v.coordenadaLat = lat;
         v.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => v.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
@@ -332,10 +342,14 @@ class _EdanPage05State extends State<EdanPage05> {
       latActual: i.coordenadaLat,
       lonActual: i.coordenadaLon,
       seccion: 'Infraestructura pública',
+      idLocal: widget.localidad.idLocal,
+      idSeccion: i.idSeccion,
+      idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
       },
+      onFotoGuardada: (path) => i.fotografia = path,
     );
     if (!ok || !mounted) return;
     setState(() {});
