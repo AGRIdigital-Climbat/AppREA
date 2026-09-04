@@ -486,7 +486,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     }
     setState(() => _saving = true);
     // Solo guarda localmente. El envío al servidor ocurre solo al presionar
-    // "Guardar" o "Salir y guardar" (via _guardarYEnviar).
+    // "Enviar" (verde) en la última página.
     if (_huboCambios()) {
       await _guardar(actual.key);
     } else {
@@ -592,70 +592,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   /// a Enviado UGR cuando el usuario pulsa "Enviar" en el resumen).
   ///
   /// Solo intenta el envío cuando el snapshot detecta cambios reales y hay
-  /// secciones marcadas como modificadas; si no hay cambios, no reenvía ni
-  /// reporta un error (evita el mensaje espurio "falló el envío").
-  Future<_GuardadoResult> _guardarYEnviar(String seccionKey) async {
-    final sinCambios = !_huboCambios();
-    if (!sinCambios) {
-      await _guardar(seccionKey);
-    } else {
-      // No hubo cambios: persiste la fila tal cual (por si faltaba crear el
-      // id_local) pero sin marcar secciones como modificadas.
-      await _guardarSinMarcar();
-      return _GuardadoResult.sinCambios;
-    }
-
-    final idLocal = _localidad.idLocal;
-    if (idLocal == null) return _GuardadoResult.soloLocal;
-
-    final modificadas = await _db.getSeccionesModificadas(idLocal);
-    if (modificadas.isEmpty) return _GuardadoResult.sinCambios;
-
-    final conectado = await ConnectivityService().checkNow();
-    if (!conectado) return _GuardadoResult.sinConexion;
-
-    final ok = await EdanDocumentoSyncService()
-        .enviarLocalidadDocumento(_localidad);
-      if (ok) {
-        _localidad
-          ..editado = false
-          ..sincronizado = true;
-        await _db.updateLocalidad(_localidad);
-        // Limpiar las marcas de modificada para las rutas enviadas.
-        await _db.clearSeccionesModificadas(idLocal, modificadas.toSet());
-        EdanSyncRespoService.instance.recargarPendientes();
-        return _GuardadoResult.enviado;
-      }
-    return _GuardadoResult.fallo;
-  }
-
-  Future<void> _guardarBorrador() async {
-    setState(() => _saving = true);
-    final resultado = await _guardarYEnviar(_pages[_currentPage].key);
-    setState(() => _saving = false);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(_mensajeGuardado(resultado))),
-    );
-    setState(() => _allowPop = true);
-    Navigator.pop(context, true);
-  }
-
-  /// Mensaje de snackbar según el resultado del guardado/salida.
-  String _mensajeGuardado(_GuardadoResult r) {
-    switch (r) {
-      case _GuardadoResult.enviado:
-        return 'Borrador guardado y enviado';
-      case _GuardadoResult.soloLocal:
-      case _GuardadoResult.sinCambios:
-        return 'Borrador guardado';
-      case _GuardadoResult.fallo:
-        return 'Borrador guardado (falló el envío, quedó pendiente)';
-      case _GuardadoResult.sinConexion:
-        return 'Borrador guardado (sin conexión, se sincronizará después)';
-    }
-  }
-
   /// Guarda a SQLite SIN salir (botón de la AppBar).
   Future<void> _guardarSinSalir() async {
     if (_saving) return;
@@ -721,6 +657,38 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
 
   Future<void> _enviar() async {
     if (_saving) return;
+
+    // Diálogo de confirmación: declaración jurada + revisión UGR
+    final confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded,
+            size: 48, color: Color(0xFFF59E0B)),
+        title: const Text('Confirmar envío'),
+        content: const Text(
+          'La información será revisada para análisis. '
+          'Corresponde hacer el documento legal del EDAN municipal '
+          'por parte del UGR.\n\n'
+          'Es información con declaración jurada.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF4CAF50),
+            ),
+            child: const Text('Enviar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true || !mounted) return;
+
     setState(() => _saving = true);
     await _guardar(_pages[_currentPage].key);
 
@@ -864,7 +832,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
             saving: _saving,
             onBack: () => _irA(_currentPage - 1),
             onNext: _next,
-            onSaveDraft: _guardarBorrador,
             onEnviar: _enviar,
           ),
         ],
@@ -884,22 +851,4 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (p.valida != null) return p.valida!(_localidad);
     return _seccionTieneDatos(key);
   }
-}
-
-/// Resultado del flujo de guardado (con o sin envío automático).
-enum _GuardadoResult {
-  /// No hubo cambios reales; se guardó local sin reenviar.
-  sinCambios,
-
-  /// Se guardó y subió al servidor correctamente.
-  enviado,
-
-  /// Conexión disponible pero el envío falló (queda pendiente).
-  fallo,
-
-  /// Sin conexión a internet; queda pendiente para el sync central.
-  sinConexion,
-
-  /// La localidad no tiene idLocal aún; solo persistió local.
-  soloLocal,
 }

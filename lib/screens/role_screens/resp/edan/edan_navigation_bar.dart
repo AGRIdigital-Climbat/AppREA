@@ -3,8 +3,8 @@ import '../../../../config/theme.dart';
 
 /// Barra de navegación inferior del wizard.
 ///
-/// Muestra botones contextuales: Anterior, Borrador (si aplica) y
-/// Siguiente / Enviar según la página actual.
+/// Muestra botones contextuales: Anterior y Siguiente / Enviar
+/// según la página actual.
 class EdanNavigationBar extends StatelessWidget {
   final bool showBack;
   final bool isLastPage;
@@ -12,7 +12,7 @@ class EdanNavigationBar extends StatelessWidget {
   final bool saving;
   final VoidCallback onBack;
   final VoidCallback onNext;
-  final VoidCallback onSaveDraft;
+  final VoidCallback? onSaveDraft;
   final VoidCallback? onEnviar;
 
   const EdanNavigationBar({
@@ -23,7 +23,7 @@ class EdanNavigationBar extends StatelessWidget {
     required this.saving,
     required this.onBack,
     required this.onNext,
-    required this.onSaveDraft,
+    this.onSaveDraft,
     this.onEnviar,
   });
 
@@ -60,18 +60,6 @@ class EdanNavigationBar extends StatelessWidget {
             else
               const Expanded(child: SizedBox()),
             const SizedBox(width: 8),
-            if (isPreview)
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: saving ? null : onSaveDraft,
-                  icon: const Icon(Icons.save_outlined, size: 18),
-                  label: const Text('Borrador'),
-                  style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
-              ),
-            if (isPreview) const SizedBox(width: 8),
             Expanded(
               flex: 2,
               child: isLastPage
