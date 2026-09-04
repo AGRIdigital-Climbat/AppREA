@@ -7,12 +7,11 @@ import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
 import '../../../services/edan_sync_service.dart';
-import 'ugr_edan_localidad_preview_screen.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_evento.dart';
 import 'ugr_route.dart';
 import '../resp/edan/edan_form_wizard.dart';
-import '../resp/edan/edan_dialog_helper.dart';
+import '../resp/edan/edan_preview_resp_screen.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 
 enum _VistaLocalidades { todos, sinConsolidar, consolidadas }
@@ -817,7 +816,24 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       }
       if (!mounted) return;
       final cambio = await Navigator.of(context).push<bool>(
-        ugrRoute(UgrEdanLocalidadPreviewScreen(localidad: localidad)),
+        ugrRoute(EdanPreviewRespScreen(
+          localidad: localidad,
+          modoUGR: true,
+          onAprobar: () async {
+            await ApiService.instance.cambiarEstadoLocalidad(
+              localidad.idServer!,
+              UgrLocalidadEstado.aprobadoUgr.id,
+            );
+            localidad.estadoLocalidad = UgrLocalidadEstado.aprobadoUgr;
+          },
+          onRechazar: () async {
+            await ApiService.instance.cambiarEstadoLocalidad(
+              localidad.idServer!,
+              UgrLocalidadEstado.rechazadoUgr.id,
+            );
+            localidad.estadoLocalidad = UgrLocalidadEstado.rechazadoUgr;
+          },
+        ), palette: Palettes.rea),
       );
       if (mounted) {
         if (cambio == true) {
