@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 
 import '../../models/edan.dart';
+import '../api_service.dart';
 import '../database_helper.dart';
 import '../edan_secciones_registry.dart';
 
@@ -255,10 +257,72 @@ class EdanDocumentoService {
       }
     }
 
+    // ── Subir cualquier foto con path local antes de enviar ──────────
+    // El documento debe referenciar paths del servidor (`/uploads/...`), nunca
+    // rutas locales (`/data/...`). Si algún ítem quedó con path local (perdido
+    // de la cola v2, upload previo fallido, etc.) se sube ahora por la API y se
+    // reemplaza en el JSON. Si la subida falla, se omite `fotografia` para no
+    // mandar una ruta inválida al backend.
+    await _subirFotosLocalesDelDocumento(doc, localidad);
+
     return doc;
   }
 
-  /// Huella de contenido para un ítem de array 1:N en el documento, ignorando
+  /// Sube por la API (`POST /upload`) cualquier `fotografia` de las secciones
+  /// array del documento que aún apunte a un path local (no empieza con
+  /// `/uploads/`), y reemplaza el valor por el path servido en [doc].
+  ///
+  /// Si la subida de un ítem falla o no devuelve path, se elimina `fotografia`
+  /// de ese ítem para no enviar una ruta local inválida al backend. Nunca
+  /// re-subirá fotos que ya estén en `/uploads/`.
+  Future<void> _subirFotosLocalesDelDocumento(
+    Map<String, dynamic> doc,
+    EdanLocalidad localidad,
+  ) async {
+    final idLocal = localidad.idLocal;
+    if (idLocal == null || idLocal.isEmpty) return;
+
+    final rutas = <String>[];
+    final idSecciones = <String>[];
+    final posiciones = <(String, int)>[];
+
+    for (final key in seccionesArray) {
+      final v = doc[key];
+      if (v is! List) continue;
+      for (var i = 0; i < v.length; i++) {
+        final item = v[i];
+        if (item is! Map) continue;
+        final foto = (item as Map<String, dynamic>)['fotografia']?.toString();
+        if (foto == null || foto.isEmpty) continue;
+        if (foto.startsWith('/uploads/')) continue; // ya en el servidor
+        final file = File(foto);
+        if (!await file.exists()) continue; // no subible; se omite en llamada
+        rutas.add(foto);
+        idSecciones.add((item['id_seccion']?.toString() ?? ''));
+        posiciones.add((key, i));
+      }
+    }
+
+    if (rutas.isEmpty) return;
+
+    final paths = await ApiService.instance.subirFotosCarrete(
+      files: rutas,
+      idSecciones: idSecciones,
+      idLocal: idLocal,
+      idEdanLocalidad: localidad.idServer ?? localidad.idEdan,
+    );
+
+    for (var k = 0; k < posiciones.length; k++) {
+      final (key, idx) = posiciones[k];
+      final item = (doc[key] as List)[idx] as Map<String, dynamic>;
+      final path = paths[idSecciones[k]];
+      if (path != null && path.isNotEmpty) {
+        item['fotografia'] = path;
+      } else {
+        item.remove('fotografia');
+      }
+    }
+  }
   /// `id_seccion` y campos volátiles (fecha_modificacion, fotos locales).
   static String? _huellaMapaConIdEmpty(String key, Map<String, dynamic> item) {
     try {

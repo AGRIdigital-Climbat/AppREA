@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 
 import '../../models/edan.dart';
@@ -5,9 +7,9 @@ import '../api_service.dart';
 import '../database_helper.dart';
 import '../edan_secciones_registry.dart';
 import '../sync_debug_collector.dart';
+import '../sync_debug_config.dart';
 import 'edan_documento_service.dart';
 import 'edan_localidades_envio_v2_service.dart';
-import 'edan_secciones_envio_factory.dart';
 
 /// Orquestador de sincronización EDAN "todo-en-uno" (grupo v2, `/documento`).
 ///
@@ -48,6 +50,13 @@ class EdanDocumentoSyncService {
     // 1. Intentar subir fotos primero. Si falla, se envía igual el EDAN.
     var fotosSubidas = false;
     if (!skipFotos) {
+      // Asegurar que el debug visual registre esta sesión y la fase de fotos:
+      // el "longpress"/Enviar no pasa por el startSession del sync central, y
+      // así el upload de fotos queda visible al inicio del envío.
+      if (kSyncDebugMode && !SyncDebugCollector.instance.isActive) {
+        SyncDebugCollector.instance.startSession();
+      }
+      SyncDebugCollector.instance.addFase('Subir fotos');
       try {
         await _subirFotosCarrete(localidad);
         fotosSubidas = true;
@@ -298,19 +307,51 @@ class EdanDocumentoSyncService {
     return listas;
   }
 
-  /// Sube el carrete de fotos pendientes de TODAS las secciones con foto,
-  /// reutilizando la lógica por-sección existente (lee `foto_pendiente`,
-  /// llama a `foto/subir` y guarda los `path` devueltos).
+  /// Sube el carrete de fotos pendientes de TODAS las secciones con foto de la
+  /// localidad, leyendo la cola unificada `foto_pendiente_v2` (la misma que usa
+  /// la sincronización RESP). Así no hay doble fuente de fotos ni re-subidas.
   Future<void> _subirFotosCarrete(EdanLocalidad localidad) async {
-    for (final ruta in EdanSeccionesRegistry.rutasV2Todas()) {
-      final desc = EdanSeccionesRegistry.porRuta(ruta);
-      final servicio = EdanSeccionesEnvioFactory.servicioDeRuta(ruta);
-      if (servicio == null || desc == null || !desc.usaFoto) continue;
+    final db = DatabaseHelper.instance;
+    final idLocal = localidad.idLocal;
+    if (idLocal == null) return;
+
+    final pendientes = await db.leerFotosPendientesUploadV2();
+    final fotos = pendientes.where((f) => f['id_local'] == idLocal).toList();
+    if (fotos.isEmpty) return;
+
+    for (final fotoRow in fotos) {
+      final idFoto = fotoRow['id_foto']?.toString() ?? '';
+      final ruta = fotoRow['ruta_local_archivo']?.toString();
+      final idSeccion = fotoRow['id_seccion']?.toString() ?? '';
+      if (ruta == null || ruta.isEmpty || idSeccion.isEmpty) continue;
+
+      final file = File(ruta);
+      if (!await file.exists()) {
+        if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Archivo no encontrado');
+        continue;
+      }
+
       try {
-        await servicio.subirFotosPendientes(localidad);
-        debugPrint('[DocSync] carrete $ruta OK');
+        final paths = await ApiService.instance.subirFotosCarrete(
+          files: [ruta],
+          idSecciones: [idSeccion],
+          idLocal: idLocal,
+          idEdanLocalidad: localidad.idServer ?? localidad.idEdan,
+        );
+        final path = paths[idSeccion];
+        if (path == null || path.isEmpty) {
+          if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Server no devolvió path');
+          continue;
+        }
+        if (idFoto.isNotEmpty) await db.marcarFotoSubidaV2(idFoto, path);
+        final tabla = await EdanSeccionesRegistry.buscarTablaPorIdSeccion(idSeccion, db);
+        if (tabla.isNotEmpty) {
+          await db.marcarFotografiaSeccion(tabla, idLocal, idSeccion, path);
+        }
+        debugPrint('[DocSync] carrete OK: $idSeccion → $path');
       } catch (e) {
-        debugPrint('[DocSync] Error carrete $ruta: $e');
+        if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, e.toString());
+        debugPrint('[DocSync] Error carrete $idSeccion: $e');
       }
     }
   }

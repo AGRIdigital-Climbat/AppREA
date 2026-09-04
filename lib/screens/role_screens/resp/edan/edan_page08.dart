@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
-import '../../../../models/id_seccion_helper.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -46,7 +45,7 @@ class _EdanPage08State extends State<EdanPage08> {
   }
 
   void _agregar() {
-    final v = EdanDanoVivienda(idSeccion: nuevoIdDanoVivienda());
+    final v = EdanDanoVivienda();
     _editar(v, esNuevo: true);
   }
 

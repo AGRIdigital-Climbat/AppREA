@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
-import '../../../../models/id_seccion_helper.dart';
 import '../../../../providers/reporte_provider.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/database_helper.dart';
@@ -549,16 +548,11 @@ class _EdanPage01State extends State<EdanPage01> {
       _syncSecciones('impServicios', v);
       if (v && l.serviciosBasicos.isEmpty) {
         l.serviciosBasicos.addAll([
-          EdanServicioBasicoDetalle(
-              tipo: 'energia_electrica', idSeccion: nuevoIdServicioBasico()),
-          EdanServicioBasicoDetalle(
-              tipo: 'agua_potable', idSeccion: nuevoIdServicioBasico()),
-          EdanServicioBasicoDetalle(
-              tipo: 'alcantarillado', idSeccion: nuevoIdServicioBasico()),
-          EdanServicioBasicoDetalle(
-              tipo: 'gas_domiciliario', idSeccion: nuevoIdServicioBasico()),
-          EdanServicioBasicoDetalle(
-              tipo: 'telecomunicaciones', idSeccion: nuevoIdServicioBasico()),
+          EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
+          EdanServicioBasicoDetalle(tipo: 'agua_potable'),
+          EdanServicioBasicoDetalle(tipo: 'alcantarillado'),
+          EdanServicioBasicoDetalle(tipo: 'gas_domiciliario'),
+          EdanServicioBasicoDetalle(tipo: 'telecomunicaciones'),
         ]);
       }
     });

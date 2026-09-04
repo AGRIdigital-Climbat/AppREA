@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
-import '../../../../models/id_seccion_helper.dart';
 import '../../../../models/reporte.dart';
 import '../../../../providers/reporte_provider.dart';
 import 'edan_boton_sacar_foto.dart';
@@ -58,7 +57,7 @@ class _EdanPage09State extends State<EdanPage09> {
 
   // ─── Agricultura ───
   void _agregarAgricultura() {
-    final a = EdanDanoAgricultura(idSeccion: nuevoIdDanoAgricultura());
+    final a = EdanDanoAgricultura();
     _editarAgricultura(a, esNuevo: true);
   }
 
@@ -181,7 +180,7 @@ class _EdanPage09State extends State<EdanPage09> {
 
   // ─── Pecuario ───
   void _agregarPecuario() {
-    final p = EdanDanoPecuario(idSeccion: nuevoIdDanoPecuario());
+    final p = EdanDanoPecuario();
     _editarPecuario(p, esNuevo: true);
   }
 
@@ -302,7 +301,7 @@ class _EdanPage09State extends State<EdanPage09> {
 
   // ─── Infraestructura productiva ───
   void _agregarInfra() {
-    final i = EdanInfraProductiva(idSeccion: nuevoIdInfraProductiva());
+    final i = EdanInfraProductiva();
     _editarInfra(i, esNuevo: true);
   }
 

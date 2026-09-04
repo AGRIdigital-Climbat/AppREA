@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
-import '../../../../models/id_seccion_helper.dart';
 import 'edan_boton_sacar_foto.dart';
 
 /// Página 06: Impacto en servicios básicos.
@@ -31,16 +30,11 @@ class _EdanPage06State extends State<EdanPage06> {
     super.initState();
     if (widget.localidad.serviciosBasicos.isEmpty) {
       widget.localidad.serviciosBasicos.addAll([
-        EdanServicioBasicoDetalle(
-            tipo: 'energia_electrica', idSeccion: nuevoIdServicioBasico()),
-        EdanServicioBasicoDetalle(
-            tipo: 'agua_potable', idSeccion: nuevoIdServicioBasico()),
-        EdanServicioBasicoDetalle(
-            tipo: 'alcantarillado', idSeccion: nuevoIdServicioBasico()),
-        EdanServicioBasicoDetalle(
-            tipo: 'gas_domiciliario', idSeccion: nuevoIdServicioBasico()),
-        EdanServicioBasicoDetalle(
-            tipo: 'telecomunicaciones', idSeccion: nuevoIdServicioBasico()),
+        EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
+        EdanServicioBasicoDetalle(tipo: 'agua_potable'),
+        EdanServicioBasicoDetalle(tipo: 'alcantarillado'),
+        EdanServicioBasicoDetalle(tipo: 'gas_domiciliario'),
+        EdanServicioBasicoDetalle(tipo: 'telecomunicaciones'),
       ]);
     }
   }

@@ -66,11 +66,13 @@ class EdanSyncRespoService {
           '${pendientesDelete.length} para delete');
       if (kSyncDebugMode) {
         SyncDebugCollector.instance.addFase('Diagnóstico local');
+        final fotosLocal = await _fotosLocalesPendientes(db, locales);
         SyncDebugCollector.instance.addDiagnostico(
           'Estado local antes de sincronizar',
           {
             'total_localidades': locales.length,
             'pendientes_delete': pendientesDelete.length,
+            'fotos_pendientes': fotosLocal,
           },
         );
       }
@@ -127,6 +129,54 @@ class EdanSyncRespoService {
     }
   }
 
+  /// Devuelve un resumen de las fotos locales pendientes de subir, para el
+  /// "Diagnóstico local" del debug visual. Cuenta tanto las filas de la cola
+  /// [`foto_pendiente_v2`] (subida=0) como las fotos de las tablas de sección
+  /// cuyo path sigue siendo local (`/data/`), agrupadas por localidad.
+  Future<Map<String, dynamic>> _fotosLocalesPendientes(
+    DatabaseHelper db,
+    List<EdanLocalidad> locales,
+  ) async {
+    final porLocalidad = <String, int>{};
+    var total = 0;
+
+    try {
+      final pendientesV2 = await db.leerFotosPendientesUploadV2();
+      for (final f in pendientesV2) {
+        final idLocal = f['id_local']?.toString();
+        if (idLocal == null || idLocal.isEmpty) continue;
+        porLocalidad[idLocal] = (porLocalidad[idLocal] ?? 0) + 1;
+        total++;
+      }
+    } catch (e) {
+      debugPrint('[SyncC] Diagnóstico fotos v2 error: $e');
+    }
+
+    for (final local in locales) {
+      final idLocal = local.idLocal;
+      if (idLocal == null) continue;
+      for (final desc in EdanSeccionesRegistry.secciones.where((s) => s.usaFoto)) {
+        try {
+          final filas = await db.leerFilasSeccion(desc.tablaSqlite, idLocal);
+          for (final fila in filas) {
+            final fotografia = fila['fotografia']?.toString();
+            if (fotografia == null || fotografia.isEmpty) continue;
+            if (!fotografia.startsWith('/data/')) continue;
+            porLocalidad[idLocal] = (porLocalidad[idLocal] ?? 0) + 1;
+            total++;
+          }
+        } catch (_) {
+          // tabla o fila no disponible: se omite
+        }
+      }
+    }
+
+    return {
+      'total': total,
+      'por_localidad': porLocalidad,
+    };
+  }
+
   // =====================================================================
   //  FASE 1: SUBIR FOTOS PENDIENTES
   // =====================================================================
@@ -156,14 +206,16 @@ class EdanSyncRespoService {
               if (fotografia == null || fotografia.isEmpty) continue;
               if (idSeccion == null || idSeccion.isEmpty) continue;
               if (!fotografia.startsWith('/data/')) continue;
-              // Esta fila tiene un path local sin subir — registrar en foto_pendiente_v2
-              await db.insertarFotoPendienteV2(
+              // Esta fila tiene un path local sin subir — registrar en foto_pendiente_v2.
+              // El id_foto devuelto se usa para marcar la subida (subida=1) y así
+              // evitar que el mismo archivo se vuelva a subir en el próximo ciclo.
+              final idFotoNuevo = await db.insertarFotoPendienteV2(
                 idLocal: idLocal,
                 idSeccion: idSeccion,
                 rutaLocalArchivo: fotografia,
               );
               fotosLocal.add({
-                'id_foto': '',
+                'id_foto': idFotoNuevo,
                 'id_local': idLocal,
                 'id_seccion': idSeccion,
                 'ruta_local_archivo': fotografia,
@@ -218,6 +270,10 @@ class EdanSyncRespoService {
                 path,
               );
             }
+            // Actualizar el modelo en memoria para que el documento que se arme
+            // en Fase 2b use el path del server (no el /data/ local), incluso si
+            // la búsqueda de tabla falló o la fila cambió.
+            _actualizarFotoModelo(local, idSeccion, path);
             subidas++;
             debugPrint('[SyncC]   Foto OK: $idSeccion → $path');
           } else {
@@ -249,6 +305,43 @@ class EdanSyncRespoService {
       idSeccion,
       DatabaseHelper.instance,
     );
+  }
+
+  /// Actualiza el campo `fotografia` del ítem del modelo (en memoria) cuyo
+  /// `id_seccion` coincide, reemplazando el path local `/data/` por el path del
+  /// servidor. Así el documento que se construye en Fase 2b serializa la ruta
+  /// servida, no la local.
+  void _actualizarFotoModelo(EdanLocalidad local, String idSeccion, String path) {
+    for (final item in _itemsConFoto(local)) {
+      if (idSeccionDe(item) == idSeccion) {
+        _setFotografiaItem(item, path);
+        return;
+      }
+    }
+  }
+
+  List<Object> _itemsConFoto(EdanLocalidad local) => [
+        ...local.establecimientosSalud,
+        ...local.danosViales,
+        ...local.danosInfraPublica,
+        ...local.serviciosBasicos,
+        ...local.unidadesEducativas,
+        ...local.danosVivienda,
+        ...local.danosAgricultura,
+        ...local.danosPecuarios,
+        ...local.infraProductiva,
+      ];
+
+  void _setFotografiaItem(Object item, String path) {
+    if (item is EdanEstablecimientoSalud) { item.fotografia = path; return; }
+    if (item is EdanDanoVial) { item.fotografia = path; return; }
+    if (item is EdanDanoInfraPublica) { item.fotografia = path; return; }
+    if (item is EdanServicioBasicoDetalle) { item.fotografia = path; return; }
+    if (item is EdanDanoUnidadEducativa) { item.fotografia = path; return; }
+    if (item is EdanDanoVivienda) { item.fotografia = path; return; }
+    if (item is EdanDanoAgricultura) { item.fotografia = path; return; }
+    if (item is EdanDanoPecuario) { item.fotografia = path; return; }
+    if (item is EdanInfraProductiva) { item.fotografia = path; return; }
   }
 
   // =====================================================================
@@ -789,10 +882,7 @@ class EdanSyncRespoService {
     try {
       final String json;
       if (item is EdanEstablecimientoSalud) {
-        final m = Map<String, dynamic>.from(item.toJson())
-          ..remove('id_seccion')
-          ..remove('fecha_modificacion');
-        json = jsonEncode(m);
+        json = _huellaMap(item.toJson());
       } else if (item is EdanDanoVial) {
         json = _huellaMap(item.toJson());
       } else if (item is EdanDanoInfraPublica) {
@@ -826,7 +916,11 @@ class EdanSyncRespoService {
     final copia = Map<String, dynamic>.from(m)
       ..remove('id_seccion')
       ..remove('fecha_modificacion')
-      ..remove('fecha_modificacion_local');
+      ..remove('fecha_modificacion_local')
+      // La ruta de foto local y la referencia subida en el servidor difieren
+      // para la misma fila física, por lo que no deben participar en la huella.
+      ..remove('fotografia')
+      ..remove('fotos');
     return jsonEncode(copia);
   }
 

@@ -583,7 +583,9 @@ class ApiService {
         request.headers['Accept'] = 'application/json';
 
         if (idEdanLocalidad != null) {
-          request.fields['id_municipio'] = '$idEdanLocalidad';
+          // Asociar la foto a la localidad EDAN (no al municipio). El valor que
+          // llega es `id_edan_localidad` (id_server/id_edan del móvil).
+          request.fields['id_edan_localidad'] = '$idEdanLocalidad';
         }
         final userId = AuthService.instance.userId;
         if (userId != null) {

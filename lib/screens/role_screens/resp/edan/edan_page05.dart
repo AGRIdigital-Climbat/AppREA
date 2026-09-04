@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
-import '../../../../models/id_seccion_helper.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -57,7 +56,7 @@ class _EdanPage05State extends State<EdanPage05> {
     super.dispose();
   }
   void _agregarVial() {
-    final v = EdanDanoVial(idSeccion: nuevoIdDanoVial());
+    final v = EdanDanoVial();
     _editarVial(v, esNuevo: true);
   }
 
@@ -181,7 +180,7 @@ class _EdanPage05State extends State<EdanPage05> {
   }
 
   void _agregarInfra() {
-    final i = EdanDanoInfraPublica(idSeccion: nuevoIdDanoInfraPublica());
+    final i = EdanDanoInfraPublica();
     _editarInfra(i, esNuevo: true);
   }
 
