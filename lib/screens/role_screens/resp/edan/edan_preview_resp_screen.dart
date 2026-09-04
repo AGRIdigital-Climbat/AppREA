@@ -20,6 +20,7 @@ class EdanPreviewRespScreen extends StatelessWidget {
     final primary = PaletteScope.of(context).primary;
     final seccionesCompletas =
         EdanResumenPage.calcularSeccionesCompletas(localidad);
+    final tieneDatos = seccionesCompletas.values.any((v) => v);
     final incompletos = seccionesCompletas.entries
         .where((e) => !e.value)
         .map((e) => e.key)
@@ -35,9 +36,12 @@ class EdanPreviewRespScreen extends StatelessWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
       ),
-      body: EdanResumenPage(
-        localidad: localidad,
-        seccionesCompletas: seccionesCompletas,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: EdanResumenPage(
+          localidad: localidad,
+          seccionesCompletas: seccionesCompletas,
+        ),
       ),
       bottomNavigationBar: Container(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
@@ -103,10 +107,14 @@ class EdanPreviewRespScreen extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: ElevatedButton(
-                      onPressed: () => _confirmarEnvio(context),
+                      onPressed: tieneDatos
+                          ? () => _confirmarEnvio(context)
+                          : null,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primary,
                         foregroundColor: Colors.white,
+                        disabledBackgroundColor: AppColors.divider,
+                        disabledForegroundColor: AppColors.textSecondary,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
