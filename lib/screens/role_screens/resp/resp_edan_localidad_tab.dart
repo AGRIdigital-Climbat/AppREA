@@ -10,7 +10,7 @@ import '../../../services/edan/edan_sync_respo_service.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
-import '../ugr/ugr_edan_preview_screen.dart';
+import 'edan/edan_preview_resp_screen.dart';
 import '../ugr/ugr_route.dart';
 
 class RespEdanLocalidadTab extends StatefulWidget {
@@ -410,14 +410,11 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
           localidad: localidad,
           completo: completo,
           onTap: () async {
-            final confirmado = await Navigator.of(context).push<Edan>(
-              ugrRoute(UgrEdanPreviewScreen(
-                edan: Edan.desdeLocalidad(localidad),
-                sinAlcalde: true,
-                cargarResponsableDeCache: true,
-              ), palette: Palettes.rea),
+            final confirmado = await Navigator.of(context).push<bool>(
+              ugrRoute(EdanPreviewRespScreen(localidad: localidad),
+                  palette: Palettes.rea),
             );
-            if (confirmado != null && mounted) {
+            if (confirmado == true && mounted) {
               await _marcarEnviada(localidad);
             } else {
               await _cargarLocalidades();

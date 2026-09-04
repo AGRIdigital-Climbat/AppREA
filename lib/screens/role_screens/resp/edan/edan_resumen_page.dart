@@ -24,6 +24,64 @@ class EdanResumenPage extends StatefulWidget {
     required this.seccionesCompletas,
   });
 
+  /// Calcula el mapa de secciones completas para una localidad.
+  /// Reutiliza la misma lógica que el wizard.
+  static Map<String, bool> calcularSeccionesCompletas(EdanLocalidad l) {
+    return {
+      '01': l.nombre.trim().isNotEmpty || l.impPoblacion || l.impSalud,
+      '02': l.totalPoblacionAfectada > 0 ||
+          l.totalFamiliasAfectadas > 0 ||
+          l.totalFamiliasDamnificadas > 0,
+      '03': _seccionTieneDatos03(l),
+      '04': _seccionTieneDatos04(l),
+      '05': _seccionTieneDatos05(l),
+      '06': l.impServiciosBasicos
+          ? true
+          : l.serviciosBasicos.any((s) => s.tieneDatos),
+      '07': l.impUnidadesEducativas
+          ? true
+          : l.unidadesEducativas.isNotEmpty,
+      '08': l.impDanosVivienda
+          ? true
+          : l.danosVivienda.isNotEmpty,
+      '09': _seccionTieneDatos09(l),
+      '10': l.impProteccion
+          ? true
+          : l.proteccion.any((g) => g.tieneDatos),
+      '11': l.impNecesidadHumanitaria
+          ? true
+          : (l.necesidadHumanitaria?.tieneDatos ?? false),
+      '13': (l.responsable?.nombre.trim().isNotEmpty ?? false) &&
+          (l.responsable?.cargo.trim().isNotEmpty ?? false),
+    };
+  }
+
+  static bool _seccionTieneDatos03(EdanLocalidad l) {
+    if (l.impImpactoPoblacion || l.impPrimeraRespuesta) return true;
+    return l.impactoPoblacion.any((i) => i.tieneDatosGlobales) ||
+        (l.necesidadPrimeraRespuesta?.tieneDatos ?? false);
+  }
+
+  static bool _seccionTieneDatos04(EdanLocalidad l) {
+    if (l.impSaludEstablecimientos || l.impNecesidadSalud) return true;
+    return l.establecimientosSalud.isNotEmpty ||
+        (l.necesidadSalud?.tieneDatos ?? false);
+  }
+
+  static bool _seccionTieneDatos05(EdanLocalidad l) {
+    if (l.impDanosViales || l.impDanosInfraPublica) return true;
+    return l.danosViales.isNotEmpty || l.danosInfraPublica.isNotEmpty;
+  }
+
+  static bool _seccionTieneDatos09(EdanLocalidad l) {
+    if (l.impDanosAgricultura ||
+        l.impDanosPecuarios ||
+        l.impInfraProductiva) return true;
+    return l.danosAgricultura.isNotEmpty ||
+        l.danosPecuarios.isNotEmpty ||
+        l.infraProductiva.isNotEmpty;
+  }
+
   @override
   State<EdanResumenPage> createState() => _EdanResumenPageState();
 }
