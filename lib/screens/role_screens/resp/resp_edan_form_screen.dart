@@ -510,11 +510,7 @@ class _RespEdanFormScreenState extends State<RespEdanFormScreen> {
     final edan = _construirEdan();
     final confirmado = await Navigator.of(context).push<Edan>(
       MaterialPageRoute(
-        builder: (_) => UgrEdanPreviewScreen(
-          edan: edan,
-          sinAlcalde: true,
-          cargarResponsableDeCache: true,
-        ),
+        builder: (_) => UgrEdanPreviewScreen(edan: edan),
       ),
     );
     if (confirmado == null || !mounted) return;

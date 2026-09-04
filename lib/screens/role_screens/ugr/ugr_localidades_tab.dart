@@ -288,7 +288,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     );
 
     final confirmado = await Navigator.of(context).push<bool>(
-      ugrRoute(UgrEdanPreviewScreen(edan: edan, soloLectura: true, esConsolidado: true)),
+      ugrRoute(UgrEdanPreviewScreen(edan: edan)),
     );
 
     if (confirmado == true && mounted) {

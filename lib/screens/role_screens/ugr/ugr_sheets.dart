@@ -148,7 +148,7 @@ class _UgrGlobalSearchSheetState extends State<_UgrGlobalSearchSheet> {
         if (edanBd == null || !mounted) return;
         Navigator.of(context).push(
           ugrRoute(
-            UgrEdanPreviewScreen(edan: edanBd, soloLectura: true, esConsolidado: true),
+            UgrEdanPreviewScreen(edan: edanBd),
           ),
         );
       },

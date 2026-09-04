@@ -1,8 +1,12 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import '../models/edan.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
+import 'edan/edan_localidades_envio_v2_service.dart';
+import 'edan_secciones_registry.dart';
 
 class EdanSyncService {
   static final EdanSyncService _instance = EdanSyncService._();
@@ -149,6 +153,16 @@ class EdanSyncService {
           }
           result.creados++;
         }
+
+        // Popular tablas seccion_* desde los datos del servidor.
+        final servicioV2 = EdanLocalidadesEnvioV2Service();
+        for (final loc in edan.localidades) {
+          try {
+            await servicioV2.popularSeccionesDesdeServer(loc);
+          } catch (e) {
+            debugPrint('Error popularizando secciones de localidad ${loc.idLocal}: $e');
+          }
+        }
       }
 
       if (edansRemotos.isNotEmpty) {
@@ -190,6 +204,13 @@ class EdanSyncService {
       
       if (edansPendientes.isEmpty) {
         return;
+      }
+
+      // Subir fotos pendientes antes de construir el JSON.
+      for (final edan in edansPendientes) {
+        for (final loc in edan.localidades) {
+          await _subirFotosPendientes(loc);
+        }
       }
 
       final edansJson = edansPendientes.map((e) {
@@ -255,6 +276,136 @@ class EdanSyncService {
       result.mensaje = 'Error al enviar EDANs: ${e.toString()}';
       result.exito = false;
     }
+  }
+
+  /// Sube las fotos pendientes de una localidad antes de enviar el EDAN al
+  /// servidor. Reutiliza la cola `foto_pendiente_v2` que ya escribe el wizard
+  /// al tomar fotos.
+  Future<void> _subirFotosPendientes(EdanLocalidad local) async {
+    final db = DatabaseHelper.instance;
+    final idLocal = local.idLocal;
+    if (idLocal == null) return;
+
+    // 1) Leer fotos pendientes de la cola v2.
+    final pendientesV2 = await db.leerFotosPendientesUploadV2();
+    final fotosLocal =
+        pendientesV2.where((f) => f['id_local'] == idLocal).toList();
+
+    // 2) Fallback: buscar en tablas de secciones donde fotografia empiece con /data/
+    if (fotosLocal.isEmpty) {
+      for (final desc in EdanSeccionesRegistry.secciones.where((s) => s.usaFoto)) {
+        try {
+          final filas = await db.leerFilasSeccion(desc.tablaSqlite, idLocal);
+          for (final fila in filas) {
+            final fotografia = fila['fotografia']?.toString();
+            final idSeccion = fila['id_seccion']?.toString();
+            if (fotografia == null || fotografia.isEmpty) continue;
+            if (idSeccion == null || idSeccion.isEmpty) continue;
+            if (!fotografia.startsWith('/data/')) continue;
+            final idFotoNuevo = await db.insertarFotoPendienteV2(
+              idLocal: idLocal,
+              idSeccion: idSeccion,
+              rutaLocalArchivo: fotografia,
+            );
+            fotosLocal.add({
+              'id_foto': idFotoNuevo,
+              'id_local': idLocal,
+              'id_seccion': idSeccion,
+              'ruta_local_archivo': fotografia,
+            });
+          }
+        } catch (e) {
+          debugPrint('[SyncUGR] Fallback fotos error ${desc.rutaV2}: $e');
+        }
+      }
+    }
+
+    if (fotosLocal.isEmpty) return;
+    debugPrint('[SyncUGR] Fase fotos: ${fotosLocal.length} pendientes para $idLocal');
+
+    for (final fotoRow in fotosLocal) {
+      final idFoto = fotoRow['id_foto']?.toString() ?? '';
+      final ruta = fotoRow['ruta_local_archivo']?.toString();
+      final idSeccion = fotoRow['id_seccion']?.toString() ?? '';
+
+      if (ruta == null || ruta.isEmpty) {
+        if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Ruta vacía');
+        continue;
+      }
+
+      final file = File(ruta);
+      if (!await file.exists()) {
+        if (idFoto.isNotEmpty) {
+          await db.marcarFotoErrorV2(idFoto, 'Archivo no encontrado');
+        }
+        continue;
+      }
+
+      try {
+        final paths = await ApiService.instance.subirFotosCarrete(
+          files: [ruta],
+          idSecciones: [idSeccion],
+          idLocal: idLocal,
+          idEdanLocalidad: local.idServer ?? local.idEdan,
+        );
+
+        final path = paths[idSeccion];
+        if (path != null && path.isNotEmpty) {
+          if (idFoto.isNotEmpty) await db.marcarFotoSubidaV2(idFoto, path);
+          // Actualizar sección en SQLite con el path del servidor.
+          final tabla = await EdanSeccionesRegistry.buscarTablaPorIdSeccion(
+            idSeccion,
+            db,
+          );
+          if (tabla.isNotEmpty) {
+            await db.marcarFotografiaSeccion(tabla, idLocal, idSeccion, path);
+          }
+          // Actualizar el modelo en memoria.
+          _actualizarFotoModelo(local, idSeccion, path);
+          debugPrint('[SyncUGR]   Foto OK: $idSeccion → $path');
+        } else {
+          if (idFoto.isNotEmpty) {
+            await db.marcarFotoErrorV2(idFoto, 'Server no devolvió path');
+          }
+        }
+      } catch (e) {
+        if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, e.toString());
+        debugPrint('[SyncUGR]   Foto FALLO: $idSeccion → $e');
+      }
+    }
+  }
+
+  void _actualizarFotoModelo(EdanLocalidad local, String idSeccion, String path) {
+    for (final item in _itemsConFoto(local)) {
+      if (idSeccionDe(item) == idSeccion) {
+        _setFotografiaItem(item, path);
+        return;
+      }
+    }
+  }
+
+  List<Object> _itemsConFoto(EdanLocalidad local) => [
+        ...local.establecimientosSalud,
+        ...local.danosViales,
+        ...local.danosInfraPublica,
+        ...local.serviciosBasicos,
+        ...local.unidadesEducativas,
+        ...local.danosVivienda,
+        ...local.danosAgricultura,
+        ...local.danosPecuarios,
+        ...local.infraProductiva,
+      ];
+
+  void _setFotografiaItem(Object item, String path) {
+    if (item is EdanEstablecimientoSalud) { item.fotografia = path; return; }
+    if (item is EdanDanoVial) { item.fotografia = path; return; }
+    if (item is EdanDanoInfraPublica) { item.fotografia = path; return; }
+    if (item is EdanServicioBasicoDetalle) { item.fotografia = path; return; }
+    if (item is EdanDanoUnidadEducativa) { item.fotografia = path; return; }
+    if (item is EdanDanoVivienda) { item.fotografia = path; return; }
+    if (item is EdanDanoAgricultura) { item.fotografia = path; return; }
+    if (item is EdanDanoPecuario) { item.fotografia = path; return; }
+    if (item is EdanInfraProductiva) { item.fotografia = path; return; }
   }
 
   Future<bool> _regenerarCodigoYReintentar(Edan edan, int userId) async {

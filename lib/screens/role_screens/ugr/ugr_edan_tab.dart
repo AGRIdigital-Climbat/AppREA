@@ -288,11 +288,6 @@ class UgrEdanTabState extends State<UgrEdanTab>
     );
   }
 
-  static bool _esBorrador(Edan e) {
-    final estLower = e.estado.trim().toLowerCase();
-    return estLower == 'borrador' || (estLower.isEmpty && e.idEstado == 1);
-  }
-
   Future<void> _verDetalleEdan(Map<String, dynamic> edan) async {
     final idEdan = edan['id_edan'];
     if (idEdan == null) return;
@@ -306,7 +301,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
         edanModel ??= Edan.fromJson(edan);
         if (!mounted) return;
         await Navigator.of(context).push(
-          ugrRoute(UgrEdanPreviewScreen(edan: edanModel, soloLectura: !_esBorrador(edanModel), esConsolidado: true)),
+          ugrRoute(UgrEdanPreviewScreen(edan: edanModel)),
         );
         if (mounted) await _cargarEdanesServidor();
       } catch (_) {
@@ -323,7 +318,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
       final edanModel = Edan.fromJson(detalle);
       if (!mounted) return;
       await Navigator.of(context).push(
-        ugrRoute(UgrEdanPreviewScreen(edan: edanModel, soloLectura: !_esBorrador(edanModel), esConsolidado: true)),
+        ugrRoute(UgrEdanPreviewScreen(edan: edanModel)),
       );
       if (mounted) await _cargarEdanesServidor();
     } catch (e) {

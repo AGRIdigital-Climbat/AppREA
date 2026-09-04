@@ -18,18 +18,10 @@ import 'ugr_route.dart';
 
 class UgrEdanPreviewScreen extends StatefulWidget {
   final Edan edan;
-  final bool soloLectura;
-  final bool sinAlcalde;
-  final bool cargarResponsableDeCache;
-  final bool esConsolidado;
 
   const UgrEdanPreviewScreen({
     super.key,
     required this.edan,
-    this.soloLectura = false,
-    this.sinAlcalde = false,
-    this.cargarResponsableDeCache = false,
-    this.esConsolidado = false,
   });
 
   @override
@@ -45,9 +37,6 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   bool _cargandoDocumentos = false;
 
   Edan get edan => widget.edan;
-  bool get soloLectura => widget.soloLectura;
-  bool get sinAlcalde => widget.sinAlcalde;
-  bool get esConsolidado => widget.esConsolidado;
 
   void _cargarAlcaldes() {
     final municipioId = edan.idMunicipio;
@@ -78,11 +67,17 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     }
   }
 
-  void _confirmar(BuildContext context) {
-    edan
-      ..estado = 'enviado'
-      ..idEstado = 1;
-    Navigator.of(context).pop(edan);
+  Future<void> _navegarSubirDocumento() async {
+    final idEdan = edan.idEdan;
+    if (idEdan == null) return;
+    final resultado = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => UgrRecursoUploadScreen(edan: edan),
+      ),
+    );
+    if (resultado == true && mounted) {
+      _cargarDocumentosEdan();
+    }
   }
 
   Future<void> _confirmarConsolidacion() async {
@@ -113,29 +108,12 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     }
   }
 
-  Future<void> _navegarSubirDocumento() async {
-    final idEdan = edan.idEdan;
-    if (idEdan == null) return;
-    final resultado = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => UgrRecursoUploadScreen(
-          edan: edan,
-        ),
-      ),
-    );
-    if (resultado == true && mounted) {
-      _cargarDocumentosEdan();
-    }
-  }
-
   @override
   void initState() {
     super.initState();
-    if (esConsolidado) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _cargarDocumentosEdan();
-      });
-    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _cargarDocumentosEdan();
+    });
   }
 
   @override
@@ -145,26 +123,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     for (final l in edan.localidades) {
       l.deduplicarSecciones();
     }
-    final incompletos = edan.incompletosPorSeccion(exigirAlcalde: !sinAlcalde);
 
-    final seccionesVisibles = <String>{
-      '01',
-      '13',
-      if (edan.localidades.any((l) =>
-          l.impImpactoPoblacion || l.impPrimeraRespuesta)) '03',
-      if (edan.localidades.any((l) =>
-          l.impSaludEstablecimientos || l.impNecesidadSalud)) '04',
-      if (edan.localidades.any((l) => l.impInfraestructura)) '05',
-      if (edan.localidades.any((l) => l.impServicios)) '06',
-      if (edan.localidades.any((l) => l.impEducacion)) '07',
-      if (edan.localidades.any((l) => l.impVivienda)) '08',
-      if (edan.localidades.any((l) => l.impAgropecuario)) '09',
-      if (edan.localidades.any((l) => l.impProteccion)) '10',
-      if (edan.localidades.any((l) => l.impNecesidadHumanitaria)) '11',
-    };
-    final incompletosVisibles = incompletos.keys
-        .where((k) => seccionesVisibles.contains(k))
-        .toList();
     return Scaffold(
       backgroundColor: PaletteScope.of(context).background,
       appBar: AppBar(
@@ -186,6 +145,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           _buildDocHeader(primary),
           const SizedBox(height: 16),
           _seccion01(),
+          _tablaResumenLocalidades(),
           _seccion02(),
           _seccion03(),
           _seccion04(),
@@ -200,11 +160,9 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           const SizedBox(height: 12),
           _buildDeclaracion(),
           const SizedBox(height: 16),
-          if (esConsolidado) ...[
-            _buildLocalidadesExpandible(primary),
-            const SizedBox(height: 12),
-            _buildDocumentosVinculados(primary),
-          ],
+          _buildLocalidadesExpandible(primary),
+          const SizedBox(height: 12),
+          _buildDocumentosVinculados(primary),
           const SizedBox(height: 24),
         ],
       ),
@@ -217,42 +175,27 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (soloLectura && esConsolidado && edan.idEdan == null)
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: _confirmarConsolidacion,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.aprobado,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      minimumSize: const Size(0, 56),
+            if (edan.idEdan == null)
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _confirmarConsolidacion,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.aprobado,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Text('Consolidar'),
+                    minimumSize: const Size(0, 56),
                   ),
-                )
-              else if (soloLectura)
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      minimumSize: const Size(0, 56),
-                    ),
-                    child: const Text('Cerrar'),
-                  ),
-                )
-              else if (!soloLectura && esConsolidado)
-                if (!soloLectura &&
-                    (edan.idEstado == 1 || edan.estado.trim().toLowerCase() == 'borrador') &&
-                    edan.idEdan != null)
+                  child: const Text('Consolidar'),
+                ),
+              )
+            else if (edan.idEdan != null &&
+                (edan.idEstado == 1 || edan.estado.trim().toLowerCase() == 'borrador'))
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -268,118 +211,41 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
                         minimumSize: const Size(0, 48),
                       ),
                     ),
-                  )
-                else
-                  const SizedBox.shrink()
-              else
-                Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (incompletosVisibles.isNotEmpty) ...[
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: AppColors.pending.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  const Row(
-                                    children: [
-                                      Icon(Icons.warning_amber_rounded, size: 16, color: AppColors.pending),
-                                      SizedBox(width: 6),
-                                      Text(
-                                        'Campos faltantes para enviar:',
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          fontWeight: FontWeight.w600,
-                                          color: AppColors.pending,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 6),
-                                  ...incompletosVisibles.map((key) => Padding(
-                                        padding: const EdgeInsets.only(bottom: 2),
-                                        child: Text(
-                                          '· Sección $key: ${incompletos[key]!.join(", ")}',
-                                          style: const TextStyle(
-                                            fontSize: 11,
-                                            color: AppColors.textSecondary,
-                                          ),
-                                        ),
-                                      )),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                          ],
-                          if (incompletosVisibles.isEmpty) ...[
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(10),
-                              decoration: BoxDecoration(
-                                color: AppColors.aprobado.withValues(alpha: 0.08),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Row(
-                                children: [
-                                  Icon(Icons.check_circle, size: 16, color: AppColors.aprobado),
-                                  SizedBox(width: 6),
-                                  Text(
-                                    'Formulario completo y listo para enviar al UGR',
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
-                                      color: AppColors.aprobado,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            const SizedBox(height: 10),
-                          ],
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: () => Navigator.of(context).pop(),
-                                  style: OutlinedButton.styleFrom(
-                                    foregroundColor: primary,
-                                    side: BorderSide(color: primary, width: 2),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    minimumSize: const Size(0, 56),
-                                  ),
-                                  child: const Text('Volver y Editar'),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton(
-                                  onPressed: incompletosVisibles.isEmpty
-                                      ? () => _confirmar(context)
-                                      : null,
-                                  style: ElevatedButton.styleFrom(
-                                    backgroundColor: primary,
-                                    foregroundColor: Colors.white,
-                                    disabledBackgroundColor: AppColors.divider,
-                                    disabledForegroundColor: AppColors.textSecondary,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    minimumSize: const Size(0, 56),
-                                  ),
-                    child: const Text('Confirmar y Enviar'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        minimumSize: const Size(0, 56),
                       ),
+                      child: const Text('Cerrar'),
+                    ),
+                  ),
+                ],
+              )
+            else
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    minimumSize: const Size(0, 56),
+                  ),
+                  child: const Text('Cerrar'),
+                ),
+              ),
           ],
         ),
       ),
@@ -830,8 +696,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       titulo: 'Datos generales',
       children: [
         _dg([
-          if (!sinAlcalde && !soloLectura)
-            _campoAlcaldeInline(),
+          _campoAlcaldeInline(),
           _df('Departamento', _v(edan.departamentoNombre)),
           _df('Provincia', _v(edan.provinciaNombre)),
           _df('Municipio', _v(edan.municipioNombre)),
@@ -993,18 +858,145 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     );
   }
 
+  Widget _tablaResumenLocalidades() {
+    final localidades = edan.localidades;
+    if (localidades.isEmpty) return const SizedBox.shrink();
+    return _DocSeccion(
+      numero: '',
+      titulo: 'Localidades incluidas (${localidades.length})',
+      children: [
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(10),
+                    topRight: Radius.circular(10),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Nombre',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Tipo',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Municipio',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ...localidades.asMap().entries.map((entry) {
+                final i = entry.key;
+                final l = entry.value;
+                final esUltimo = i == localidades.length - 1;
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: esUltimo
+                          ? BorderSide.none
+                          : const BorderSide(color: AppColors.divider, width: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          l.nombre.isNotEmpty ? l.nombre : '-',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          l.tipoLocalidad.isNotEmpty ? l.tipoLocalidad : '-',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          l.municipioNombre ?? '-',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _seccion02() {
+    final totalPoblacion = edan.localidades.fold<int>(
+        0, (suma, l) => suma + l.totalPoblacionAfectada);
+    final totalFamiliasAfectadas = edan.localidades.fold<int>(
+        0, (suma, l) => suma + l.totalFamiliasAfectadas);
+    final totalFamiliasDamnificadas = edan.localidades.fold<int>(
+        0, (suma, l) => suma + l.totalFamiliasDamnificadas);
     return _DocSeccion(
       numero: '02',
       titulo: 'Información total población afectada y damnificada',
       children: [
         _dg([
           _df('Población afectada',
-              edan.totalPoblacionAfectada > 0 ? '${edan.totalPoblacionAfectada}' : '0'),
+              totalPoblacion > 0 ? '$totalPoblacion' : '0'),
           _df('Familias afectadas',
-              edan.totalFamiliasAfectadas > 0 ? '${edan.totalFamiliasAfectadas}' : '0'),
+              totalFamiliasAfectadas > 0 ? '$totalFamiliasAfectadas' : '0'),
           _df('Familias damnificadas',
-              edan.totalFamiliasDamnificadas > 0 ? '${edan.totalFamiliasDamnificadas}' : '0'),
+              totalFamiliasDamnificadas > 0 ? '$totalFamiliasDamnificadas' : '0'),
         ]),
       ],
     );
@@ -1785,7 +1777,6 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
                       onPressed: () => _descargarDocumento(doc),
                       tooltip: 'Descargar',
                     ),
-                    if (!soloLectura)
                       IconButton(
                         icon: const Icon(Icons.delete_outline, size: 18),
                         color: AppColors.error,

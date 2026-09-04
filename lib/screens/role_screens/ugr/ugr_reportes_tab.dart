@@ -323,7 +323,7 @@ class _LocalidadCard extends StatelessWidget {
   void _verDetalle(BuildContext context) {
     final edan = Edan.desdeLocalidad(localidad);
     Navigator.of(context).push(
-      ugrRoute(UgrEdanPreviewScreen(edan: edan, soloLectura: true, esConsolidado: true)),
+      ugrRoute(UgrEdanPreviewScreen(edan: edan)),
     );
   }
 }

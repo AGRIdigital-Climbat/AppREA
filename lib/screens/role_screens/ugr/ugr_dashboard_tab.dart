@@ -370,7 +370,7 @@ class _LocalidadActividadCard extends StatelessWidget {
         onTap: () {
           final edan = Edan.desdeLocalidad(localidad);
           Navigator.of(context).push(
-            ugrRoute(UgrEdanPreviewScreen(edan: edan, soloLectura: true, esConsolidado: true)),
+            ugrRoute(UgrEdanPreviewScreen(edan: edan)),
           );
         },
       ),
