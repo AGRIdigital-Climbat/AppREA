@@ -8,6 +8,7 @@ import '../../../services/database_helper.dart';
 import '../../../services/edan/edan_documento_sync_service.dart';
 import '../../../services/edan/edan_sync_respo_service.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
+import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
 import '../ugr/ugr_edan_preview_screen.dart';
 import '../ugr/ugr_route.dart';
@@ -210,6 +211,7 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
         localidad.idEdanLocalidadEstado = estadoDestino.id;
         localidad.sincronizado = true;
         localidad.pendienteActualizacion = false;
+        localidad.editado = false;
         await DatabaseHelper.instance.updateLocalidad(localidad);
       }
     } catch (e) {
@@ -535,7 +537,7 @@ class _RespLocalidadCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-              _buildSeccionBadges(context),
+              EdanSeccionBadges(localidad: localidad),
               const SizedBox(height: 10),
               if (esPendienteEnvio)
                 Container(
@@ -606,50 +608,6 @@ class _RespLocalidadCard extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-
-  Widget _buildSeccionBadges(BuildContext context) {
-    final l = localidad;
-    final labels = <String>[
-      if (l.impImpactoPoblacion) 'Población',
-      if (l.impSaludEstablecimientos || l.impNecesidadSalud) 'Salud',
-      if (l.impServiciosBasicos) 'Servicios',
-      if (l.impDanosViales || l.impDanosInfraPublica) 'Vías y puentes',
-      if (l.impUnidadesEducativas) 'Educación',
-      if (l.impDanosVivienda) 'Vivienda',
-      if (l.impDanosAgricultura || l.impDanosPecuarios || l.impInfraProductiva)
-        'Agropecuario',
-      if (l.impProteccion) 'Protección',
-      if (l.impNecesidadHumanitaria) 'Necesidades',
-    ];
-    if (labels.isEmpty) return const SizedBox.shrink();
-    return Wrap(
-      spacing: 6,
-      runSpacing: 6,
-      children: labels
-          .map((t) => Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: PaletteScope.of(context)
-                      .primary
-                      .withValues(alpha: 0.08),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                      color: PaletteScope.of(context)
-                          .primary
-                          .withValues(alpha: 0.25)),
-                ),
-                child: Text(
-                  t,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ))
-          .toList(),
     );
   }
 

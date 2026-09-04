@@ -1,5 +1,7 @@
 import 'database_helper.dart';
 
+import '../models/edan.dart';
+
 /// Tipo de serialización de una sección en la API v2.
 enum EdanSeccionTipo { unoAUno, unoAN }
 
@@ -235,5 +237,34 @@ class EdanSeccionesRegistry {
       }
     }
     return flags;
+  }
+
+  /// Labels de las secciones visibles en el wizard, indexados por el flag de page01.
+  static const Map<String, String> _seccionLabels = {
+    'impPoblacion': 'Población',
+    'impSalud': 'Salud',
+    'impInfraestructura': 'Infraestructura',
+    'impServicios': 'Servicios',
+    'impEducacion': 'Educación',
+    'impVivienda': 'Vivienda',
+    'impAgropecuario': 'Agropecuario',
+    'impProteccion': 'Protección',
+    'impNecesidades': 'Necesidades',
+  };
+
+  /// Retorna los labels de las secciones activas según los flags imp_* de la localidad.
+  /// Refleja exactamente lo que se marca en page01.
+  static List<String> seccionesActivasLabels(EdanLocalidad l) {
+    final result = <String>[];
+    if (l.impPoblacion) result.add(_seccionLabels['impPoblacion']!);
+    if (l.impSalud) result.add(_seccionLabels['impSalud']!);
+    if (l.impInfraestructura) result.add(_seccionLabels['impInfraestructura']!);
+    if (l.impServicios) result.add(_seccionLabels['impServicios']!);
+    if (l.impEducacion) result.add(_seccionLabels['impEducacion']!);
+    if (l.impVivienda) result.add(_seccionLabels['impVivienda']!);
+    if (l.impAgropecuario) result.add(_seccionLabels['impAgropecuario']!);
+    if (l.impProteccion) result.add(_seccionLabels['impProteccion']!);
+    if (l.impNecesidades) result.add(_seccionLabels['impNecesidades']!);
+    return result;
   }
 }

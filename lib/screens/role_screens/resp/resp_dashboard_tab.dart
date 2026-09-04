@@ -8,6 +8,7 @@ import '../../../services/database_helper.dart';
 import '../../../services/edan/edan_documento_sync_service.dart';
 import '../../../services/edan/edan_sync_respo_service.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
+import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
 import '../ugr/ugr_edan_preview_screen.dart';
 import '../ugr/ugr_route.dart';
@@ -207,6 +208,7 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
         localidad.idEdanLocalidadEstado = estadoDestino.id;
         localidad.sincronizado = true;
         localidad.pendienteActualizacion = false;
+        localidad.editado = false;
         await DatabaseHelper.instance.updateLocalidad(localidad);
       }
     } catch (e) {
@@ -701,6 +703,8 @@ class _RespLocalidadCard extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 10),
+              EdanSeccionBadges(localidad: localidad),
               const SizedBox(height: 10),
               if (esPendienteEnvio)
                 Container(

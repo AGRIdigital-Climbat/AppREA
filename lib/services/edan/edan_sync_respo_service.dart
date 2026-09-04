@@ -476,6 +476,10 @@ class EdanSyncRespoService {
           } else {
             await db.markLocalidadAsSynced(idLocal, 0);
           }
+          // Limpiar editado en filas de secciones ANTES de recalcular cabecera
+          for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
+            await db.marcarFilasSeccionSincronizadas(tabla, idLocal);
+          }
           await db.sincronizarFlagEditadoCabecera(idLocal);
           final mods = await db.getSeccionesModificadas(idLocal);
           await db.clearSeccionesModificadas(idLocal, mods.toSet());
