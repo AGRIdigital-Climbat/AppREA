@@ -25,32 +25,38 @@ class EdanResumenPage extends StatefulWidget {
   });
 
   /// Calcula el mapa de secciones completas para una localidad.
-  /// Reutiliza la misma lógica que el wizard.
+  /// Replica exactamente la lógica del wizard: solo incluye secciones
+  /// cuyo flag imp_* esté activado en page01.
   static Map<String, bool> calcularSeccionesCompletas(EdanLocalidad l) {
     return {
       '01': l.nombre.trim().isNotEmpty || l.impPoblacion || l.impSalud,
       '02': l.totalPoblacionAfectada > 0 ||
           l.totalFamiliasAfectadas > 0 ||
           l.totalFamiliasDamnificadas > 0,
-      '03': _seccionTieneDatos03(l),
-      '04': _seccionTieneDatos04(l),
-      '05': _seccionTieneDatos05(l),
-      '06': l.impServiciosBasicos
-          ? true
-          : l.serviciosBasicos.any((s) => s.tieneDatos),
-      '07': l.impUnidadesEducativas
-          ? true
-          : l.unidadesEducativas.isNotEmpty,
-      '08': l.impDanosVivienda
-          ? true
-          : l.danosVivienda.isNotEmpty,
-      '09': _seccionTieneDatos09(l),
-      '10': l.impProteccion
-          ? true
-          : l.proteccion.any((g) => g.tieneDatos),
-      '11': l.impNecesidadHumanitaria
-          ? true
-          : (l.necesidadHumanitaria?.tieneDatos ?? false),
+      if (l.impPoblacion) '03': _seccionTieneDatos03(l),
+      if (l.impSalud) '04': _seccionTieneDatos04(l),
+      if (l.impInfraestructura) '05': _seccionTieneDatos05(l),
+      if (l.impServicios)
+        '06': l.impServiciosBasicos
+            ? true
+            : l.serviciosBasicos.any((s) => s.tieneDatos),
+      if (l.impEducacion)
+        '07': l.impUnidadesEducativas
+            ? true
+            : l.unidadesEducativas.isNotEmpty,
+      if (l.impVivienda)
+        '08': l.impDanosVivienda
+            ? true
+            : l.danosVivienda.isNotEmpty,
+      if (l.impAgropecuario) '09': _seccionTieneDatos09(l),
+      if (l.impProteccion)
+        '10': l.impProteccion
+            ? true
+            : l.proteccion.any((g) => g.tieneDatos),
+      if (l.impNecesidades)
+        '11': l.impNecesidadHumanitaria
+            ? true
+            : (l.necesidadHumanitaria?.tieneDatos ?? false),
       '13': (l.responsable?.nombre.trim().isNotEmpty ?? false) &&
           (l.responsable?.cargo.trim().isNotEmpty ?? false),
     };
