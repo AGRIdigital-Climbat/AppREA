@@ -29,7 +29,9 @@ class EdanResumenPage extends StatefulWidget {
 }
 
 class _EdanResumenPageState extends State<EdanResumenPage> {
-  final Set<String> _expandidas = <String>{'01'};
+  // Todas las secciones visibles se expanden por defecto en el primer build.
+  final Set<String> _expandidas = <String>{};
+  final Set<String> _seccionesInicializadas = <String>{};
 
   EdanLocalidad get _l => widget.localidad;
 
@@ -40,7 +42,7 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
     final secciones = <_Seccion>[
       _Seccion('01', 'Datos generales', Icons.place_outlined, _completa('01'),
           _datosGenerales(l)),
-      _Seccion('02', 'Totales', Icons.people_outline, _completa('02'),
+      _Seccion('02', 'Población damnificada y afectada', Icons.people_outline, _completa('02'),
           _totales(l)),
       if (l.impPoblacion)
         _Seccion('03', 'Impacto en la población', Icons.groups_outlined,
@@ -72,6 +74,14 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
       _Seccion('13', 'Responsable', Icons.badge_outlined, _completa('13'),
           _responsable(l)),
     ];
+
+    // Expandir por defecto TODAS las secciones visibles (solo la primera vez,
+    // para no intervenir con el toggle manual posterior del usuario).
+    for (final s in secciones) {
+      if (_seccionesInicializadas.add(s.key)) {
+        _expandidas.add(s.key);
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -294,24 +304,15 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
 
     par('Localidad', l.etiquetaLugar);
     par('Tipo', l.tipoLocalidad);
-    final ubicacion = [
-      l.departamentoNombre ?? '',
-      l.provinciaNombre ?? '',
-      l.municipioNombre ?? '',
-    ].where((e) => e.trim().isNotEmpty).join(', ');
-    par('Ubicación', ubicacion);
+    par('Departamento', l.departamentoNombre);
+    par('Provincia', l.provinciaNombre);
+    par('Municipio', l.municipioNombre);
     par('Fecha de llenado', l.fechaLlenado);
-    par('Fecha del evento', _deFechaHora(l.fechaEvento, l.horaEvento));
-    par('Tipo de evento', l.tipoEventoNombre);
+    par('Fecha del evento', l.fechaEvento);
+    par('Hora del evento', l.horaEvento);
+    final tipo = (l.tipoEventoNombre ?? '').trim();
+    if (tipo.isNotEmpty) lineas.add(_Linea.badge('Tipo de evento', tipo));
     return lineas;
-  }
-
-  String _deFechaHora(String? fecha, String? hora) {
-    final f = (fecha ?? '').trim();
-    final h = (hora ?? '').trim();
-    if (f.isEmpty) return h;
-    if (h.isEmpty) return f;
-    return '$f $h';
   }
 
   List<_Linea> _totales(EdanLocalidad l) => [
@@ -340,6 +341,26 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
             _Linea.par('Observaciones', p.observaciones),
         ];
         if (sub.isNotEmpty) lineas.add(_Linea.subcard(sub));
+      }
+
+      // Total desglosado
+      var tf = 0;
+      var th = 0;
+      var td = 0;
+      for (final p in l.impactoPoblacion) {
+        for (final g in p.gruposEtarios) {
+          tf += g.fallecidos;
+          th += g.heridos;
+          td += g.desaparecidos;
+        }
+      }
+      final total = tf + th + td;
+      if (total > 0) {
+        lineas.add(const _Linea.titulo('total población'));
+        if (tf > 0) lineas.add(_Linea.par('Fallecidos', '$tf'));
+        if (th > 0) lineas.add(_Linea.par('Heridos', '$th'));
+        if (td > 0) lineas.add(_Linea.par('Desaparecidos', '$td'));
+        lineas.add(_Linea.par('Total afectados', '$total'));
       }
     }
 
@@ -388,6 +409,24 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
             _Linea.par('Otros afectados', '${e.otrosAfectados}'),
           ..._fotoLineas(e, 'Establecimiento'),
         ]));
+      }
+
+      // Total desglosado salud
+      var tmed = 0;
+      var tenf = 0;
+      var tot = 0;
+      for (final e in l.establecimientosSalud) {
+        tmed += e.medicosAfectados;
+        tenf += e.enfermerasAfectados;
+        tot += e.otrosAfectados;
+      }
+      final tPersonal = tmed + tenf + tot;
+      if (tPersonal > 0) {
+        lineas.add(const _Linea.titulo('total salud'));
+        if (tmed > 0) lineas.add(_Linea.par('Médicos', '$tmed'));
+        if (tenf > 0) lineas.add(_Linea.par('Enfermeras', '$tenf'));
+        if (tot > 0) lineas.add(_Linea.par('Otros', '$tot'));
+        lineas.add(_Linea.par('Total personal', '$tPersonal'));
       }
     }
 
@@ -449,6 +488,32 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
         ]));
       }
     }
+
+    // Total desglosado infraestructura
+    if (conViales || conPublica) {
+      final tv = l.danosViales.length;
+      final tvTotal = l.danosViales.where((v) => v.danoTotal).length;
+      final tvParcial = l.danosViales.where((v) => v.danoParcial).length;
+      final tk = l.danosViales.fold<double>(0, (a, v) => a + v.kmDanio);
+      final ti = l.danosInfraPublica.length;
+      final tiTotal = l.danosInfraPublica.where((e) => e.danoTotal).length;
+      final tiParcial = l.danosInfraPublica.where((e) => e.danoParcial).length;
+
+      if (tv > 0 || ti > 0) {
+        lineas.add(const _Linea.titulo('total infraestructura'));
+        if (tv > 0) {
+          lineas.add(_Linea.par('Vías/puentes afectados', '$tv'));
+          if (tvTotal > 0) lineas.add(_Linea.par('Daño total', '$tvTotal'));
+          if (tvParcial > 0) lineas.add(_Linea.par('Daño parcial', '$tvParcial'));
+          if (tk > 0) lineas.add(_Linea.par('Km de daño', '${tk.toStringAsFixed(1)}'));
+        }
+        if (ti > 0) {
+          lineas.add(_Linea.par('Infraestructura pública', '$ti'));
+          if (tiTotal > 0) lineas.add(_Linea.par('Daño total', '$tiTotal'));
+          if (tiParcial > 0) lineas.add(_Linea.par('Daño parcial', '$tiParcial'));
+        }
+      }
+    }
     return lineas;
   }
 
@@ -466,6 +531,16 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
           _Linea.par('Observaciones', s.observaciones),
         ..._fotoLineas(s, 'Servicio'),
       ]));
+    }
+    // Total desglosado servicios
+    final totalAfectados = l.serviciosBasicos.where((s) => s.afectado).length;
+    final totalTotal = l.serviciosBasicos.where((s) => s.danoTotal).length;
+    final totalParcial = l.serviciosBasicos.where((s) => s.danoParcial).length;
+    if (totalAfectados > 0) {
+      lineas.add(const _Linea.titulo('total servicios'));
+      lineas.add(_Linea.par('Servicios afectados', '$totalAfectados'));
+      if (totalTotal > 0) lineas.add(_Linea.par('Daño total', '$totalTotal'));
+      if (totalParcial > 0) lineas.add(_Linea.par('Daño parcial', '$totalParcial'));
     }
     return lineas;
   }
@@ -493,6 +568,26 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
         ..._fotoLineas(u, 'Educación'),
       ]));
     }
+    // Total desglosado educación
+    if (l.unidadesEducativas.isNotEmpty) {
+      var te = 0;
+      var tp = 0;
+      var ta = 0;
+      for (final u in l.unidadesEducativas) {
+        te += u.estudiantes;
+        tp += u.profesores;
+        ta += u.administrativos;
+      }
+      final total = te + tp + ta;
+      if (total > 0) {
+        lineas.add(const _Linea.titulo('total educación'));
+        if (te > 0) lineas.add(_Linea.par('Estudiantes', '$te'));
+        if (tp > 0) lineas.add(_Linea.par('Profesores', '$tp'));
+        if (ta > 0) lineas.add(_Linea.par('Administrativos', '$ta'));
+        lineas.add(_Linea.par('Total afectados', '$total'));
+      }
+      lineas.add(_Linea.par('Unidades afectadas', '${l.unidadesEducativas.length}'));
+    }
     return lineas;
   }
 
@@ -510,6 +605,22 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
           _Linea.par('Observaciones', v.observaciones),
         ..._fotoLineas(v, 'Vivienda'),
       ]));
+    }
+    // Total desglosado vivienda
+    if (l.danosVivienda.isNotEmpty) {
+      var tParcial = 0;
+      var tTotal = 0;
+      for (final v in l.danosVivienda) {
+        tParcial += v.danoParcial;
+        tTotal += v.danoTotal;
+      }
+      final tAfectadas = tParcial + tTotal;
+      if (tAfectadas > 0) {
+        lineas.add(const _Linea.titulo('total vivienda'));
+        if (tParcial > 0) lineas.add(_Linea.par('Daño parcial', '$tParcial'));
+        if (tTotal > 0) lineas.add(_Linea.par('Daño total', '$tTotal'));
+        lineas.add(_Linea.par('Total viviendas afectadas', '$tAfectadas'));
+      }
     }
     return lineas;
   }
@@ -565,6 +676,47 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
         ]));
       }
     }
+
+    // Total desglosado agropecuario
+    final hayAgro = l.impDanosAgricultura && l.danosAgricultura.isNotEmpty;
+    final hayPec = l.impDanosPecuarios && l.danosPecuarios.isNotEmpty;
+    final hayInfraP = l.impInfraProductiva && l.infraProductiva.isNotEmpty;
+    if (hayAgro || hayPec || hayInfraP) {
+      lineas.add(const _Linea.titulo('total agropecuario'));
+      if (hayAgro) {
+        var tha = 0;
+        var thp = 0;
+        for (final a in l.danosAgricultura) {
+          tha += a.hectareasAfectadas;
+          thp += a.hectareasPerdidas;
+        }
+        if (tha > 0) lineas.add(_Linea.par('Ha afectadas', '$tha'));
+        if (thp > 0) lineas.add(_Linea.par('Ha perdidas', '$thp'));
+        lineas.add(_Linea.par('Cultivos', '${l.danosAgricultura.length}'));
+      }
+      if (hayPec) {
+        var taa = 0;
+        var tam = 0;
+        for (final p in l.danosPecuarios) {
+          taa += p.animalesAfectados;
+          tam += p.animalesMuertos;
+        }
+        if (taa > 0) lineas.add(_Linea.par('Animales afectados', '$taa'));
+        if (tam > 0) lineas.add(_Linea.par('Animales muertos', '$tam'));
+        lineas.add(_Linea.par('Especies', '${l.danosPecuarios.length}'));
+      }
+      if (hayInfraP) {
+        var tip = 0;
+        var tit = 0;
+        for (final i in l.infraProductiva) {
+          tip += i.danoParcial;
+          tit += i.danoTotal;
+        }
+        if (tip > 0) lineas.add(_Linea.par('Infra parcial', '$tip'));
+        if (tit > 0) lineas.add(_Linea.par('Infra total', '$tit'));
+        lineas.add(_Linea.par('Infra productiva', '${l.infraProductiva.length}'));
+      }
+    }
     return lineas;
   }
 
@@ -585,6 +737,24 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
           _Linea.par('Observaciones', g.observaciones),
       ]));
     }
+    // Total desglosado protección
+    final gruposConDatos = l.proteccion.where((g) => g.tieneDatos).toList();
+    if (gruposConDatos.isNotEmpty) {
+      var tm = 0;
+      var th = 0;
+      for (final g in gruposConDatos) {
+        tm += g.mujeres;
+        th += g.hombres;
+      }
+      final tp = tm + th;
+      if (tp > 0) {
+        lineas.add(const _Linea.titulo('total protección'));
+        if (tm > 0) lineas.add(_Linea.par('Mujeres', '$tm'));
+        if (th > 0) lineas.add(_Linea.par('Hombres', '$th'));
+        lineas.add(_Linea.par('Total personas', '$tp'));
+      }
+      lineas.add(_Linea.par('Grupos con datos', '${gruposConDatos.length}'));
+    }
     return lineas;
   }
 
@@ -603,11 +773,17 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
         ('Almacenamiento de agua', n.obsAlmacenamientoAgua),
       if (n.banos) ('Baños', n.obsBanos),
     ];
-    return [
+    final lineas = <_Linea>[
       for (final it in items)
         _Linea.par(it.$1,
             it.$2.trim().isNotEmpty ? it.$2 : 'Requiere'),
     ];
+    // Total desglosado necesidades
+    if (items.isNotEmpty) {
+      lineas.add(const _Linea.titulo('total necesidades'));
+      lineas.add(_Linea.par('Necesidades marcadas', '${items.length}'));
+    }
+    return lineas;
   }
 
   List<_Linea> _responsable(EdanLocalidad l) {
@@ -661,7 +837,9 @@ class _Linea {
         coordenadaLat = 0,
         coordenadaLon = 0,
         titulo = null,
-        subcards = null;
+        subcards = null,
+        badgeEtiqueta = null,
+        badgeValor = null;
   const _Linea.titulo(this.titulo)
       : seccion = null,
         foto = null,
@@ -670,7 +848,9 @@ class _Linea {
         coordenadaLon = 0,
         etiqueta = null,
         valor = null,
-        subcards = null;
+        subcards = null,
+        badgeEtiqueta = null,
+        badgeValor = null;
   const _Linea.subcard(this.subcards)
       : seccion = null,
         foto = null,
@@ -679,7 +859,19 @@ class _Linea {
         coordenadaLon = 0,
         etiqueta = null,
         valor = null,
-        titulo = null;
+        titulo = null,
+        badgeEtiqueta = null,
+        badgeValor = null;
+  const _Linea.badge(this.badgeEtiqueta, this.badgeValor)
+      : seccion = null,
+        foto = null,
+        fotografia = null,
+        coordenadaLat = 0,
+        coordenadaLon = 0,
+        etiqueta = null,
+        valor = null,
+        titulo = null,
+        subcards = null;
   const _Linea.fotos({
     required this.seccion,
     this.foto,
@@ -689,7 +881,9 @@ class _Linea {
   })  : etiqueta = null,
         valor = null,
         titulo = null,
-        subcards = null;
+        subcards = null,
+        badgeEtiqueta = null,
+        badgeValor = null;
 
   final String? seccion;
   final EdanFoto? foto;
@@ -700,6 +894,8 @@ class _Linea {
   final String? valor;
   final String? titulo;
   final List<_Linea>? subcards;
+  final String? badgeEtiqueta;
+  final String? badgeValor;
 
   bool get esFoto =>
       (fotografia?.isNotEmpty ?? false) ||
@@ -707,6 +903,7 @@ class _Linea {
           foto != null;
   bool get esSubcard => subcards != null;
   bool get esTitulo => titulo != null;
+  bool get esBadge => badgeValor != null;
 }
 
 class _LineaWidget extends StatelessWidget {
@@ -773,6 +970,24 @@ class _LineaWidget extends StatelessWidget {
         ),
       );
     }
+    if (linea.esBadge) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              linea.badgeEtiqueta ?? '',
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textSecondary),
+            ),
+          ),
+          Expanded(child: _BadgeChip(texto: linea.badgeValor!)),
+        ],
+      );
+    }
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -798,6 +1013,30 @@ class _LineaWidget extends StatelessWidget {
   }
 }
 
+class _BadgeChip extends StatelessWidget {
+  final String texto;
+  const _BadgeChip({required this.texto});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2563EB).withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Text(
+        texto,
+        style: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF2563EB),
+        ),
+      ),
+    );
+  }
+}
+
 class GrillaFotos extends StatelessWidget {
   final EdanFoto? foto;
   final String? fotografia;
@@ -816,25 +1055,48 @@ class GrillaFotos extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
+    final conCoords = (coordenadaLat != 0 || coordenadaLon != 0);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        EdanFotoMiniatura(
-          foto: foto,
-          fotografia: fotografia,
-          width: 72,
-          height: 72,
-          onTap: () => EdanBotonSacarFoto.verFotoCompleta(
-            context,
-            fotos: foto != null ? [foto!] : <EdanFoto>[],
-            fotografia: fotografia,
-            coordenadaLat: coordenadaLat,
-            coordenadaLon: coordenadaLon,
-            seccion: seccion,
-            soloLectura: true,
-          ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            EdanFotoMiniatura(
+              foto: foto,
+              fotografia: fotografia,
+              width: 72,
+              height: 72,
+              onTap: () => EdanBotonSacarFoto.verFotoCompleta(
+                context,
+                fotos: foto != null ? [foto!] : <EdanFoto>[],
+                fotografia: fotografia,
+                coordenadaLat: coordenadaLat,
+                coordenadaLon: coordenadaLon,
+                seccion: seccion,
+                soloLectura: true,
+              ),
+            ),
+          ],
         ),
+        if (conCoords) ...[
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.location_on_outlined, size: 12, color: AppColors.textSecondary),
+              const SizedBox(width: 4),
+              Text(
+                'Lat: ${coordenadaLat.toStringAsFixed(5)} · Lon: ${coordenadaLon.toStringAsFixed(5)}',
+                style: const TextStyle(
+                  fontSize: 10,
+                  color: AppColors.textSecondary,
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
