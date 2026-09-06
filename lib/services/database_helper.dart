@@ -1,5 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/edan.dart';
@@ -21,7 +23,7 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    final path = join(await getDatabasesPath(), 'rea_database.db');
+    final path = join(await _localDbPath(), 'rea_database.db');
     return await openDatabase(
       path,
       version: 29,
@@ -29,6 +31,18 @@ class DatabaseHelper {
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
     );
+  }
+
+  /// Ruta de la base de datos según la plataforma:
+  /// - Desktop (Windows/Linux): AppData dir de path_provider (necesario con
+  ///   `sqflite_common_ffi`, ya que `getDatabasesPath()` no funciona ahí).
+  /// - Móvil (Android/iOS): `getDatabasesPath()` estándar de sqflite.
+  Future<String> _localDbPath() async {
+    if (Platform.isWindows || Platform.isLinux) {
+      final dir = await getApplicationSupportDirectory();
+      return dir.path;
+    }
+    return await getDatabasesPath();
   }
 
   Future<void> _createDatabase(Database db, int version) async {

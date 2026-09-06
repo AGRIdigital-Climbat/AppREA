@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "net.climbat" "\0"
-            VALUE "FileDescription", "rea" "\0"
+            VALUE "FileDescription", "EDAN" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "rea" "\0"
+            VALUE "InternalName", "EDAN" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 net.climbat. All rights reserved." "\0"
-            VALUE "OriginalFilename", "rea.exe" "\0"
-            VALUE "ProductName", "rea" "\0"
+            VALUE "OriginalFilename", "EDAN.exe" "\0"
+            VALUE "ProductName", "EDAN" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

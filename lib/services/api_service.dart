@@ -302,65 +302,14 @@ class ApiService {
         .toList();
   }
 
-  Future<Map<String, dynamic>> getMunicipioGeojson(String codigoIne) async {
+  Future<Map<String, dynamic>> getMunicipioGeojson(int idMunicipio) async {
     final response = await _requestWithRetry(() =>
       http.get(
-        Uri.parse('${ApiConfig.sharedEndpoint}/municipios/$codigoIne/geojson'),
+        Uri.parse('${ApiConfig.sharedEndpoint}/municipios/$idMunicipio/geojson'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
     );
     return _handleResponse(response);
-  }
-
-  Future<List<Reporte>> getReportes({
-    int? idEstado,
-    int? idMunicipio,
-    int skip = 0,
-    int limit = 50,
-  }) async {
-    final params = <String>['skip=$skip', 'limit=$limit'];
-    if (idEstado != null) params.add('id_estado=$idEstado');
-    if (idMunicipio != null) params.add('id_municipio=$idMunicipio');
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes?${params.join('&')}'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 10))
-    );
-    final body = await _handleResponse(response);
-    return _extractDataList(body)
-        .map((json) => Reporte.fromJson(json))
-        .toList();
-  }
-
-  Future<List<Map<String, dynamic>>> getMisResumenReportes({
-    required int idUsuario,
-    int skip = 0,
-    int limit = 50,
-  }) async {
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes/mis-resumen?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 10))
-    );
-    final body = await _handleResponse(response);
-    return _extractDataList(body);
-  }
-
-  Future<List<Map<String, dynamic>>> getMisReportes({
-    required int idUsuario,
-    int skip = 0,
-    int limit = 50,
-  }) async {
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes/mis-reportes?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 15))
-    );
-    final body = await _handleResponse(response);
-    return _extractDataList(body);
   }
 
   Future<String?> downloadImage(String serverPath, String savePath) async {
@@ -421,78 +370,6 @@ class ApiService {
       }
       return null;
     }
-  }
-
-  Future<Reporte> createReporte(Map<String, dynamic> data) async {
-    final response = await _requestWithRetry(() =>
-      http.post(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes'),
-        headers: _headers,
-        body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 15))
-    );
-    final body = await _handleResponse(response);
-    return Reporte.fromJson(body['data']);
-  }
-
-  Future<Reporte> createReporteConFoto({
-    required String filePath,
-    required Map<String, dynamic> data,
-  }) async {
-    Future<http.Response> doUpload() async {
-      final request = http.MultipartRequest(
-        'POST',
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes/con-foto'),
-      );
-
-      if (_token != null) {
-        request.headers['Authorization'] = 'Bearer $_token';
-      }
-      request.headers['Accept'] = 'application/json';
-
-      final contentType = _getImageContentType(filePath);
-      request.files.add(await http.MultipartFile.fromPath(
-        'file',
-        filePath,
-        contentType: MediaType.parse(contentType),
-      ));
-
-      data.forEach((key, value) {
-        if (value != null) {
-          request.fields[key] = value.toString();
-        }
-      });
-
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
-      return http.Response.fromStream(streamedResponse);
-    }
-
-    final response = await _requestWithRetry(doUpload);
-    final body = await _handleResponse(response);
-    return Reporte.fromJson(body['data']);
-  }
-
-  Future<Reporte> updateReporte(int id, Map<String, dynamic> data) async {
-    final response = await _requestWithRetry(() =>
-      http.put(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
-        headers: _headers,
-        body: jsonEncode(data),
-      ).timeout(const Duration(seconds: 15))
-    );
-    final body = await _handleResponse(response);
-    return Reporte.fromJson(body['data']);
-  }
-
-  Future<void> cambiarEstadoReporte(int id, int idEstado) async {
-    final response = await _requestWithRetry(() =>
-      http.put(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id/estado'),
-        headers: _headers,
-        body: jsonEncode({'id_estado': idEstado}),
-      ).timeout(const Duration(seconds: 15))
-    );
-    await _handleResponse(response);
   }
 
   String _getImageContentType(String filePath) {
@@ -635,16 +512,6 @@ class ApiService {
     return allPaths;
   }
 
-  Future<void> deleteReporte(int id) async {
-    final response = await _requestWithRetry(() =>
-      http.delete(
-        Uri.parse('${ApiConfig.reaEndpoint}/reportes/$id'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 10))
-    );
-    await _handleResponse(response);
-  }
-
   Future<List<TipoEvento>> getTiposEvento() async {
     final response = await _requestWithRetry(() =>
       http.get(
@@ -707,32 +574,6 @@ class ApiService {
     final body = await _handleResponse(response);
     return _extractDataList(body)
         .map((json) => GrupoEtarioCatalogo.fromJson(json))
-        .toList();
-  }
-
-  Future<List<Estado>> getEstados() async {
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse('${ApiConfig.reaEndpoint}/estados'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 10))
-    );
-    final body = await _handleResponse(response);
-    return _extractDataList(body)
-        .map((json) => Estado.fromJson(json))
-        .toList();
-  }
-
-  Future<List<Categoria>> getCategorias() async {
-    final response = await _requestWithRetry(() =>
-      http.get(
-        Uri.parse('${ApiConfig.reaEndpoint}/categorias'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 10))
-    );
-    final body = await _handleResponse(response);
-    return _extractDataList(body)
-        .map((json) => Categoria.fromJson(json))
         .toList();
   }
 
@@ -945,33 +786,24 @@ class ApiService {
     await _handleResponse(response);
   }
 
-  Future<Map<String, dynamic>> syncEdans(List<Map<String, dynamic>> edans) async {
-    final response = await _requestWithRetry(() =>
-      http.post(
-        Uri.parse('${ApiConfig.edanEndpoint}/sync'),
-        headers: _headers,
-        body: jsonEncode({'edans': edans}),
-      ).timeout(const Duration(seconds: 60))
-    );
-    final body = await _handleResponse(response);
-    return Map<String, dynamic>.from(body);
-  }
-
+  /// Lista los EDANs del usuario desde `/edan/` (v2). La ruta anterior
+  /// `/edan/sync/pull` ya no existe en el backend (404 "not found"), así que
+  /// se reutiliza el listado estándar del mismo `getEdans`, que sí existe.
+  ///
+  /// El backend ignora `id_usuario`; el filtro real por responsable UGR es
+  /// `id_usuario_ugr` (verificado contra producción).
   Future<List<Map<String, dynamic>>> pullEdans({
     int? idUsuario,
-    DateTime? fechaDesde,
     int skip = 0,
     int limit = 100,
   }) async {
-    final params = <String>[];
-    if (idUsuario != null) params.add('id_usuario=$idUsuario');
-    if (fechaDesde != null) params.add('fecha_desde=${fechaDesde.toIso8601String()}');
-    params.add('skip=$skip');
-    params.add('limit=$limit');
-    
+    final params = <String>['skip=$skip', 'limit=$limit'];
+    if (idUsuario != null) params.add('id_usuario_ugr=$idUsuario');
+    params.add('es_borrador=false');
+
     final response = await _requestWithRetry(() =>
       http.get(
-        Uri.parse('${ApiConfig.edanEndpoint}/sync/pull?${params.join('&')}'),
+        Uri.parse('${ApiConfig.edanEndpoint}/?${params.join('&')}'),
         headers: _headers,
       ).timeout(const Duration(seconds: 30))
     );

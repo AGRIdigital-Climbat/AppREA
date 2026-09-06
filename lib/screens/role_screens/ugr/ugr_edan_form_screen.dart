@@ -16,6 +16,8 @@ import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/image_service.dart';
+import '../../../services/location_service.dart';
 import '../../../widgets/custom_text_field.dart';
 import 'crear_usuario_screen.dart';
 import 'ugr_edan_preview_screen.dart';
@@ -2331,6 +2333,55 @@ class _BotonSacarFotoState extends State<_BotonSacarFoto> {
       _cargando = true;
       _advertencia = null;
     });
+
+    // Windows: no hay cámara ni GPS; usar diálogo manual de coordenadas + file picker
+    if (Platform.isWindows) {
+      try {
+        final pos = await LocationService.manualLocationDialog(
+          context,
+          latInicial: widget.coordenadaLat,
+          lonInicial: widget.coordenadaLon,
+        );
+        if (pos == null) {
+          if (mounted) setState(() => _cargando = false);
+          return;
+        }
+        final imagen = await ImageService().takePhoto();
+        if (imagen == null) {
+          if (mounted) setState(() => _cargando = false);
+          return;
+        }
+        final dir = await getApplicationDocumentsDirectory();
+        final nombreArchivo = 'edan_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final archivo = File('${dir.path}/$nombreArchivo');
+        await File(imagen.path).copy(archivo.path);
+
+        widget.fotos.clear();
+        widget.fotos.add(EdanFoto(
+          ruta: archivo.path,
+          latitud: pos.latitude,
+          longitud: pos.longitude,
+          precision: pos.accuracy,
+        ));
+
+        if (mounted) {
+          widget.onCoordenadasCapturadas?.call(pos.latitude, pos.longitude);
+          widget.onChanged();
+          setState(() {
+            _cargando = false;
+            _advertencia = null;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+          );
+          setState(() => _cargando = false);
+        }
+      }
+      return;
+    }
 
     try {
       final camOk = await Permission.camera.request().isGranted;

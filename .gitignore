@@ -37,3 +37,6 @@ Thumbs.db
 # Temporary files
 stderr.txt
 stdout.txt
+
+# Installer output (compiled binaries)
+dist/

@@ -1,12 +1,11 @@
-import 'dart:io';
-
 import 'package:flutter/foundation.dart';
 import '../models/edan.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
+import 'edan/edan_documento_service.dart';
+import 'edan/edan_documento_sync_service.dart';
 import 'edan/edan_localidades_envio_v2_service.dart';
-import 'edan_secciones_registry.dart';
 
 class EdanSyncService {
   static final EdanSyncService _instance = EdanSyncService._();
@@ -120,59 +119,132 @@ class EdanSyncService {
 
   Future<void> _pullEdans(int userId, SyncResult result) async {
     try {
-      final prefs = await DatabaseHelper.instance.getLastSyncDate();
-      final fechaDesde = prefs != null ? DateTime.fromMillisecondsSinceEpoch(prefs) : null;
+      final api = ApiService.instance;
+      final db = DatabaseHelper.instance;
+      final servicioV2 = EdanLocalidadesEnvioV2Service();
 
-      final edansRemotos = await ApiService.instance.pullEdans(
+      // 1) Cabeceras de EDAN: listado estándar `/edan/` (ruta viva; la antigua
+      //    `/edan/sync/pull` ya no existe y devolvía 404 "not found").
+      final edansRemotos = await api.pullEdans(
         idUsuario: userId,
-        fechaDesde: fechaDesde,
         skip: 0,
         limit: 100,
       );
 
       for (final edanJson in edansRemotos) {
         final edan = Edan.fromJson(edanJson);
-        
-        final existente = await DatabaseHelper.instance
-            .getEdanByServerId(edan.idEdan ?? edan.idServer ?? 0);
+        final serverId = edan.idEdan ?? edan.idServer ?? 0;
+
+        final existente = await db.getEdanByServerId(serverId);
         if (existente != null) {
           if (!existente.pendienteActualizacion && existente.sincronizado) {
             edan.idLocal = existente.idLocal;
-            await DatabaseHelper.instance.updateEdan(edan);
-            await DatabaseHelper.instance.markEdanAsSynced(
+            await db.updateEdan(edan);
+            await db.markEdanAsSynced(
               existente.idLocal!,
               edan.idEdan ?? edan.idServer ?? existente.idServer ?? 0,
             );
           }
           result.actualizados++;
         } else {
-          final idLocal = await DatabaseHelper.instance.insertEdan(edan, usuarioId: userId);
-          final serverId = edan.idEdan ?? edan.idServer;
-          if (serverId != null && idLocal > 0) {
-            await DatabaseHelper.instance.markEdanAsSynced(idLocal, serverId);
+          final idLocal = await db.insertEdan(edan, usuarioId: userId);
+          if (serverId != 0 && idLocal > 0) {
+            await db.markEdanAsSynced(idLocal, serverId);
           }
-          result.creados++;
-        }
-
-        // Popular tablas seccion_* desde los datos del servidor.
-        final servicioV2 = EdanLocalidadesEnvioV2Service();
-        for (final loc in edan.localidades) {
-          try {
-            await servicioV2.popularSeccionesDesdeServer(loc);
-          } catch (e) {
-            debugPrint('Error popularizando secciones de localidad ${loc.idLocal}: $e');
-          }
+          if (idLocal > 0) result.creados++;
         }
       }
 
-      if (edansRemotos.isNotEmpty) {
-        await DatabaseHelper.instance.saveLastSyncDate(DateTime.now().millisecondsSinceEpoch);
+      // 2) Localidades con todas sus secciones: `GET /edan/localidades/
+      //    mis-reportes`. El listado `/edan/` NO trae `localidades` (vienen
+      //    vacías), por lo que la descarga real de datos se hace por este
+      //    endpoint, cuyo shape es idéntico al documento de `construirDocumento`.
+      var skip = 0;
+      const page = 100;
+      while (true) {
+        final items = await api.getLocalidadesMisReportes(
+          idUsuario: userId,
+          skip: skip,
+          limit: page,
+          modoComprimido: true,
+        );
+        if (items.isEmpty) break;
+        for (final raw in items) {
+          try {
+            await _recibirLocalidad(raw, userId, servicioV2, result);
+          } catch (e) {
+            debugPrint('Error recibiendo localidad del servidor: $e');
+            result.fallidos++;
+          }
+        }
+        skip += items.length;
+        if (items.length < page) break;
       }
     } catch (e) {
       debugPrint('Error en pull: $e');
       result.mensaje = 'Error al recibir EDANs: ${e.toString()}';
       result.exito = false;
     }
+  }
+
+  /// Persiste (insert/update LWW) una localidad traída del servidor y rellena
+  /// las tablas de secciones. No pisa cambios locales pendientes de subir.
+  Future<void> _recibirLocalidad(
+    Map<String, dynamic> raw,
+    int userId,
+    EdanLocalidadesEnvioV2Service servicioV2,
+    SyncResult result,
+  ) async {
+    final db = DatabaseHelper.instance;
+    final server = EdanDocumentoService.parsearDocumento(raw);
+    if (server.idLocal == null || server.idLocal!.isEmpty) {
+      server.idLocal = 'pull-${DateTime.now().millisecondsSinceEpoch}';
+    }
+    server.idUsuario = userId;
+
+    final idLocal = server.idLocal!;
+    final serverId = server.idServer ?? server.idEdan;
+
+    // Marca borrado en servidor → eliminar local (solo si ya está sincronizada).
+    if (server.pendienteEliminacion) {
+      final local = await db.getLocalidadByIdLocal(idLocal);
+      if (local != null && local.sincronizado) {
+        await db.deleteLocalidad(idLocal);
+        result.eliminados++;
+      }
+      return;
+    }
+
+    final existente = await db.getLocalidadByIdLocal(idLocal);
+    EdanLocalidad persistida;
+    if (existente == null) {
+      await db.insertLocalidad(server, usuarioId: userId);
+      if (serverId != null && serverId > 0) {
+        await db.markLocalidadAsSyncedConFecha(
+          idLocal,
+          serverId,
+          server.fechaModificacion ?? DateTime.now().toIso8601String(),
+        );
+      }
+      result.creados++;
+      persistida = server;
+    } else {
+      // No pisar trabajo local pendiente: sus cambios van por el push.
+      if (existente.editado ||
+          !existente.sincronizado ||
+          existente.pendienteActualizacion) {
+        return;
+      }
+      persistida = EdanDocumentoService.aplicarPull(existente, server);
+      await db.reemplazarLocalidadDesdeServer(
+        persistida,
+        idServer: serverId,
+        fechaServer: persistida.fechaModificacion,
+      );
+      result.actualizados++;
+    }
+
+    await servicioV2.popularSeccionesDesdeServer(persistida);
   }
 
   Future<void> _pushDeletions(SyncResult result) async {
@@ -201,252 +273,67 @@ class EdanSyncService {
   Future<void> _pushEdans(int userId, SyncResult result) async {
     try {
       final edansPendientes = await DatabaseHelper.instance.getUnsyncedEdans();
-      
+
       if (edansPendientes.isEmpty) {
         return;
       }
 
-      // Subir fotos pendientes antes de construir el JSON.
+      final db = DatabaseHelper.instance;
+      final docSync = EdanDocumentoSyncService();
+
+      // El backend v2 NO tiene POST `/edan/sync` (404, igual que `sync/pull`).
+      // El envío v2 es PER LOCALIDAD vía `POST/PUT /localidades/{...}/documento`
+      // (el mismo contrato que usa el RESP en su Fase 2).
       for (final edan in edansPendientes) {
+        var todosOk = true;
+
         for (final loc in edan.localidades) {
-          await _subirFotosPendientes(loc);
-        }
-      }
-
-      final edansJson = edansPendientes.map((e) {
-        final json = e.toJson();
-        json['id_usuario'] = userId;
-        return json;
-      }).toList();
-      final porIdLocal = <int, Edan>{
-        for (final e in edansPendientes)
-          if (e.idLocal != null) e.idLocal!: e,
-      };
-
-      final respuesta = await ApiService.instance.syncEdans(edansJson);
-
-      final datos = respuesta['data'];
-      final items = datos is List ? datos : <dynamic>[];
-
-      for (final item in items) {
-        if (item is! Map) continue;
-        final m = Map<String, dynamic>.from(item);
-        final idLocal = _parseId(m['id_local']);
-        final aplicado = m['aplicado'] == true;
-
-        if (aplicado && idLocal != null) {
-          final idServer = _parseId(m['id_edan']);
-          if (idServer != null) {
-            await DatabaseHelper.instance.markEdanAsSynced(idLocal, idServer);
-            result.enviados++;
+          final idLocal = loc.idLocal;
+          if (idLocal == null || idLocal.isEmpty) {
+            todosOk = false;
+            continue;
           }
-          continue;
-        }
 
-        if (idLocal != null) {
-          final error = _extractError(m);
-          final errorTexto = error.toLowerCase();
-          final esColisionCodigo = errorTexto.contains('codigo') &&
-              (errorTexto.contains('unique') ||
-                  errorTexto.contains('duplic') ||
-                  errorTexto.contains('ya existe'));
-          final edan = porIdLocal[idLocal];
-          if (esColisionCodigo && edan != null) {
-            final reintentado = await _regenerarCodigoYReintentar(edan, userId);
-            if (reintentado) {
+          try {
+            final ok = await docSync.enviarLocalidadDocumento(
+              loc,
+              skipFotos: true,
+            );
+            if (ok) {
+              final idEdanLocalidad = loc.idServer;
+              if (idEdanLocalidad != null) {
+                await db.markLocalidadAsSyncedConFecha(
+                  idLocal,
+                  idEdanLocalidad,
+                  loc.fechaModificacion ?? DateTime.now().toIso8601String(),
+                );
+              } else {
+                await db.markLocalidadAsSynced(idLocal, 0);
+              }
               result.enviados++;
             } else {
+              todosOk = false;
               result.fallidos++;
             }
-          } else {
-            final intentos = _parseId(m['intentos']) ?? 0;
-            await DatabaseHelper.instance.updateEdanSyncAttempts(
-              idLocal,
-              intentos + 1,
-              error,
-            );
+          } catch (e) {
+            todosOk = false;
             result.fallidos++;
+            debugPrint('Error enviando localidad ${loc.nombre}: $e');
           }
-        } else {
-          result.fallidos++;
+        }
+
+        // Solo se marca el EDAN sincronizado si todas sus localidades OK.
+        if (todosOk && edan.idLocal != null) {
+          await db.markEdanAsSynced(
+            edan.idLocal!,
+            edan.idEdan ?? edan.idServer ?? 0,
+          );
         }
       }
     } catch (e) {
       debugPrint('Error en push: $e');
       result.mensaje = 'Error al enviar EDANs: ${e.toString()}';
       result.exito = false;
-    }
-  }
-
-  /// Sube las fotos pendientes de una localidad antes de enviar el EDAN al
-  /// servidor. Reutiliza la cola `foto_pendiente_v2` que ya escribe el wizard
-  /// al tomar fotos.
-  Future<void> _subirFotosPendientes(EdanLocalidad local) async {
-    final db = DatabaseHelper.instance;
-    final idLocal = local.idLocal;
-    if (idLocal == null) return;
-
-    // 1) Leer fotos pendientes de la cola v2.
-    final pendientesV2 = await db.leerFotosPendientesUploadV2();
-    final fotosLocal =
-        pendientesV2.where((f) => f['id_local'] == idLocal).toList();
-
-    // 2) Fallback: buscar en tablas de secciones donde fotografia empiece con /data/
-    if (fotosLocal.isEmpty) {
-      for (final desc in EdanSeccionesRegistry.secciones.where((s) => s.usaFoto)) {
-        try {
-          final filas = await db.leerFilasSeccion(desc.tablaSqlite, idLocal);
-          for (final fila in filas) {
-            final fotografia = fila['fotografia']?.toString();
-            final idSeccion = fila['id_seccion']?.toString();
-            if (fotografia == null || fotografia.isEmpty) continue;
-            if (idSeccion == null || idSeccion.isEmpty) continue;
-            if (!fotografia.startsWith('/data/')) continue;
-            final idFotoNuevo = await db.insertarFotoPendienteV2(
-              idLocal: idLocal,
-              idSeccion: idSeccion,
-              rutaLocalArchivo: fotografia,
-            );
-            fotosLocal.add({
-              'id_foto': idFotoNuevo,
-              'id_local': idLocal,
-              'id_seccion': idSeccion,
-              'ruta_local_archivo': fotografia,
-            });
-          }
-        } catch (e) {
-          debugPrint('[SyncUGR] Fallback fotos error ${desc.rutaV2}: $e');
-        }
-      }
-    }
-
-    if (fotosLocal.isEmpty) return;
-    debugPrint('[SyncUGR] Fase fotos: ${fotosLocal.length} pendientes para $idLocal');
-
-    for (final fotoRow in fotosLocal) {
-      final idFoto = fotoRow['id_foto']?.toString() ?? '';
-      final ruta = fotoRow['ruta_local_archivo']?.toString();
-      final idSeccion = fotoRow['id_seccion']?.toString() ?? '';
-
-      if (ruta == null || ruta.isEmpty) {
-        if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Ruta vacía');
-        continue;
-      }
-
-      final file = File(ruta);
-      if (!await file.exists()) {
-        if (idFoto.isNotEmpty) {
-          await db.marcarFotoErrorV2(idFoto, 'Archivo no encontrado');
-        }
-        continue;
-      }
-
-      try {
-        final paths = await ApiService.instance.subirFotosCarrete(
-          files: [ruta],
-          idSecciones: [idSeccion],
-          idLocal: idLocal,
-          idEdanLocalidad: local.idServer ?? local.idEdan,
-        );
-
-        final path = paths[idSeccion];
-        if (path != null && path.isNotEmpty) {
-          if (idFoto.isNotEmpty) await db.marcarFotoSubidaV2(idFoto, path);
-          // Actualizar sección en SQLite con el path del servidor.
-          final tabla = await EdanSeccionesRegistry.buscarTablaPorIdSeccion(
-            idSeccion,
-            db,
-          );
-          if (tabla.isNotEmpty) {
-            await db.marcarFotografiaSeccion(tabla, idLocal, idSeccion, path);
-          }
-          // Actualizar el modelo en memoria.
-          _actualizarFotoModelo(local, idSeccion, path);
-          debugPrint('[SyncUGR]   Foto OK: $idSeccion → $path');
-        } else {
-          if (idFoto.isNotEmpty) {
-            await db.marcarFotoErrorV2(idFoto, 'Server no devolvió path');
-          }
-        }
-      } catch (e) {
-        if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, e.toString());
-        debugPrint('[SyncUGR]   Foto FALLO: $idSeccion → $e');
-      }
-    }
-  }
-
-  void _actualizarFotoModelo(EdanLocalidad local, String idSeccion, String path) {
-    for (final item in _itemsConFoto(local)) {
-      if (idSeccionDe(item) == idSeccion) {
-        _setFotografiaItem(item, path);
-        return;
-      }
-    }
-  }
-
-  List<Object> _itemsConFoto(EdanLocalidad local) => [
-        ...local.establecimientosSalud,
-        ...local.danosViales,
-        ...local.danosInfraPublica,
-        ...local.serviciosBasicos,
-        ...local.unidadesEducativas,
-        ...local.danosVivienda,
-        ...local.danosAgricultura,
-        ...local.danosPecuarios,
-        ...local.infraProductiva,
-      ];
-
-  void _setFotografiaItem(Object item, String path) {
-    if (item is EdanEstablecimientoSalud) { item.fotografia = path; return; }
-    if (item is EdanDanoVial) { item.fotografia = path; return; }
-    if (item is EdanDanoInfraPublica) { item.fotografia = path; return; }
-    if (item is EdanServicioBasicoDetalle) { item.fotografia = path; return; }
-    if (item is EdanDanoUnidadEducativa) { item.fotografia = path; return; }
-    if (item is EdanDanoVivienda) { item.fotografia = path; return; }
-    if (item is EdanDanoAgricultura) { item.fotografia = path; return; }
-    if (item is EdanDanoPecuario) { item.fotografia = path; return; }
-    if (item is EdanInfraProductiva) { item.fotografia = path; return; }
-  }
-
-  Future<bool> _regenerarCodigoYReintentar(Edan edan, int userId) async {
-    try {
-      final db = DatabaseHelper.instance;
-      final municipioId =
-          edan.idMunicipio ?? AuthService.instance.currentToken?.idMunicipio;
-      final codigoIne = municipioId != null
-          ? (await db.getCodigoIneMunicipio(municipioId)) ?? '000'
-          : '000';
-      final nuevoCodigo = await db.generarSiguienteCodigoEdan(
-        year: DateTime.now().year,
-        municipioId: municipioId ?? 0,
-        codigoIne: codigoIne,
-      );
-      edan.codigoEdan = nuevoCodigo;
-      await db.updateEdan(edan);
-
-      final json = edan.toJson();
-      json['id_usuario'] = userId;
-      final respuesta = await ApiService.instance.syncEdans([json]);
-      final datos = respuesta['data'];
-      final items = datos is List ? datos : <dynamic>[];
-      var aplicado = false;
-      for (final item in items) {
-        if (item is! Map) continue;
-        final m = Map<String, dynamic>.from(item);
-        if (m['aplicado'] == true) {
-          aplicado = true;
-          final idLocal = _parseId(m['id_local']);
-          final idServer = _parseId(m['id_edan']);
-          if (idLocal != null && idServer != null) {
-            await DatabaseHelper.instance.markEdanAsSynced(idLocal, idServer);
-          }
-        }
-      }
-      return aplicado;
-    } catch (e) {
-      debugPrint(
-          'Error reintentando EDAN ${edan.idLocal} tras colisión de código: $e');
-      return false;
     }
   }
 }
@@ -478,21 +365,4 @@ class SyncResult {
     if (partes.isEmpty) return 'Sin cambios';
     return 'Sincronización completada: ${partes.join(', ')}';
   }
-}
-
-int? _parseId(dynamic value) {
-  if (value == null) return null;
-  if (value is int) return value;
-  return int.tryParse(value.toString());
-}
-
-String _extractError(Map<String, dynamic> m) {
-  final directo = m['error'];
-  if (directo is String && directo.isNotEmpty) return directo;
-  final data = m['data'];
-  if (data is Map) {
-    final ultimo = data['ultimo_error'];
-    if (ultimo is String && ultimo.isNotEmpty) return ultimo;
-  }
-  return 'Error de sincronización';
 }

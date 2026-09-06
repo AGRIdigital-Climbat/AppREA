@@ -145,17 +145,16 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           _buildDocHeader(primary),
           const SizedBox(height: 16),
           _seccion01(),
-          _tablaResumenLocalidades(),
           _seccion02(),
-          _seccion03(),
-          _seccion04(),
-          _seccion05(),
-          _seccion06(),
-          _seccion07(),
-          _seccion08(),
-          _seccion09(),
-          _seccion10(),
-          _seccion11(),
+          if (_seccionTieneDatos(3)) _seccion03(),
+          if (_seccionTieneDatos(4)) _seccion04(),
+          if (_seccionTieneDatos(5)) _seccion05(),
+          if (_seccionTieneDatos(6)) _seccion06(),
+          if (_seccionTieneDatos(7)) _seccion07(),
+          if (_seccionTieneDatos(8)) _seccion08(),
+          if (_seccionTieneDatos(9)) _seccion09(),
+          if (_seccionTieneDatos(10)) _seccion10(),
+          if (_seccionTieneDatos(11)) _seccion11(),
           _seccion13(),
           const SizedBox(height: 12),
           _buildDeclaracion(),
@@ -707,38 +706,156 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           _df('Lugares afectados',
               edan.localidadesAfectadas > 0 ? '${edan.localidadesAfectadas}' : '-'),
         ]),
-        _sh('Lugares (${edan.localidades.length})'),
-        if (edan.localidades.isEmpty)
-          _vacio()
-        else
-          ...edan.localidades.asMap().entries.map((entry) {
-            final l = entry.value;
-            return _tb([
-              _tbRow('Lugar', _v(l.etiquetaLugar)),
-              ..._impactosLocalidad(l).isNotEmpty
-                  ? [
-                      _tbRow('Impactos',
-                          _impactosLocalidad(l).join(', ')),
-                    ]
-                  : [],
-            ]);
-          }),
+        _buildTablaLocalidadesInline(),
       ],
     );
   }
 
-  List<String> _impactosLocalidad(EdanLocalidad l) {
-    return [
-      if (l.impPoblacion) 'Población',
-      if (l.impSalud) 'Salud',
-      if (l.impInfraestructura) 'Infraestructura',
-      if (l.impServicios) 'Servicios básicos',
-      if (l.impEducacion) 'Educación',
-      if (l.impVivienda) 'Vivienda',
-      if (l.impAgropecuario) 'Agropecuario',
-      if (l.impProteccion) 'Protección',
-      if (l.impNecesidades) 'Necesidades humanitarias',
-    ];
+  Widget _buildTablaLocalidadesInline() {
+    final localidades = edan.localidades;
+    if (localidades.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _sh('Localidades incluidas (${localidades.length})'),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            color: AppColors.background,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Column(
+            children: [
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  borderRadius: const BorderRadius.only(
+                    topLeft: Radius.circular(10),
+                    topRight: Radius.circular(10),
+                  ),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Nombre',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Tipo',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        'Municipio',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ...localidades.asMap().entries.map((entry) {
+                final i = entry.key;
+                final l = entry.value;
+                final esUltimo = i == localidades.length - 1;
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    border: Border(
+                      bottom: esUltimo
+                          ? BorderSide.none
+                          : const BorderSide(color: AppColors.divider, width: 0.5),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          l.nombre.isNotEmpty ? l.nombre : '-',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          l.tipoLocalidad.isNotEmpty ? l.tipoLocalidad : '-',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          l.municipioNombre ?? '-',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool _seccionTieneDatos(int numSeccion) {
+    for (final l in edan.localidades) {
+      switch (numSeccion) {
+        case 3:
+          if (l.impPoblacion) return true;
+        case 4:
+          if (l.impSalud) return true;
+        case 5:
+          if (l.impInfraestructura) return true;
+        case 6:
+          if (l.impServicios) return true;
+        case 7:
+          if (l.impEducacion) return true;
+        case 8:
+          if (l.impVivienda) return true;
+        case 9:
+          if (l.impAgropecuario) return true;
+        case 10:
+          if (l.impProteccion) return true;
+        case 11:
+          if (l.impNecesidades) return true;
+      }
+    }
+    return false;
   }
 
   Widget _campoAlcaldeInline() {
@@ -858,127 +975,6 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     );
   }
 
-  Widget _tablaResumenLocalidades() {
-    final localidades = edan.localidades;
-    if (localidades.isEmpty) return const SizedBox.shrink();
-    return _DocSeccion(
-      numero: '',
-      titulo: 'Localidades incluidas (${localidades.length})',
-      children: [
-        Container(
-          width: double.infinity,
-          decoration: BoxDecoration(
-            color: AppColors.background,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.divider),
-          ),
-          child: Column(
-            children: [
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.08),
-                  borderRadius: const BorderRadius.only(
-                    topLeft: Radius.circular(10),
-                    topRight: Radius.circular(10),
-                  ),
-                ),
-                child: const Row(
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        'Nombre',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        'Tipo',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      flex: 2,
-                      child: Text(
-                        'Municipio',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.textPrimary,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              ...localidades.asMap().entries.map((entry) {
-                final i = entry.key;
-                final l = entry.value;
-                final esUltimo = i == localidades.length - 1;
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    border: Border(
-                      bottom: esUltimo
-                          ? BorderSide.none
-                          : const BorderSide(color: AppColors.divider, width: 0.5),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          l.nombre.isNotEmpty ? l.nombre : '-',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textPrimary,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          l.tipoLocalidad.isNotEmpty ? l.tipoLocalidad : '-',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 2,
-                        child: Text(
-                          l.municipioNombre ?? '-',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.textSecondary,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _seccion02() {
     final totalPoblacion = edan.localidades.fold<int>(
         0, (suma, l) => suma + l.totalPoblacionAfectada);
@@ -1006,10 +1002,28 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     final locs = edan.localidades
         .where((l) => l.impImpactoPoblacion || l.impPrimeraRespuesta)
         .toList();
+    /// Suma totals across all localidades con impacto en población
+    final totalFallecidos = locs.fold<int>(0, (s, l) {
+      final ip = l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0] : EdanImpactoPoblacion();
+      return s + ip.fallecidos;
+    });
+    final totalHeridos = locs.fold<int>(0, (s, l) {
+      final ip = l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0] : EdanImpactoPoblacion();
+      return s + ip.heridos;
+    });
+    final totalDesaparecidos = locs.fold<int>(0, (s, l) {
+      final ip = l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0] : EdanImpactoPoblacion();
+      return s + ip.desaparecidos;
+    });
     return _DocSeccion(
       numero: '03',
       titulo: 'Impacto en la población',
       children: [
+        _dg([
+          _df('Fallecidos', totalFallecidos > 0 ? '$totalFallecidos' : '0'),
+          _df('Heridos', totalHeridos > 0 ? '$totalHeridos' : '0'),
+          _df('Desaparecidos', totalDesaparecidos > 0 ? '$totalDesaparecidos' : '0'),
+        ]),
         _sh('Impacto en la población'),
         if (locs.isEmpty)
           _vacio()
@@ -1017,7 +1031,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           ...locs.asMap().entries.map((entry) {
             final i = entry.key;
             final l = entry.value;
-            final ip = l.impactoPoblacion.isNotEmpty ? l.impactoPoblacion[0] : null;
+            final ip = _primerImpactoPoblacionConDatos(l.impactoPoblacion);
             return _bloqueLocalidad(i, l.etiquetaLugar, [
               if (ip != null) ...[
                 _dg([
@@ -1025,7 +1039,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
                   _df('Heridos', '${ip.heridos}'),
                   _df('Desaparecidos', '${ip.desaparecidos}'),
                 ]),
-                ...ip.gruposEtarios.map((g) => _tb([
+                ..._gruposEtariosConDatos(ip.gruposEtarios).map((g) => _tb([
                       _tbRow('Grupo etario', _v(g.rango)),
                       _tbRow('Fallecidos', '${g.fallecidos}'),
                       _tbRow('Heridos', '${g.heridos}'),
@@ -1057,6 +1071,23 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     );
   }
 
+  /// Retorna el primer registro de impacto poblacion que tiene al menos un valor > 0,
+/// o null si la lista está vacía.
+  EdanImpactoPoblacion? _primerImpactoPoblacionConDatos(
+      List<EdanImpactoPoblacion> lista) {
+    for (final ip in lista) {
+      if (ip.fallecidos > 0 || ip.heridos > 0 || ip.desaparecidos > 0) {
+        return ip;
+      }
+    }
+    return null;
+  }
+
+  /// Filtra solo los grupos etarios que tienen al menos un dato > 0
+  List<EdanGrupoEtario> _gruposEtariosConDatos(List<EdanGrupoEtario> lista) {
+    return lista.where((g) => g.fallecidos > 0 || g.heridos > 0 || g.desaparecidos > 0).toList();
+  }
+
   bool get _aplicaNecesidadesSalud {
     final t = (edan.tipoEventoNombre ?? '')
         .trim()
@@ -1075,10 +1106,30 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     final locs = edan.localidades
         .where((l) => l.impSaludEstablecimientos || l.impNecesidadSalud)
         .toList();
+    /// Totales a nivel de EDAN
+    final totalEstablecimientos = locs.fold<int>(0, (s, l) => s + l.establecimientosSalud.length);
+    final totalMedicos = locs.fold<int>(0, (s, l) {
+      final count = l.establecimientosSalud.fold<int>(0, (sum, s) => sum + s.medicosAfectados);
+      return s + count;
+    });
+    final totalEnfermeras = locs.fold<int>(0, (s, l) {
+      final count = l.establecimientosSalud.fold<int>(0, (sum, s) => sum + s.enfermerasAfectados);
+      return s + count;
+    });
+    final totalOtros = locs.fold<int>(0, (s, l) {
+      final count = l.establecimientosSalud.fold<int>(0, (sum, s) => sum + s.otrosAfectados);
+      return s + count;
+    });
     return _DocSeccion(
       numero: '04',
       titulo: 'Impacto en la salud',
       children: [
+        _dg([
+          _df('Establecimientos', totalEstablecimientos > 0 ? '$totalEstablecimientos' : '0'),
+          _df('Médicos', totalMedicos > 0 ? '$totalMedicos' : '0'),
+          _df('Enfermeras', totalEnfermeras > 0 ? '$totalEnfermeras' : '0'),
+          _df('Otros', totalOtros > 0 ? '$totalOtros' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else
@@ -1131,10 +1182,22 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     final locs = edan.localidades.where((l) =>
         l.danosViales.isNotEmpty ||
         l.danosInfraPublica.isNotEmpty).toList();
+    /// Totales a nivel de EDAN
+    final totalVias = locs.fold<int>(0, (s, l) => s + l.danosViales.length);
+    final totalKm = locs.fold<double>(0, (s, l) {
+      final sum = l.danosViales.fold<double>(0, (sum2, d) => sum2 + d.kmDanio);
+      return s + sum;
+    });
+    final totalInfra = locs.fold<int>(0, (s, l) => s + l.danosInfraPublica.length);
     return _DocSeccion(
       numero: '05',
       titulo: 'Impacto en infraestructuras',
       children: [
+        _dg([
+          _df('Vías y puentes', totalVias > 0 ? '$totalVias' : '0'),
+          _df('Km dañados', totalKm > 0 ? totalKm.toStringAsFixed(1) : '0'),
+          _df('Infraestructura pública', totalInfra > 0 ? '$totalInfra' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else
@@ -1192,10 +1255,15 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   Widget _seccion06() {
     final locs = edan.localidades.where((l) =>
         l.serviciosBasicos.any((s) => s.tieneDatos)).toList();
+    /// Totales a nivel de EDAN
+    final totalServicios = locs.fold<int>(0, (s, l) => s + l.serviciosBasicos.length);
     return _DocSeccion(
       numero: '06',
       titulo: 'Impacto en servicios básicos',
       children: [
+        _dg([
+          _df('Servicios con datos', totalServicios > 0 ? '$totalServicios' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else
@@ -1230,10 +1298,30 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
 
   Widget _seccion07() {
     final locs = edan.localidades.where((l) => l.impEducacion).toList();
+    /// Totales a nivel de EDAN
+    final totalUnidades = locs.fold<int>(0, (s, l) => s + l.unidadesEducativas.length);
+    final totalEstudiantes = locs.fold<int>(0, (s, l) {
+      final sum = l.unidadesEducativas.fold<int>(0, (sum2, u) => sum2 + u.estudiantes);
+      return s + sum;
+    });
+    final totalProfesores = locs.fold<int>(0, (s, l) {
+      final sum = l.unidadesEducativas.fold<int>(0, (sum2, u) => sum2 + u.profesores);
+      return s + sum;
+    });
+    final totalAdmin = locs.fold<int>(0, (s, l) {
+      final sum = l.unidadesEducativas.fold<int>(0, (sum2, u) => sum2 + u.administrativos);
+      return s + sum;
+    });
     return _DocSeccion(
       numero: '07',
       titulo: 'Impacto en educación',
       children: [
+        _dg([
+          _df('Unidades educativas', totalUnidades > 0 ? '$totalUnidades' : '0'),
+          _df('Estudiantes', totalEstudiantes > 0 ? '$totalEstudiantes' : '0'),
+          _df('Profesores', totalProfesores > 0 ? '$totalProfesores' : '0'),
+          _df('Administrativos', totalAdmin > 0 ? '$totalAdmin' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else
@@ -1281,10 +1369,25 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
 
   Widget _seccion08() {
     final locs = edan.localidades.where((l) => l.impVivienda).toList();
+    /// Totales a nivel de EDAN
+    final totalViviendas = locs.fold<int>(0, (s, l) => s + l.danosVivienda.length);
+    final totalDanoParcial = locs.fold<int>(0, (s, l) {
+      final count = l.danosVivienda.fold<int>(0, (sum, v) => sum + (v.danoParcial > 0 ? 1 : 0));
+      return s + count;
+    });
+    final totalDanoTotal = locs.fold<int>(0, (s, l) {
+      final count = l.danosVivienda.fold<int>(0, (sum, v) => sum + (v.danoTotal > 0 ? 1 : 0));
+      return s + count;
+    });
     return _DocSeccion(
       numero: '08',
       titulo: 'Impacto en viviendas',
       children: [
+        _dg([
+          _df('Viviendas dañadas', totalViviendas > 0 ? '$totalViviendas' : '0'),
+          _df('Dano parcial', totalDanoParcial > 0 ? '$totalDanoParcial' : '0'),
+          _df('Dano total', totalDanoTotal > 0 ? '$totalDanoTotal' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else
@@ -1325,10 +1428,27 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
 
   Widget _seccion09() {
     final locs = edan.localidades.where((l) => l.impAgropecuario).toList();
+    /// Totales a nivel de EDAN
+    final totalCultivos = locs.fold<int>(0, (s, l) => s + l.danosAgricultura.length);
+    final totalAnimalesAfectados = locs.fold<int>(0, (s, l) {
+      final count = l.danosPecuarios.fold<int>(0, (sum, p) => sum + p.animalesAfectados);
+      return s + count;
+    });
+    final totalAnimalesMuertos = locs.fold<int>(0, (s, l) {
+      final count = l.danosPecuarios.fold<int>(0, (sum, p) => sum + p.animalesMuertos);
+      return s + count;
+    });
+    final totalInfraProductiva = locs.fold<int>(0, (s, l) => s + l.infraProductiva.length);
     return _DocSeccion(
       numero: '09',
       titulo: 'Impacto agropecuario',
       children: [
+        _dg([
+          _df('Cultivos dañados', totalCultivos > 0 ? '$totalCultivos' : '0'),
+          _df('Animales afectados', totalAnimalesAfectados > 0 ? '$totalAnimalesAfectados' : '0'),
+          _df('Animales muertos', totalAnimalesMuertos > 0 ? '$totalAnimalesMuertos' : '0'),
+          _df('Infraestructura productiva', totalInfraProductiva > 0 ? '$totalInfraProductiva' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else
@@ -1416,43 +1536,64 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
             final i = entry.key;
             final l = entry.value;
             return _bloqueLocalidad(i, l.etiquetaLugar, [
-              ..._filasProteccion(l.proteccion),
+              ..._filasProteccionFiltradas(l.proteccion),
             ]);
           }),
       ],
     );
   }
 
-  List<Widget> _filasProteccion(List<EdanGrupoVulnerable> grupos) {
-    return [
-      for (var i = 0; i < grupos.length; i++)
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: _tb([
-            _tbRow('Grupo', grupos[i].nombreGrupo ?? 'Grupo ${i + 1}'),
-            _dg([
-              _df('Mujeres', '${grupos[i].mujeres}'),
-              _df('Hombres', '${grupos[i].hombres}'),
-              _df('Total', '${grupos[i].total}'),
-            ]),
-            _tags([
-              if (grupos[i].apoyoPsicologico == true) 'Apoyo psicológico',
-              if (grupos[i].reposicionDocumentos == true) 'Reposición de documento',
-            ]),
-            if (grupos[i].observaciones.trim().isNotEmpty)
-              _tbRow('Observaciones', grupos[i].observaciones),
-          ]),
-        ),
-    ];
+/// Muestra solo grupos vulnerables que tienen datos (mujeres > 0, hombres > 0,
+  /// total > 0, o flags activados)
+  List<Widget> _filasProteccionFiltradas(List<EdanGrupoVulnerable> grupos) {
+    final conDatos = grupos.where((g) =>
+        g.mujeres > 0 ||
+        g.hombres > 0 ||
+        g.total > 0 ||
+        g.apoyoPsicologico == true ||
+        g.reposicionDocumentos == true).toList();
+    if (conDatos.isEmpty) return [_vacio()];
+    return conDatos.map((g) => Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: _tb([
+        _tbRow('Grupo', g.nombreGrupo ?? 'Grupo vulnerable'),
+        _dg([
+          _df('Mujeres', '${g.mujeres}'),
+          _df('Hombres', '${g.hombres}'),
+          _df('Total', '${g.total}'),
+        ]),
+        _tags([
+          if (g.apoyoPsicologico == true) 'Apoyo psicológico',
+          if (g.reposicionDocumentos == true) 'Reposición de documento',
+        ]),
+        if (g.observaciones.trim().isNotEmpty)
+          _tbRow('Observaciones', g.observaciones),
+      ]),
+    )).toList();
   }
 
   Widget _seccion11() {
     final locs =
         edan.localidades.where((l) => l.impNecesidadHumanitaria).toList();
+    /// Totales a nivel de EDAN
+    final totalLocalidades = locs.length;
+    final totalConAlimentos = locs.where((l) => l.necesidadHumanitaria?.alimentos ?? false).length;
+    final totalConRefugio = locs.where((l) => l.necesidadHumanitaria?.refugioVivienda ?? false).length;
+    final totalConRopaCama = locs.where((l) => l.necesidadHumanitaria?.ropaCama ?? false).length;
+    final totalConAgua = locs.where((l) => l.necesidadHumanitaria?.almacenamientoAgua ?? false).length;
+    final totalConBanios = locs.where((l) => l.necesidadHumanitaria?.banos ?? false).length;
     return _DocSeccion(
       numero: '11',
       titulo: 'Necesidades humanitarias',
       children: [
+        _dg([
+          _df('Localidades', totalLocalidades > 0 ? '$totalLocalidades' : '0'),
+          _df('Con alimentos', totalConAlimentos > 0 ? '$totalConAlimentos' : '0'),
+          _df('Con refugio/vivienda', totalConRefugio > 0 ? '$totalConRefugio' : '0'),
+          _df('Con ropa de cama', totalConRopaCama > 0 ? '$totalConRopaCama' : '0'),
+          _df('Con almacenamiento agua', totalConAgua > 0 ? '$totalConAgua' : '0'),
+          _df('Con baños', totalConBanios > 0 ? '$totalConBanios' : '0'),
+        ]),
         if (locs.isEmpty)
           _vacio()
         else

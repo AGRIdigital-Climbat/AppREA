@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'config/theme.dart';
 import 'providers/auth_provider.dart';
 import 'providers/reporte_provider.dart';
@@ -13,6 +15,13 @@ import 'services/debug_log.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Desktop: inicializar la factory de SQLite (databaseFactoryFfi).
+  // Necesario antes de cualquier uso de openDatabase en Windows/Linux.
+  if (Platform.isWindows || Platform.isLinux) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
 
   final rutaLog = await DebugLog.instance.inicializar();
   if (rutaLog != null) {

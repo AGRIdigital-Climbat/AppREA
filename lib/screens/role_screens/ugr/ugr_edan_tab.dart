@@ -401,7 +401,7 @@ class _EdanServidorCard extends StatelessWidget {
     final departamento = _safeStr(
         edan['departamento_nombre'] ?? edan['departamentoNombre'] ?? edan['departamento']);
     final estado = _safeStr(edan['estado']);
-    final localidades = _safeInt(edan['total_localidades']);
+    final localidades = _safeInt(edan['num_localidades'] ?? edan['total_localidades']);
     final fechaEvento = _safeStr(edan['fecha_evento'] ?? edan['fechaEvento']);
     final horaEvento = _safeStr(edan['hora_evento'] ?? edan['horaEvento']);
 

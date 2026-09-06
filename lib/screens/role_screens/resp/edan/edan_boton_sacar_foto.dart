@@ -616,14 +616,43 @@ class _SheetFotoState extends State<_SheetFoto> {
   double _prec = 0;
   bool _sacando = false;
 
+  // Windows: controllers para entrada manual de coordenadas
+  final _latCtrl = TextEditingController();
+  final _lonCtrl = TextEditingController();
+  final _coordFormKey = GlobalKey<FormState>();
+  static bool get _isWindows => Platform.isWindows;
+
   @override
   void initState() {
     super.initState();
-    // Seguridad: siempre se solicitan coordenadas GPS frescas al abrir el
-    // bottom sheet, sin reutilizar las ya guardadas en el ítem. Así la foto
-    // (si se toma) queda siempre asociada a una posición capturada en este
-    // momento y no a una anterior.
-    _capturarCoordenadas();
+    if (_isWindows) {
+      // Windows: prellenar con coordenadas previas si existen
+      if (widget.latActual != 0) {
+        _latCtrl.text = widget.latActual.toStringAsFixed(6);
+      }
+      if (widget.lonActual != 0) {
+        _lonCtrl.text = widget.lonActual.toStringAsFixed(6);
+      }
+    } else {
+      // Móvil: siempre se solicitan coordenadas GPS frescas al abrir el
+      // bottom sheet, sin reutilizar las ya guardadas en el ítem.
+      _capturarCoordenadas();
+    }
+  }
+
+  @override
+  void dispose() {
+    _latCtrl.dispose();
+    _lonCtrl.dispose();
+    super.dispose();
+  }
+
+  bool _validarCoordenadasWindows() {
+    if (!_coordFormKey.currentState!.validate()) return false;
+    _lat = double.parse(_latCtrl.text.trim());
+    _lon = double.parse(_lonCtrl.text.trim());
+    _prec = 10.0;
+    return true;
   }
 
   Future<void> _capturarCoordenadas() async {
@@ -655,9 +684,32 @@ class _SheetFotoState extends State<_SheetFoto> {
   /// Devuelve true si se completó una captura (nueva o reemplazada) con
   /// coordenadas frescas [lat]/[lon].
   Future<bool> _tomarFoto() async {
-    // Seguridad: siempre se recapturan coordenadas GPS frescas justo antes de
-    // tomar la foto. La foto queda asociada a la posición capturada en ese
-    // momento, nunca a una previa del ítem.
+    // Windows: leer coordenadas de los campos de texto + file picker
+    if (_isWindows) {
+      if (!_validarCoordenadasWindows()) return false;
+      setState(() => _sacando = true);
+      final ok = await EdanBotonSacarFoto.capturarFoto(
+        fotos: widget.fotos,
+        latitud: _lat!,
+        longitud: _lon!,
+        precision: _prec,
+        idLocal: widget.idLocal,
+        idSeccion: widget.idSeccion,
+      );
+      if (!mounted) return false;
+      setState(() => _sacando = false);
+      if (ok) {
+        widget.onCoordenadasCapturadas(_lat!, _lon!);
+        if (widget.fotos.isNotEmpty) {
+          widget.onFotoGuardada?.call(widget.fotos.first.ruta);
+        }
+        Navigator.of(context).pop(true);
+      }
+      return ok;
+    }
+
+    // Móvil: siempre se recapturan coordenadas GPS frescas justo antes de
+    // tomar la foto.
     setState(() => _capturando = true);
     final pos = await EdanBotonSacarFoto.capturarCoordenadas(
       context,
@@ -745,7 +797,13 @@ class _SheetFotoState extends State<_SheetFoto> {
   }
 
   void _onSacarFoto() {
-    if (_sacando || _lat == null || _lon == null) return;
+    if (_sacando) return;
+    // Windows: validar coordenadas de los campos de texto
+    if (_isWindows) {
+      if (!_validarCoordenadasWindows()) return;
+    } else {
+      if (_lat == null || _lon == null) return;
+    }
     if (widget.fotos.isNotEmpty) {
       _abrirMenuFotoExistente();
       return;
@@ -756,7 +814,10 @@ class _SheetFotoState extends State<_SheetFoto> {
   @override
   Widget build(BuildContext context) {
     const colorPrimario = AppColors.completed;
-    final bool coordsListas = _lat != null && _lon != null;
+    // Windows: "listo" cuando los campos de texto tienen valores
+    final bool coordsListas = _isWindows
+        ? (_latCtrl.text.isNotEmpty && _lonCtrl.text.isNotEmpty)
+        : (_lat != null && _lon != null);
     final bool tienefoto = widget.fotos.isNotEmpty;
 
     return Padding(
@@ -837,9 +898,14 @@ class _SheetFotoState extends State<_SheetFoto> {
                               color: Colors.white,
                             ),
                           )
-                        : const Icon(Icons.photo_camera_outlined, size: 20),
+                        : Icon(
+                            _isWindows ? Icons.image_outlined : Icons.photo_camera_outlined,
+                            size: 20,
+                          ),
                     label: Text(
-                      tienefoto ? 'Editar foto' : 'Sacar foto',
+                      _isWindows
+                          ? (tienefoto ? 'Cambiar imagen' : 'Seleccionar imagen')
+                          : (tienefoto ? 'Editar foto' : 'Sacar foto'),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w700,
@@ -849,11 +915,13 @@ class _SheetFotoState extends State<_SheetFoto> {
                 ),
                 if (tienefoto) ...[
                   const SizedBox(height: 8),
-                  const Text(
-                    'Ya tienes una foto. El botón abrirá opciones para '
-                    'verla o retomarla.',
+                  Text(
+                    _isWindows
+                        ? 'Ya tienes una imagen seleccionada. El botón abrirá opciones para cambiarla.'
+                        : 'Ya tienes una foto. El botón abrirá opciones para '
+                            'verla o retomarla.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
                       color: AppColors.textSecondary,
                       fontStyle: FontStyle.italic,
@@ -869,6 +937,93 @@ class _SheetFotoState extends State<_SheetFoto> {
   }
 
   Widget _coordenadasCard(Color verde, bool coordsListas) {
+    // Windows: campos editables de coordenadas
+    if (_isWindows) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Form(
+          key: _coordFormKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.edit_location_alt, color: verde, size: 18),
+                  const SizedBox(width: 8),
+                  const Text(
+                    'Coordenadas del punto de muestreo',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextFormField(
+                      controller: _latCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                      style: const TextStyle(fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: 'Latitud',
+                        hintText: 'ej: -16.500000',
+                        prefixIcon: const Icon(Icons.north, size: 16),
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Req.';
+                        final n = double.tryParse(v.trim());
+                        if (n == null) return 'Inválido';
+                        if (n < -90 || n > 90) return '-90 a 90';
+                        return null;
+                      },
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _lonCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+                      style: const TextStyle(fontSize: 13),
+                      decoration: InputDecoration(
+                        labelText: 'Longitud',
+                        hintText: 'ej: -68.000000',
+                        prefixIcon: const Icon(Icons.east, size: 16),
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                      validator: (v) {
+                        if (v == null || v.trim().isEmpty) return 'Req.';
+                        final n = double.tryParse(v.trim());
+                        if (n == null) return 'Inválido';
+                        if (n < -180 || n > 180) return '-180 a 180';
+                        return null;
+                      },
+                      onChanged: (_) => setState(() {}),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Móvil: flujo GPS automático
     final Widget contenido;
     if (_capturando) {
       contenido = const Row(

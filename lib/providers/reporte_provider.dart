@@ -1,8 +1,6 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:path_provider/path_provider.dart';
 import '../models/reporte.dart';
 import '../models/reporte_offline.dart';
 import '../models/departamento.dart';
@@ -13,9 +11,6 @@ import '../services/database_helper.dart';
 import '../services/api_service.dart';
 import '../services/sync_manager.dart';
 import '../services/auth_service.dart';
-import '../services/connectivity_service.dart';
-
-enum CrearReporteResult { enviado, pendiente, borrador }
 
 class ReporteProvider extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
@@ -80,7 +75,7 @@ class ReporteProvider extends ChangeNotifier {
     });
 
     await loadReportes();
-    _downloadPhase = 'Cargando catálogos locales...';
+    _downloadPhase = 'Cargando catÃ¡logos locales...';
     notifyListeners();
     await loadCatalogsLocal();
 
@@ -89,7 +84,7 @@ class ReporteProvider extends ChangeNotifier {
       notifyListeners();
       await loadGeography();
 
-      _downloadPhase = 'Descargando catálogos del servidor...';
+      _downloadPhase = 'Descargando catÃ¡logos del servidor...';
       notifyListeners();
       await fetchAndCacheCatalogs();
     }
@@ -105,19 +100,6 @@ class ReporteProvider extends ChangeNotifier {
     notifyListeners();
 
     await initialize();
-
-    if (AuthService.instance.isAuthenticated) {
-      _downloadPhase = 'Descargando reportes del servidor...';
-      notifyListeners();
-      if (_reportes.isEmpty) {
-        await syncAllFromServer();
-      } else {
-        _syncManager.pullServerUpdates().then((_) => loadReportes());
-      }
-      _downloadPhase = 'Descargando imágenes...';
-      notifyListeners();
-      descargarImagenesPendientes();
-    }
 
     _downloadPhase = '';
     _isInitializing = false;
@@ -309,7 +291,7 @@ class ReporteProvider extends ChangeNotifier {
       _tiposRepositorio = [];
     }
 
-    // Cachear catálogos geográficos desde SQLite (offline)
+    // Cachear catÃ¡logos geogrÃ¡ficos desde SQLite (offline)
     try {
       final depData = await _db.getDepartamentosLocal();
       if (depData.isNotEmpty) {
@@ -347,25 +329,7 @@ class ReporteProvider extends ChangeNotifier {
   }
 
   Future<Map<String, int>> fetchAndCacheCatalogs() async {
-    int estadosCount = 0;
-    int categoriasCount = 0;
     int tiposCount = 0;
-
-    try {
-      final estados = await _api.getEstados();
-      _estados = estados;
-      await _db.saveEstados(
-          estados.map((e) => {'id_estado': e.idEstado, 'nombre': e.nombre, 'descripcion': e.descripcion, 'orden': e.orden}).toList());
-      estadosCount = estados.length;
-    } catch (_) {}
-
-    try {
-      final categorias = await _api.getCategorias();
-      _categorias = categorias;
-      await _db.saveCategorias(
-          categorias.map((c) => {'id_categoria': c.idCategoria, 'nombre': c.nombre, 'descripcion': c.descripcion, 'orden': c.orden}).toList());
-      categoriasCount = categorias.length;
-    } catch (_) {}
 
     try {
       final tipos = await _api.getTiposEvento();
@@ -468,10 +432,10 @@ class ReporteProvider extends ChangeNotifier {
     await _downloadAndCacheMunicipioGeojson();
 
     notifyListeners();
-    return {'estados': estadosCount, 'categorias': categoriasCount, 'tipos': tiposCount};
+    return {'tipos': tiposCount};
   }
 
-  /// Descarga SOLO gruposVulnerables si está vacío
+  /// Descarga SOLO gruposVulnerables si estÃ¡ vacÃ­o
   Future<void> fetchGruposVulnerablesIfNeeded() async {
     if (_gruposVulnerables.isNotEmpty) return;
 
@@ -501,7 +465,7 @@ class ReporteProvider extends ChangeNotifier {
     }
   }
 
-  /// Descarga SOLO grupos etarios si está vacío (catálogo v2).
+  /// Descarga SOLO grupos etarios si estÃ¡ vacÃ­o (catÃ¡logo v2).
   Future<void> fetchGruposEtariosIfNeeded() async {
     if (_gruposEtarios.isNotEmpty) return;
 
@@ -659,7 +623,7 @@ class ReporteProvider extends ChangeNotifier {
       }
       if (match == null) return;
 
-      final feature = await _api.getMunicipioGeojson(match.codigoIne);
+      final feature = await _api.getMunicipioGeojson(match.id);
       final raw = (feature['data'] ?? feature) as Map<String, dynamic>;
       final geojson = MunicipioGeojson.fromJson(raw);
 
@@ -673,7 +637,7 @@ class ReporteProvider extends ChangeNotifier {
       _municipioGeojson = geojson;
       notifyListeners();
     } catch (_) {
-      // Silencioso: no rompe el flujo de catálogos
+      // Silencioso: no rompe el flujo de catÃ¡logos
     }
   }
 
@@ -695,252 +659,6 @@ class ReporteProvider extends ChangeNotifier {
   String getCategoriaNombre(int id) {
     final match = _categorias.where((c) => c.idCategoria == id);
     return match.isNotEmpty ? match.first.nombre : 'Otra';
-  }
-
-  Future<void> crearReporte(ReporteOffline reporte) async {
-    await _db.insertReporte(reporte);
-    _pendingCount++;
-    notifyListeners();
-
-    await loadReportes();
-
-    if (ConnectivityService().isConnected) {
-      await _syncManager.syncPendingReports();
-    }
-  }
-
-  Future<CrearReporteResult> crearReporteConEnvio(ReporteOffline reporte) async {
-    await _db.insertReporte(reporte);
-
-    final userId = AuthService.instance.userId;
-    if (userId == null) {
-      _pendingCount++;
-      notifyListeners();
-      await loadReportes();
-      return CrearReporteResult.pendiente;
-    }
-
-    final reportes = await _db.getReportes(userId);
-    final inserted = reportes.lastWhere(
-      (r) => r.fechaCreacion.isAtSameMomentAs(reporte.fechaCreacion),
-      orElse: () => reporte,
-    );
-
-    if (!ConnectivityService().isConnected || inserted.idLocal == null) {
-      _pendingCount++;
-      notifyListeners();
-      await loadReportes();
-      return CrearReporteResult.pendiente;
-    }
-
-    try {
-      final hasLocalImage = inserted.imagenes != null && inserted.imagenes!.isNotEmpty;
-
-      if (hasLocalImage) {
-        final data = inserted.toApiFormat();
-        data['categorias'] = inserted.categorias?.toString();
-        final response = await _api.createReporteConFoto(
-          filePath: inserted.imagenes!.first,
-          data: data,
-        );
-        await _db.updateEstado(inserted.idLocal!, response.idEstado, response.estado?.nombre);
-        await _db.markAsSynced(inserted.idLocal!, response.idReporte!);
-        if (response.fotografia != null) {
-          await _db.saveFotografiaServerPath(inserted.idLocal!, response.fotografia!);
-        }
-      } else {
-        final data = inserted.toApiFormat();
-        if (inserted.fotografiaServerPath != null) {
-          data['fotografia'] = inserted.fotografiaServerPath;
-        }
-        final response = await _api.createReporte(data);
-        await _db.updateEstado(inserted.idLocal!, response.idEstado, response.estado?.nombre);
-        await _db.markAsSynced(inserted.idLocal!, response.idReporte!);
-      }
-
-      await loadReportes();
-      return CrearReporteResult.enviado;
-    } catch (e) {
-      debugPrint('[crearReporteConEnvio] Error enviando reporte: $e');
-      _pendingCount++;
-      notifyListeners();
-      await loadReportes();
-      return CrearReporteResult.pendiente;
-    }
-  }
-
-  Future<void> actualizarReporte(ReporteOffline reporte) async {
-    await _db.updateReporte(reporte);
-
-    if (ConnectivityService().isConnected) {
-      await _syncManager.syncPendingReports();
-    }
-
-    await loadReportes();
-  }
-
-  Future<void> guardarBorrador(ReporteOffline reporte) async {
-    final borrador = ReporteOffline(
-      idLocal: reporte.idLocal,
-      idServer: reporte.idServer,
-      usuarioId: reporte.usuarioId,
-      departamentoId: reporte.departamentoId,
-      provinciaId: reporte.provinciaId,
-      municipioId: reporte.municipioId,
-      comunidad: reporte.comunidad,
-      departamentoNombre: reporte.departamentoNombre,
-      provinciaNombre: reporte.provinciaNombre,
-      municipioNombre: reporte.municipioNombre,
-      fechaEvento: reporte.fechaEvento,
-      horaEvento: reporte.horaEvento,
-      tipoEventoId: reporte.tipoEventoId,
-      coordenadaLat: reporte.coordenadaLat,
-      coordenadaLon: reporte.coordenadaLon,
-      descripcion: reporte.descripcion,
-      estadoId: reporte.estadoId,
-      categorias: reporte.categorias,
-      imagenes: reporte.imagenes,
-      esBorrador: true,
-      sincronizado: false,
-      pendienteEliminacion: false,
-      pendienteActualizacion: false,
-      fechaCreacion: reporte.fechaCreacion,
-    );
-
-    if (borrador.idLocal != null) {
-      await _db.updateReporte(borrador);
-    } else {
-      await _db.insertReporte(borrador);
-    }
-    await loadReportes();
-  }
-
-  Future<void> eliminarReporte(int idLocal) async {
-    await _syncManager.deleteReporte(idLocal);
-    await loadReportes();
-  }
-
-  Future<void> sincronizarPendientes() async {
-    await _syncManager.syncPendingReports();
-    await loadReportes();
-    descargarImagenesPendientes();
-  }
-
-  Future<void> descargarImagenesPendientes() async {
-    try {
-      final userId = AuthService.instance.userId;
-      if (userId == null) return;
-
-      final reportes = await _db.getReportesSinDescargar(userId);
-      if (reportes.isEmpty) return;
-
-      final appDir = await getApplicationDocumentsDirectory();
-      final reportesDir = Directory('${appDir.path}/reportes');
-      if (!await reportesDir.exists()) {
-        await reportesDir.create(recursive: true);
-      }
-
-      for (final reporte in reportes) {
-        if (reporte.fotografiaServerPath == null ||
-            reporte.fotografiaServerPath!.isEmpty) {
-          continue;
-        }
-
-        try {
-          final serverPath = reporte.fotografiaServerPath!;
-          final fileName = '${reporte.idServer}_${serverPath.split('/').last}';
-          final savePath = '${reportesDir.path}/$fileName';
-
-          final downloaded = await _api.downloadImage(serverPath, savePath);
-          if (downloaded != null) {
-            await _db.updateReporteLocalImage(reporte.idServer!, downloaded);
-            await _db.marcarImagenDescargada(reporte.idLocal!);
-          }
-        } catch (_) {
-          // No marcar — queda pendiente para el próximo intento
-        }
-      }
-    } catch (_) {
-      // Error general — no bloquea la app
-    }
-  }
-
-  Future<int> refreshFromServer() async {
-    final result = await syncAllFromServer();
-    await fetchAndCacheCatalogs();
-    await loadCatalogsLocal();
-    descargarImagenesPendientes();
-    return result['reportes'] ?? 0;
-  }
-
-  Future<Map<String, int>> syncAllFromServer() async {
-    int reportesCount = 0;
-    int imagenesCount = 0;
-
-    try {
-      final userId = AuthService.instance.userId;
-      if (userId == null) return {'reportes': 0, 'imagenes': 0};
-
-      final appDir = await getApplicationDocumentsDirectory();
-      final reportesDir = Directory('${appDir.path}/reportes');
-
-      int skip = 0;
-      const limit = 50;
-      bool hasMore = true;
-
-      while (hasMore) {
-        final batch = await _api.getMisReportes(
-          idUsuario: userId,
-          skip: skip,
-          limit: limit,
-        );
-
-        if (batch.isEmpty) {
-          hasMore = false;
-          break;
-        }
-
-        for (final data in batch) {
-          await _db.upsertReportFromServer(userId, data);
-          reportesCount++;
-
-          final serverPath = data['fotografia'] as String?;
-          if (serverPath != null && serverPath.isNotEmpty) {
-            final existing = await _db.getReporteByServerId(data['id_reporte'] as int);
-            final hasLocalImage = existing != null &&
-                existing.imagenes != null &&
-                existing.imagenes!.isNotEmpty;
-
-            if (!hasLocalImage) {
-              final fileName = '${data['id_reporte']}_${serverPath.split('/').last}';
-              final savePath = '${reportesDir.path}/$fileName';
-
-              final downloaded = await _api.downloadImage(serverPath, savePath);
-              if (downloaded != null) {
-                await _db.updateReporteLocalImage(data['id_reporte'] as int, downloaded);
-                final reporte = await _db.getReporteByServerId(data['id_reporte'] as int);
-                if (reporte != null) {
-                  await _db.marcarImagenDescargada(reporte.idLocal!);
-                }
-                imagenesCount++;
-              }
-            }
-          }
-        }
-
-        if (batch.length < limit) {
-          hasMore = false;
-        } else {
-          skip += limit;
-        }
-      }
-
-    } catch (e) {
-      debugPrint('[syncAllFromServer] ERROR: $e');
-    }
-
-    await loadReportes();
-    return {'reportes': reportesCount, 'imagenes': imagenesCount};
   }
 
   @override

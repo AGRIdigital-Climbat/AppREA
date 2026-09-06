@@ -24,6 +24,7 @@ dependencies:
   shared_preferences: ^2.2.0
   flutter_secure_storage: ^10.0.0
   sqflite: ^2.3.0
+  sqflite_common_ffi: ^2.3.6
   path: ^1.8.0
   
   # Connectivity

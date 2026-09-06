@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import '../screens/modules/pre_edan_screen.dart';
 import '../screens/modules/edan_screen.dart';
 import '../screens/modules/rida_screen.dart';
 import '../screens/modules/sinb_screen.dart';
 
-enum ModuleType { preEdan, edan, rida, sinb }
+enum ModuleType { edan, rida, sinb }
 
 class ModuleConfig {
   final ModuleType type;
@@ -25,14 +24,6 @@ class ModuleConfig {
 }
 
 final List<ModuleConfig> kModules = [
-  ModuleConfig(
-    type: ModuleType.preEdan,
-    title: 'PRE EDAN',
-    subtitle: 'Reporte de eventos adversos',
-    icon: Icons.dashboard_rounded,
-    permissionKey: 'REA',
-    screenBuilder: (_) => const PreEdanScreen(),
-  ),
   ModuleConfig(
     type: ModuleType.edan,
     title: 'EDAN',

@@ -6,6 +6,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 
 class PermissionService {
   static Future<bool> requestCameraPermission() async {
+    if (Platform.isWindows) return true;
     final status = await Permission.camera.status;
 
     if (status.isGranted) return true;
@@ -17,6 +18,7 @@ class PermissionService {
   }
 
   static Future<bool> requestLocationPermission() async {
+    if (Platform.isWindows) return true;
     final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) return false;
 
@@ -33,6 +35,7 @@ class PermissionService {
   }
 
   static Future<bool> requestGalleryPermission() async {
+    if (Platform.isWindows) return true;
     if (Platform.isAndroid) {
       final androidInfo = await DeviceInfoPlugin().androidInfo;
 
@@ -59,6 +62,7 @@ class PermissionService {
   }
 
   static Future<bool> requestNotificationPermission() async {
+    if (Platform.isWindows) return true;
     final status = await Permission.notification.status;
     if (status.isGranted) return true;
 

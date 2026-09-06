@@ -899,11 +899,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     final conectado = await ConnectivityService().checkNow();
     try {
       if (localidad.sincronizado && localidad.idServer != null && conectado) {
-        await ApiService.instance.deleteSeccionItem(
-          idLocalidad: '${localidad.idServer}',
-          rutaSeccion: 'api/v2/edan/localidades',
-          idSeccion: '${localidad.idServer}',
-        );
+        await ApiService.instance.eliminarLocalidadDocumento(localidad.idServer!);
         await db.deleteLocalidad(idLocal);
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(

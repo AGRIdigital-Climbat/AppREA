@@ -22,7 +22,7 @@ class HomeWithDrawer extends StatefulWidget {
 class _HomeWithDrawerState extends State<HomeWithDrawer>
     with SingleTickerProviderStateMixin {
   late final SlideDrawerController _drawerController;
-  ModuleType _currentModule = ModuleType.preEdan;
+  ModuleType _currentModule = ModuleType.edan;
   bool _showProfile = false;
 
   @override
@@ -57,8 +57,6 @@ class _HomeWithDrawerState extends State<HomeWithDrawer>
 
   bool _canAccess(ModuleType type, AuthProvider auth) {
     switch (type) {
-      case ModuleType.preEdan:
-        return auth.canAccessPreEdan;
       case ModuleType.edan:
         return auth.canAccessEdan;
       case ModuleType.rida:

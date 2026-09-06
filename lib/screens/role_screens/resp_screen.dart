@@ -218,7 +218,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
             RespEdanLocalidadTab(key: _edanTabKey),
             RespMapaTab(key: _mapaTabKey),
             const RespGuiaTab(),
-            const PerfilTab(),
+            const PerfilTab(catalogoEdan: true),
           ],
         ),
       ),
