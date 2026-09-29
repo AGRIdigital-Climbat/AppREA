@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
+import 'id_seccion_helper.dart';
 import 'usuario.dart';
 
 /// Resuelve el `id_seccion` de un ítem al deserializar, RESPETANDO el valor
@@ -497,7 +498,11 @@ class EdanEstablecimientoSalud with EdanFotoHolder {
       };
 
   /// Serialización alineada al schema EstablecimientoSalud de la API.
-  /// NO incluye fotografia: las fotos se suben vía con-foto (POST dedicado).
+  ///
+  /// `toApiJson()` es el payload de `/documento` (la vía real de subida, la usa
+  /// el botón Sincronizar), por eso SÍ lleva `fotografia`. Si el valor es un
+  /// path local, `construirDocumento` lo sube y lo reemplaza por `/uploads/...`;
+  /// si ya es un path del servidor, lo conserva y no lo vuelve a subir.
   Map<String, dynamic> toApiJson() => {
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
@@ -688,7 +693,8 @@ class EdanDanoVial with EdanFotoHolder {
 
   /// Serialización alineada al schema DanoVial de la API: la UI guarda
   /// viaPuente ('vía'/'puente') y la API espera dos booleanos via/puente.
-  /// NO incluye fotografia: las fotos se suben vía con-foto (POST dedicado).
+  /// Lleva `fotografia` porque es el payload de `/documento` (ver
+  /// `EdanEstablecimientoSalud.toApiJson()`).
   Map<String, dynamic> toApiJson() {
     final vp = viaPuente.trim().toLowerCase();
     return {
@@ -1033,15 +1039,18 @@ class EdanDanoUnidadEducativa with EdanFotoHolder {
       comunidad: _str(json['comunidad']),
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
       danoTotal: _toBool(json['dano_total'] ?? json['danoTotal']),
-      suspensionClases: json['suspension_clases'] ?? json['suspensionClases'] == null
+      // Parentheses: `??` binds looser than `==`, así que sin ellas esto se
+      // leía como `json['suspension_clases'] ?? (...) == null ? null : ...` y
+      // un `true` se devolvía como null (se perdía la suspensión al releer).
+      suspensionClases: (json['suspension_clases'] ?? json['suspensionClases']) == null
           ? null
           : _toBool(json['suspension_clases'] ?? json['suspensionClases']),
-      perdidaMaterial: json['perdida_material'] ?? json['perdidaMaterial'] == null
+      perdidaMaterial: (json['perdida_material'] ?? json['perdidaMaterial']) == null
           ? null
           : _toBool(json['perdida_material'] ?? json['perdidaMaterial']),
-      funcionaAlbergue: json['funciona_albergue'] ?? json['funciona_albergue'] == null
+      funcionaAlbergue: (json['funciona_albergue'] ?? json['funcionaAlbergue']) == null
           ? null
-          : _toBool(json['funciona_albergue'] ?? json['funciona_albergue']),
+          : _toBool(json['funciona_albergue'] ?? json['funcionaAlbergue']),
       estudiantes: _toInt(json['estudiantes']),
       profesores: _toInt(json['profesores']),
       administrativos: _toInt(json['administrativos']),
@@ -1289,6 +1298,7 @@ class EdanDanoPecuario with EdanFotoHolder {
   int animalesAfectados;
   int animalesMuertos;
   String necesidadesInmediatas;
+  String observaciones;
   List<EdanFoto> fotos;
   @override
   String? fotografia;
@@ -1306,6 +1316,7 @@ class EdanDanoPecuario with EdanFotoHolder {
     this.animalesAfectados = 0,
     this.animalesMuertos = 0,
     this.necesidadesInmediatas = '',
+    this.observaciones = '',
     List<EdanFoto>? fotos,
     this.fotografia,
     this.coordenadaLat = 0,
@@ -1327,6 +1338,7 @@ class EdanDanoPecuario with EdanFotoHolder {
       necesidadesInmediatas: json['necesidades_inmediatas'] ??
           json['necesidadesInmediatas'] ??
           '',
+      observaciones: _str(json['observaciones']),
       fotos: fotosRaw is List
           ? fotosRaw.map((f) => EdanFoto.fromJson(f is Map ? Map<String, dynamic>.from(f) : {})).toList()
           : [],
@@ -1347,6 +1359,7 @@ class EdanDanoPecuario with EdanFotoHolder {
         'animales_afectados': animalesAfectados,
         'animales_muertos': animalesMuertos,
         'necesidades_inmediatas': necesidadesInmediatas,
+        'observaciones': observaciones,
         'fotos': fotos.map((f) => f.toJson()).toList(),
         'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
@@ -1362,6 +1375,7 @@ class EdanDanoPecuario with EdanFotoHolder {
         'animales_afectados': animalesAfectados,
         'animales_muertos': animalesMuertos,
         'necesidades_inmediatas': necesidadesInmediatas,
+        'observaciones': observaciones,
         'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
@@ -1935,6 +1949,9 @@ class EdanLocalidad {
       final id = c is Map ? (c['id_grupo_vulnerable'] ?? c['id']) : null;
       final nombre = c is Map ? (c['nombre'] ?? '') : '';
       return EdanGrupoVulnerable(
+        // El id se genera UNA vez al crear el grupo. Sin esto el servidor no
+        // tiene clave de UPSERT y cada reenvío duplicaría la fila.
+        idSeccion: nuevoIdProteccion(),
         idGrupoVulnerableCatalogo: id is int ? id : int.tryParse('$id'),
         nombreGrupo: nombre.toString(),
       );
@@ -2076,6 +2093,12 @@ class EdanLocalidad {
       proteccion = parseList(json['proteccion'], EdanGrupoVulnerable.fromJson);
     } else {
       proteccion = [];
+    }
+    // El formulario siempre muestra las 8 ranuras del catálogo. Si el servidor
+    // solo devolvió los grupos con datos, se completan las que faltan para que
+    // la persona pueda llenarlas; los vacíos no se envían (filtra `tieneDatos`).
+    for (var i = proteccion.length; i < etiquetasProteccion.length; i++) {
+      proteccion.add(EdanGrupoVulnerable(nombreGrupo: etiquetasProteccion[i]));
     }
 
     // Extraer estado_localidad anidado
@@ -2709,6 +2732,25 @@ class EdanLocalidad {
     }
     return null;
   }
+
+  /// Suma total de personas en grupos etarios (page03).
+  int get sumaGruposEtarios => impactoPoblacion.isEmpty
+      ? 0
+      : impactoPoblacion[0].fallecidos +
+          impactoPoblacion[0].heridos +
+          impactoPoblacion[0].desaparecidos;
+
+  /// Suma total de personal de salud afectado (page04).
+  int get sumaSaludPersonal => establecimientosSalud.fold<int>(
+      0, (acc, e) => acc + e.medicosAfectados + e.enfermerasAfectados + e.otrosAfectados);
+
+  /// Suma total de personas en unidades educativas (page07).
+  int get sumaUnidadesEducativas =>
+      unidadesEducativas.fold<int>(0, (acc, u) => acc + u.totalAfectados);
+
+  /// Suma total de protección — mujeres + hombres de todos los grupos (page10).
+  int get sumaProteccion =>
+      proteccion.fold<int>(0, (acc, g) => acc + g.total);
 }
 
 class EdanResponsable {
@@ -3353,4 +3395,14 @@ abstract mixin class EdanFotoHolder {
   String? get fotografia;
   double get coordenadaLat;
   double get coordenadaLon;
+
+  // El paso final de fotos del asistente escribe la coordenada capturada; el
+  // mixin solo declara getters, así que también declara los setters que el
+  // captura necesita y así no hay que castear cada clase una por una.
+  set coordenadaLat(double valor);
+  set coordenadaLon(double valor);
+
+  // La foto también se escribe desde el paso final, igual que la coordenada:
+  // `mostrarSheetFoto` devuelve la ruta y la página la guarda.
+  set fotografia(String? valor);
 }

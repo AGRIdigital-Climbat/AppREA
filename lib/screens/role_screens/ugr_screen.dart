@@ -12,8 +12,7 @@ import '../../widgets/perfil_tab.dart';
 import 'ugr/ugr_edan_tab.dart';
 import 'ugr/ugr_guia_tab.dart';
 import 'ugr/ugr_localidades_tab.dart';
-import 'ugr/ugr_route.dart';
-import 'resp/edan/edan_form_wizard.dart';
+import 'resp/edan/edan_ia_elegir_creacion.dart';
 import 'resp/resp_mapa_tab.dart';
 
 class UgrScreen extends StatefulWidget {
@@ -389,10 +388,11 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
             ],
             FloatingActionButton(
               onPressed: () async {
-                final creado = await Navigator.of(context).push<bool>(
-                  ugrRoute(EdanFormWizard(), palette: Palettes.rea),
-                );
-                if (creado == true && mounted) {
+                // El `+` deja elegir entre el wizard y el asistente con IA.
+                final modo = await pedirModoCreacionEdan(context);
+                if (modo == null || !mounted) return;
+                final creado = await abrirCreacionEdan(context, modo);
+                if (creado && mounted) {
                   _localidadesTabKey.currentState?.refresh();
                 }
               },

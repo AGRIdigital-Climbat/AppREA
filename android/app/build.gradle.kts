@@ -24,7 +24,7 @@ android {
 
     defaultConfig {
         applicationId = "net.climbat.rea"
-        minSdk = 28
+        minSdk = 26
         targetSdk = 36
         versionCode = flutter.versionCode
         versionName = flutter.versionName

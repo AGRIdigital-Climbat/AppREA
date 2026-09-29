@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
@@ -148,6 +149,50 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
 
     setState(() => _subiendo = true);
 
+    bool procederConSubida = false;
+
+    try {
+      final bytes = await _selectedFile!.readAsBytes();
+      if (bytes.length > 20 * 1024 * 1024) {
+        procederConSubida = await _dialogAdvertencia(
+          titulo: 'PDF mayor a 20 MB',
+          mensaje: 'El documento supera el límite de validación de firma (20 MB). '
+              'Se subirá sin poder validar la firma digital.',
+          labelConfirmar: 'Subir de todos modos',
+        );
+      } else {
+        try {
+          final resultado =
+              await ApiService.instance.validarPdfFirma(base64Encode(bytes));
+          procederConSubida = await _dialogResultadoFirma(resultado);
+        } catch (e) {
+          procederConSubida = await _dialogAdvertencia(
+            titulo: 'No se pudo validar la firma',
+            mensaje:
+                'No se pudo validar la firma digital: ${ApiService.traducirError(e)}. '
+                '¿Deseas subir el documento de todos modos?',
+            labelConfirmar: 'Subir igualmente',
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al preparar el archivo: ${ApiService.traducirError(e)}'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+      if (mounted) setState(() => _subiendo = false);
+      return;
+    }
+
+    if (!procederConSubida) {
+      if (mounted) setState(() => _subiendo = false);
+      return;
+    }
+
     try {
       final fechaDocumento = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
@@ -186,6 +231,103 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
     } finally {
       if (mounted) setState(() => _subiendo = false);
     }
+  }
+
+  Future<bool> _dialogAdvertencia({
+    required String titulo,
+    required String mensaje,
+    required String labelConfirmar,
+  }) async {
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: AppColors.pending, size: 48),
+        title: Text(titulo),
+        content: Text(mensaje),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: Text(labelConfirmar),
+          ),
+        ],
+      ),
+    );
+    return confirmado ?? false;
+  }
+
+  Future<bool> _dialogResultadoFirma(Map<String, dynamic> resultado) async {
+    final tipoRespuesta = resultado['tipoRespuesta']?.toString() ?? '';
+    final tieneFirma = tipoRespuesta == 'Exito';
+    final cantidadFirmas = (resultado['cantidad_firmas'] as num?)?.toInt() ?? 0;
+    final mensaje = resultado['mensaje']?.toString() ?? '';
+
+    String firmante = '';
+    final firmas = resultado['firmas'];
+    if (firmas is List && firmas.isNotEmpty && firmas.first is Map) {
+      final certificado = (firmas.first as Map)['certificado'];
+      if (certificado is Map) {
+        firmante = certificado['nombreSignatario']?.toString() ?? '';
+      }
+    }
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          tieneFirma ? Icons.verified_user : Icons.warning_amber_rounded,
+          color: tieneFirma ? AppColors.aprobado : AppColors.pending,
+          size: 48,
+        ),
+        title: Text(tieneFirma ? 'PDF con firma digital' : 'PDF sin firma digital'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              mensaje.isNotEmpty
+                  ? mensaje
+                  : tieneFirma
+                      ? '$cantidadFirmas firma(s) digital(es) identificada(s).'
+                      : 'El documento no contiene firma digital válida.',
+            ),
+            if (firmante.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Firmado por: $firmante'),
+            ],
+            const SizedBox(height: 12),
+            Text(
+              tieneFirma
+                  ? 'Puedes subir el documento.'
+                  : 'Puedes subir el documento de todos modos.',
+              style: TextStyle(
+                fontSize: 13,
+                color: tieneFirma ? AppColors.aprobado : AppColors.pending,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: tieneFirma ? AppColors.aprobado : AppColors.pending,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Subir'),
+          ),
+        ],
+      ),
+    );
+    return confirmado ?? false;
   }
 
   @override

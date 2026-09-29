@@ -83,8 +83,8 @@ void main() {
   // ─────────────────────────────────────────────────────
   // _proteccionApi() retorna vacío (endpoints dedicados)
   // ─────────────────────────────────────────────────────
-  group('_proteccionApi() retorna vacío', () {
-    test('localidad con 8 grupos con datos → proteccionApi vacío', () {
+  group('proteccion dentro del payload de /documento', () {
+    test('localidad con 8 grupos con datos → proteccion con los 8', () {
       final loc = EdanLocalidad(
         proteccion: List.generate(
           8,
@@ -98,7 +98,8 @@ void main() {
       );
       final json = loc.toApiJson();
       final proteccion = json['proteccion'] as List;
-      expect(proteccion, isEmpty);
+      expect(proteccion.length, 8,
+          reason: '/documento es la via real de subida: debe llevar proteccion');
     });
 
     test('localidad sin grupos → proteccionApi vacío', () {
@@ -298,8 +299,8 @@ void main() {
       );
 
       final apiJson = loc.toApiJson();
-      expect((apiJson['proteccion'] as List), isEmpty,
-          reason: 'JSON principal NO incluye proteccion');
+      expect((apiJson['proteccion'] as List).length, 3,
+          reason: '/documento lleva los grupos con datos (los vacíos se filtran)');
 
       final dedicados = loc.proteccionParaEndpointDedicado();
       expect(dedicados.length, 3,

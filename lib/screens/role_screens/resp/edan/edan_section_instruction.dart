@@ -8,6 +8,7 @@ class EdanSeccionInstruction extends StatelessWidget {
   final IconData icono;
   final String? estadoEtiqueta;
   final bool completada;
+  final VoidCallback? onAyuda;
 
   const EdanSeccionInstruction({
     super.key,
@@ -16,6 +17,7 @@ class EdanSeccionInstruction extends StatelessWidget {
     required this.icono,
     this.estadoEtiqueta,
     this.completada = false,
+    this.onAyuda,
   });
 
   @override
@@ -29,26 +31,32 @@ class EdanSeccionInstruction extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icono, color: color, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    titulo,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: color,
-                    ),
+          // Primera fila: icono + título.
+          Row(
+            children: [
+              Icon(icono, color: color, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  titulo,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: color,
                   ),
                 ),
-                if (estadoEtiqueta != null) ...[
-                  const SizedBox(width: 8),
+              ),
+            ],
+          ),
+          // Segunda fila: estado a la izquierda y ayuda a la derecha.
+          if (estadoEtiqueta != null || onAyuda != null) ...[
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                if (estadoEtiqueta != null)
                   Container(
                     padding: const EdgeInsets.symmetric(
                         horizontal: 8, vertical: 3),
@@ -67,10 +75,42 @@ class EdanSeccionInstruction extends StatelessWidget {
                       ),
                     ),
                   ),
-                ],
+                const Spacer(),
+                if (onAyuda != null)
+                  Material(
+                    color: const Color(0xFF2563EB),
+                    borderRadius: BorderRadius.circular(20),
+                    elevation: 2,
+                    shadowColor:
+                        const Color(0xFF2563EB).withValues(alpha: 0.45),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(20),
+                      onTap: onAyuda,
+                      child: const Padding(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.help_outline,
+                                color: Colors.white, size: 16),
+                            SizedBox(width: 6),
+                            Text(
+                              'Ayuda',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
-          ),
+          ],
         ],
       ),
     );

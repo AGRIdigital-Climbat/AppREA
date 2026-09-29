@@ -21,6 +21,116 @@ class EdanLocalidadesEnvioV2Service {
 
   final DatabaseHelper _db;
 
+  /// Fuente de verdad única para los flags `imp_*` de un modelo: la tabla
+  /// `localidad_secciones_activas` en SQLite. Sobreescribe los flags del
+  /// [localidad] con el estado actual de las secciones activas (misma lógica
+  /// que [EdanDocumentoService.construirDocumento], el wizard y la vista previa
+  /// RESP). Si no hay idLocal o no hay secciones activas, recalcula los flags
+  /// desde los datos ya cargados en el modelo.
+  ///
+  /// Con [unionConGuardados]=true (items de Inicio/Reportes y del listado UGR)
+  /// los flags GRUESOS del modelo (los que guarda page01 en `datos_json`) se
+  /// conservan en unión con los derivados de secciones activas: así el badge
+  /// refleja lo marcado en page01 aunque la tabla de secciones activas no lo
+  /// tenga (p. ej. por un pull de una versión vieja). La unión también se
+  /// conserva en el fallback (sin idLocal o sin secciones activas): se
+  /// recalculan los flags desde los datos del modelo y se mantienen en OR los
+  /// gruesos previos (server/doc). La vista previa y el JSON usan el default
+  /// (false) para seguir siendo 1:1.
+  Future<void> aplicarFlagsDesdeSeccionesActivas(
+    EdanLocalidad localidad, {
+    bool unionConGuardados = false,
+  }) async {
+    final base = unionConGuardados
+        ? {
+            'imp_poblacion': localidad.impPoblacion,
+            'imp_salud': localidad.impSalud,
+            'imp_infraestructura': localidad.impInfraestructura,
+            'imp_servicios': localidad.impServicios,
+            'imp_educacion': localidad.impEducacion,
+            'imp_vivienda': localidad.impVivienda,
+            'imp_agropecuario': localidad.impAgropecuario,
+            'imp_proteccion': localidad.impProteccion,
+            'imp_necesidades': localidad.impNecesidades,
+          }
+        : const <String, bool>{};
+
+    final idLocal = localidad.idLocal;
+    if (idLocal == null || idLocal.isEmpty) {
+      _aplicarUnionDesdeDatos(localidad, base);
+      return;
+    }
+    final activas = await _db.leerSeccionesActivas(idLocal);
+    if (activas.isEmpty) {
+      _aplicarUnionDesdeDatos(localidad, base);
+      return;
+    }
+    final flags = EdanSeccionesRegistry.construirFlagsDesdeActivas(activas);
+    localidad
+      ..impImpactoPoblacion = flags['imp_impacto_poblacion'] ?? false
+      ..impPrimeraRespuesta = flags['imp_primera_respuesta'] ?? false
+      ..impSaludEstablecimientos = flags['imp_salud_establecimientos'] ?? false
+      ..impNecesidadSalud = flags['imp_necesidad_salud'] ?? false
+      ..impDanosViales = flags['imp_danos_viales'] ?? false
+      ..impDanosInfraPublica = flags['imp_danos_infra_publica'] ?? false
+      ..impServiciosBasicos = flags['imp_servicios_basicos'] ?? false
+      ..impUnidadesEducativas = flags['imp_unidades_educativas'] ?? false
+      ..impDanosVivienda = flags['imp_danos_vivienda'] ?? false
+      ..impDanosAgricultura = flags['imp_danos_agricultura'] ?? false
+      ..impDanosPecuarios = flags['imp_danos_pecuarios'] ?? false
+      ..impInfraProductiva = flags['imp_infra_productiva'] ?? false
+      ..impProteccion = flags['imp_proteccion'] ?? false
+      ..impNecesidadHumanitaria = flags['imp_necesidad_humanitaria'] ?? false
+      ..impPoblacion =
+          (flags['imp_poblacion'] ?? false) || (base['imp_poblacion'] ?? false)
+      ..impSalud =
+          (flags['imp_salud'] ?? false) || (base['imp_salud'] ?? false)
+      ..impInfraestructura = (flags['imp_infraestructura'] ?? false) ||
+          (base['imp_infraestructura'] ?? false)
+      ..impServicios = (flags['imp_servicios'] ?? false) ||
+          (base['imp_servicios'] ?? false)
+      ..impEducacion = (flags['imp_educacion'] ?? false) ||
+          (base['imp_educacion'] ?? false)
+      ..impVivienda = (flags['imp_vivienda'] ?? false) ||
+          (base['imp_vivienda'] ?? false)
+      ..impAgropecuario = (flags['imp_agropecuario'] ?? false) ||
+          (base['imp_agropecuario'] ?? false)
+      ..impProteccion = (flags['imp_proteccion'] ?? false) ||
+          (base['imp_proteccion'] ?? false)
+      ..impNecesidades = (flags['imp_necesidades'] ?? false) ||
+          (base['imp_necesidades'] ?? false);
+  }
+
+  /// Fallback de [aplicarFlagsDesdeSeccionesActivas] cuando no hay idLocal o
+  /// no hay secciones activas: recalcula los flags desde los datos ya cargados
+  /// en el modelo y, si se pidió unión, conserva los gruesos previos (los que
+  /// trae el server/doc, equivalentes a page01) en OR con los derivados.
+  void _aplicarUnionDesdeDatos(
+    EdanLocalidad localidad,
+    Map<String, bool> base,
+  ) {
+    localidad.recalcularFlagsImpacto();
+    if (base.isEmpty) return;
+    localidad
+      ..impPoblacion =
+          localidad.impPoblacion || (base['imp_poblacion'] ?? false)
+      ..impSalud = localidad.impSalud || (base['imp_salud'] ?? false)
+      ..impInfraestructura = localidad.impInfraestructura ||
+          (base['imp_infraestructura'] ?? false)
+      ..impServicios =
+          localidad.impServicios || (base['imp_servicios'] ?? false)
+      ..impEducacion =
+          localidad.impEducacion || (base['imp_educacion'] ?? false)
+      ..impVivienda =
+          localidad.impVivienda || (base['imp_vivienda'] ?? false)
+      ..impAgropecuario =
+          localidad.impAgropecuario || (base['imp_agropecuario'] ?? false)
+      ..impProteccion =
+          localidad.impProteccion || (base['imp_proteccion'] ?? false)
+      ..impNecesidades =
+          localidad.impNecesidades || (base['imp_necesidades'] ?? false);
+  }
+
   /// Persiste a sus tablas (Modelo A) las secciones indicadas por [rutas].
   ///
   /// - [marcarEditado=true] (default): marca `editado=1` (candidatas a envío).
@@ -211,11 +321,12 @@ class EdanLocalidadesEnvioV2Service {
   /// Los flags `imp_*` vienen de `datos_json` (cabecera); este método
   /// rellena los arrays (ej. `danosViales`, `impactoPoblacion`) desde
   /// las tablas `seccion_*`.
-  Future<void> cargarSeccionesDesdeSQLite(EdanLocalidad localidad) async {
+  Future<void> cargarSeccionesDesdeSQLite(EdanLocalidad localidad, {List<String>? soloLasActivas}) async {
     final idLocal = localidad.idLocal;
     if (idLocal == null || idLocal.isEmpty) return;
 
     for (final desc in EdanSeccionesRegistry.secciones) {
+      if (soloLasActivas != null && !soloLasActivas.contains(desc.rutaV2)) continue;
       try {
         var filas = await _db.leerFilasSeccion(desc.tablaSqlite, idLocal);
         if (filas.isEmpty) continue;

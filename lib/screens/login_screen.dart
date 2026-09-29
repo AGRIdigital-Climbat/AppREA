@@ -107,14 +107,14 @@ class _LoginScreenState extends State<LoginScreen> {
                   ),
                   const SizedBox(height: 48),
                   CustomTextField(
-                    label: 'Carnet de identidad',
-                    hint: 'Ingrese su carnet',
+                    label: 'Carnet de identidad o usuario',
+                    hint: 'Ingrese su carnet o usuario',
                     controller: _usuarioController,
                     keyboardType: TextInputType.text,
                     prefixIcon: const Icon(Icons.person_outline),
                     validator: (value) {
                       if (value == null || value.isEmpty) {
-                        return 'Ingrese su carnet';
+                        return 'Ingrese su carnet o usuario';
                       }
                       return null;
                     },

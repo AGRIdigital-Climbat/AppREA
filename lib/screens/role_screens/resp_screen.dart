@@ -10,11 +10,10 @@ import '../../screens/sync_debug_screen.dart';
 import '../../widgets/perfil_tab.dart';
 import '../../widgets/asistente_ia.dart';
 import 'resp/resp_dashboard_tab.dart';
-import 'resp/edan/edan_form_wizard.dart';
+import 'resp/edan/edan_ia_elegir_creacion.dart';
 import 'resp/resp_edan_localidad_tab.dart';
 import 'resp/resp_guia_tab.dart';
 import 'resp/resp_mapa_tab.dart';
-import 'ugr/ugr_route.dart';
 
 class RespScreen extends StatefulWidget {
   const RespScreen({super.key});
@@ -366,40 +365,10 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   Widget? _buildReporteFab() {
     switch (_selectedIndex) {
       case 0:
-        return FloatingActionButton(
-          onPressed: () async {
-            final exito = await Navigator.of(context).push<bool>(
-              ugrRoute(EdanFormWizard(), palette: Palettes.rea),
-            );
-            if (exito != true || !mounted) return;
-            _dashboardTabKey.currentState?.refresh();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Reporte guardado correctamente.'),
-                backgroundColor: AppColors.completed,
-              ),
-            );
-          },
-          tooltip: 'Nuevo reporte',
-          backgroundColor: PaletteScope.of(context).primary,
-          child: const Icon(Icons.add, color: Colors.white),
-        );
       case 1:
+        // Inicio y Reportes: el `+` abre el diálogo para elegir wizard o IA.
         return FloatingActionButton(
-          onPressed: () async {
-            final exito = await Navigator.of(context).push<bool>(
-              ugrRoute(EdanFormWizard(), palette: Palettes.rea),
-            );
-            if (exito != true || !mounted) return;
-            _edanTabKey.currentState?.refresh();
-            _dashboardTabKey.currentState?.refresh();
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Reporte guardado correctamente.'),
-                backgroundColor: AppColors.completed,
-              ),
-            );
-          },
+          onPressed: () => _crearFicha(_selectedIndex),
           tooltip: 'Nuevo reporte',
           backgroundColor: PaletteScope.of(context).primary,
           child: const Icon(Icons.add, color: Colors.white),
@@ -407,6 +376,25 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       default:
         return null;
     }
+  }
+
+  /// Abre el diálogo de creación y, según el modo elegido, el wizard o el
+  /// asistente con IA. Solo refresca si la ficha quedó guardada.
+  Future<void> _crearFicha(int tabActual) async {
+    final modo = await pedirModoCreacionEdan(context);
+    if (modo == null || !mounted) return;
+
+    final exito = await abrirCreacionEdan(context, modo);
+    if (!exito || !mounted) return;
+
+    _dashboardTabKey.currentState?.refresh();
+    _edanTabKey.currentState?.refresh();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Reporte guardado correctamente.'),
+        backgroundColor: AppColors.completed,
+      ),
+    );
   }
 
   String _getTabTitle() {

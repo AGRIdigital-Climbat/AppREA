@@ -5,8 +5,8 @@ import 'package:rea/models/edan.dart';
 import 'package:rea/models/id_seccion_helper.dart';
 
 void main() {
-  group('API flow: toApiJson() sin fotografia (anti-duplicados)', () {
-    test('EdanEstablecimientoSalud.toApiJson() NO incluye fotografia', () {
+  group('API flow: toApiJson() incluye fotografia (contrato /documento)', () {
+    test('EdanEstablecimientoSalud.toApiJson() incluye fotografia', () {
       final item = EdanEstablecimientoSalud(
         idSeccion: generarIdSeccion('sv'),
         nombreEstablecimiento: 'Hospital Test',
@@ -17,14 +17,15 @@ void main() {
         coordenadaLon: -68.1,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse,
-          reason: 'toApiJson() debe omitir fotografia');
+      expect(json.containsKey('fotografia'), isTrue,
+          reason: 'toApiJson() es el payload de /documento y debe llevar la foto');
+      expect(json['fotografia'], equals('/uploads/existing.jpg'));
       expect(json['coordenada_lat'], equals(-16.5));
       expect(json['coordenada_lon'], equals(-68.1));
       expect(json['id_seccion'], isNotNull);
     });
 
-    test('EdanDanoVial.toApiJson() NO incluye fotografia', () {
+    test('EdanDanoVial.toApiJson() incluye fotografia', () {
       final item = EdanDanoVial(
         idSeccion: generarIdSeccion('dv'),
         viaPuente: 'Vía',
@@ -36,13 +37,13 @@ void main() {
         coordenadaLon: -67.8,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['via'], isTrue);
       expect(json['puente'], isFalse);
       expect(json['coordenada_lat'], equals(-16.3));
     });
 
-    test('EdanDanoInfraPublica.toApiJson() NO incluye fotografia', () {
+    test('EdanDanoInfraPublica.toApiJson() incluye fotografia', () {
       final item = EdanDanoInfraPublica(
         idSeccion: generarIdSeccion('di'),
         comunidad: 'Barrio Test',
@@ -52,11 +53,11 @@ void main() {
         coordenadaLon: -67.7,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['tipo_estructura'], equals('Edificio público'));
     });
 
-    test('EdanServicioBasicoDetalle.toApiJson() NO incluye fotografia', () {
+    test('EdanServicioBasicoDetalle.toApiJson() incluye fotografia', () {
       final item = EdanServicioBasicoDetalle(
         idSeccion: generarIdSeccion('sb'),
         tipo: 'energia_electrica',
@@ -66,11 +67,11 @@ void main() {
         coordenadaLon: -67.3,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['tipo'], equals('energia_electrica'));
     });
 
-    test('EdanDanoUnidadEducativa.toApiJson() NO incluye fotografia', () {
+    test('EdanDanoUnidadEducativa.toApiJson() incluye fotografia', () {
       final item = EdanDanoUnidadEducativa(
         idSeccion: generarIdSeccion('ue'),
         nombreEstablecimiento: 'UE Bolivia',
@@ -79,11 +80,11 @@ void main() {
         coordenadaLon: -67.2,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['nombre_establecimiento'], equals('UE Bolivia'));
     });
 
-    test('EdanDanoVivienda.toApiJson() NO incluye fotografia', () {
+    test('EdanDanoVivienda.toApiJson() incluye fotografia', () {
       final item = EdanDanoVivienda(
         idSeccion: generarIdSeccion('vv'),
         comunidad: 'Barrio Test',
@@ -94,12 +95,12 @@ void main() {
         coordenadaLon: -67.4,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['dano_parcial'], equals(5));
       expect(json['dano_total'], equals(2));
     });
 
-    test('EdanDanoAgricultura.toApiJson() NO incluye fotografia', () {
+    test('EdanDanoAgricultura.toApiJson() incluye fotografia', () {
       final item = EdanDanoAgricultura(
         idSeccion: generarIdSeccion('da'),
         tipoCultivo: 'Papa',
@@ -109,11 +110,11 @@ void main() {
         coordenadaLon: -67.5,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['tipo_cultivo'], equals('Papa'));
     });
 
-    test('EdanDanoPecuario.toApiJson() NO incluye fotografia', () {
+    test('EdanDanoPecuario.toApiJson() incluye fotografia', () {
       final item = EdanDanoPecuario(
         idSeccion: generarIdSeccion('dp'),
         especie: 'Bovino',
@@ -123,11 +124,11 @@ void main() {
         coordenadaLon: -67.9,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['especie'], equals('Bovino'));
     });
 
-    test('EdanInfraProductiva.toApiJson() NO incluye fotografia', () {
+    test('EdanInfraProductiva.toApiJson() incluye fotografia', () {
       final item = EdanInfraProductiva(
         idSeccion: generarIdSeccion('ip'),
         tipo: 'Taller',
@@ -138,7 +139,7 @@ void main() {
         coordenadaLon: -67.1,
       );
       final json = item.toApiJson();
-      expect(json.containsKey('fotografia'), isFalse);
+      expect(json.containsKey('fotografia'), isTrue);
       expect(json['tipo'], equals('Taller'));
     });
   });
@@ -160,8 +161,8 @@ void main() {
       expect(fotoData['coordenada_lat'], equals(-16.999),
           reason: 'Coordenadas de la foto deben sobreescribir las de la sección');
       expect(fotoData['coordenada_lon'], equals(-68.999));
-      expect(fotoData.containsKey('fotografia'), isFalse,
-          reason: 'toFotoData no incluye fotografia (el archivo se sube por separado)');
+      expect(fotoData.containsKey('fotografia'), isTrue,
+          reason: 'toFotoData hereda toApiJson(): lleva la foto de la sección');
       expect(fotoData['nombre_establecimiento'], equals('Hospital'));
     });
 
@@ -559,10 +560,10 @@ void main() {
       expect((json['danos_agricultura'] as List).length, equals(1));
       expect((json['danos_pecuarios'] as List).length, equals(1));
       expect((json['infra_productiva'] as List).length, equals(1));
-      expect((json['proteccion'] as List), isEmpty,
-          reason: 'proteccion se envía por endpoints dedicados');
+      expect((json['proteccion'] as List), isNotEmpty,
+          reason: '/documento incluye proteccion: construccion de foto la sube desde aca');
 
-      // Verificar que NINGUNA sección tiene fotografia
+      // Cada seccion 1:N lleva su fotografia en el payload de /documento
       for (final seccionKey in [
         'establecimientos_salud', 'danos_viales', 'danos_infra_publica',
         'servicios_basicos', 'unidades_educativas', 'danos_vivienda',
@@ -570,8 +571,8 @@ void main() {
       ]) {
         final items = json[seccionKey] as List;
         for (final item in items) {
-          expect((item as Map).containsKey('fotografia'), isFalse,
-              reason: '$seccionKey no debe incluir fotografia');
+          expect((item as Map).containsKey('fotografia'), isTrue,
+              reason: '$seccionKey debe incluir fotografia');
           expect(item.containsKey('coordenada_lat'), isTrue,
               reason: '$seccionKey debe incluir coordenada_lat');
           expect(item.containsKey('coordenada_lon'), isTrue,
@@ -948,12 +949,12 @@ void main() {
       expect(json['dano_parcial'], true);
     });
 
-    test('toApiJson() NO incluye fotografia', () {
+    test('toApiJson() incluye fotografia', () {
       final item = EdanServicioBasicoDetalle(
         tipo: 'agua_potable',
         danoParcial: true,
       );
-      expect(item.toApiJson().containsKey('fotografia'), isFalse);
+      expect(item.toApiJson().containsKey('fotografia'), isTrue);
     });
 
     test('toFotoData() override coordenadas con las de la foto', () {
@@ -1158,7 +1159,7 @@ void main() {
         final jsonStr = jsonEncode(json);
         expect(jsonStr.isNotEmpty, isTrue);
 
-        // Verificar que NINGUNA sección tiene fotografia
+        // Cada seccion 1:N lleva su fotografia en el payload de /documento
         for (final key in [
           'establecimientos_salud', 'danos_viales', 'danos_infra_publica',
           'servicios_basicos', 'unidades_educativas', 'danos_vivienda',
@@ -1166,8 +1167,8 @@ void main() {
         ]) {
           final items = json[key] as List;
           for (final item in items) {
-            expect((item as Map).containsKey('fotografia'), isFalse,
-                reason: 'Localidad $i: $key no debe incluir fotografia');
+            expect((item as Map).containsKey('fotografia'), isTrue,
+                reason: 'Localidad $i: $key debe incluir fotografia');
           }
         }
 

@@ -95,7 +95,7 @@ class MotorIA {
   static final MotorIA instance = MotorIA._();
   MotorIA._();
 
-  static String get _base => ApiConfig.motorIaBaseUrl;
+  static String get _base => ApiConfig.ragBaseUrl;
 
   static const Map<String, String> _headers = {
     'Accept': 'application/json',

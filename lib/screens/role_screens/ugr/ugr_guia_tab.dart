@@ -6,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../config/theme.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/motor_ia_service.dart';
-import '../../../widgets/asistente_ia.dart';
+import '../../../providers/asistente_ia_provider.dart';
+import '../../../widgets/asistente_ia/asistente_ia_bottom_sheet.dart';
 
 class UgrGuiaTab extends StatefulWidget {
   const UgrGuiaTab({super.key});
@@ -83,7 +84,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       numero: '01',
       titulo: 'Datos generales',
       subtitulo: 'Ubicación, alcalde, fechas y localidades',
-      queLlenar: 'Identifica el lugar y el responsable del municipio para la '
+      queLlenar:
+          'Identifica el lugar y el responsable del municipio para la '
           'coordinación de la respuesta.',
       pasos: [
         'Departamento, provincia y municipio',
@@ -91,10 +93,12 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Nombre del alcalde y teléfono de contacto',
         'Fecha de llenado, fecha del evento y hora (0-24h)',
       ],
-      consejo: 'La fecha de llenado es distinta a la fecha del evento. '
+      consejo:
+          'La fecha de llenado es distinta a la fecha del evento. '
           'La fecha del evento se obtiene preguntando a quienes estuvieron en '
           'el lugar.',
-      ejemplo: 'Cochabamba · Villa Tunari · Alcalde: Asterio Romero · '
+      ejemplo:
+          'Cochabamba · Villa Tunari · Alcalde: Asterio Romero · '
           'Llenado: 02-feb-2019 · Evento: 01-feb-2019, 10:00',
       obligatorio: true,
       icon: Icons.location_city,
@@ -110,12 +114,14 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Total de familias afectadas',
         'Total de familias damnificadas',
       ],
-      consejo: 'Este es uno de los datos MÁS IMPORTANTES del EDAN. '
+      consejo:
+          'Este es uno de los datos MÁS IMPORTANTES del EDAN. '
           'Todos los campos son obligatorios. '
           'Afectado = daños o pérdidas indirectas. Damnificado = daños '
           'directos, su vivienda quedó inhabitable. Lleva el listado de '
           'familias con el nº de integrantes para respaldar la ayuda.',
-      ejemplo: 'Población afectada: 100 · Familias afectadas: 20 · '
+      ejemplo:
+          'Población afectada: 100 · Familias afectadas: 20 · '
           'Familias damnificadas: 5',
       obligatorio: true,
       icon: Icons.groups,
@@ -132,10 +138,12 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Necesidades de primera respuesta: búsqueda, salvamento/rescate, '
             'evacuación',
       ],
-      consejo: 'Si hubo varios eventos, registra el que causó mayor daño. '
+      consejo:
+          'Si hubo varios eventos, registra el que causó mayor daño. '
           'Grupos etarios: niño 0-5, escolar 6-18, adulto 19-60, adulto mayor '
           '60+.',
-      ejemplo: 'Inundación · Fallecidos: 5 · Evacuación: 30 familias '
+      ejemplo:
+          'Inundación · Fallecidos: 5 · Evacuación: 30 familias '
           'requieren evacuar por aumento de caudal',
       obligatorio: true,
       icon: Icons.warning_amber_rounded,
@@ -145,7 +153,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       numero: '04',
       titulo: 'Impacto en la salud',
       subtitulo: 'Establecimientos de salud afectados',
-      queLlenar: 'Registra el daño en servicios de salud y la atención '
+      queLlenar:
+          'Registra el daño en servicios de salud y la atención '
           'necesaria.',
       pasos: [
         'Nombre del establecimiento, localidad y nivel de atención (1°, 2° o '
@@ -154,10 +163,12 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Personal de salud afectado (médicos, enfermeras, otros)',
         'Necesidades: botiquín (incendio/inundación/sequía) y otras',
       ],
-      consejo: 'Daño parcial: con refacciones sigue funcionando. Daño total: '
+      consejo:
+          'Daño parcial: con refacciones sigue funcionando. Daño total: '
           'no puede funcionar. Anota en observaciones medicación específica '
           'para tratamientos crónicos.',
-      ejemplo: 'Centro de Salud Villa Tunari · Daño parcial · 2 médicos, '
+      ejemplo:
+          'Centro de Salud Villa Tunari · Daño parcial · 2 médicos, '
           '3 enfermeras · Botiquín inundación: 45 personas requieren atención',
       obligatorio: true,
       icon: Icons.local_hospital,
@@ -172,9 +183,11 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Vía o puente dañado y su ubicación',
         'Estructura pública afectada (tipo y estado)',
       ],
-      consejo: 'Adjunta fotos de cada estructura dañada para respaldar el '
+      consejo:
+          'Adjunta fotos de cada estructura dañada para respaldar el '
           'EDAN.',
-      ejemplo: 'Puente sobre el río Colorado · Colapso total · Comunidad '
+      ejemplo:
+          'Puente sobre el río Colorado · Colapso total · Comunidad '
           'Villa Nueva',
       obligatorio: true,
       icon: Icons.construction,
@@ -192,7 +205,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Comunicaciones',
       ],
       consejo: 'Registra por localidad si cada servicio está afectado.',
-      ejemplo: 'Comunidad Villa Nueva: sin agua potable y sin energía '
+      ejemplo:
+          'Comunidad Villa Nueva: sin agua potable y sin energía '
           'eléctrica',
       obligatorio: true,
       icon: Icons.water_drop,
@@ -208,9 +222,11 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Estudiantes y profesores afectados',
         'Estado del establecimiento',
       ],
-      consejo: 'Verifica si las clases fueron suspendidas y cuántos estudiantes '
+      consejo:
+          'Verifica si las clases fueron suspendidas y cuántos estudiantes '
           'quedaron sin atención.',
-      ejemplo: 'Unidad Educativa 6 de Agosto · 120 estudiantes · '
+      ejemplo:
+          'Unidad Educativa 6 de Agosto · 120 estudiantes · '
           'Infraestructura dañada',
       obligatorio: true,
       icon: Icons.school,
@@ -221,11 +237,9 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       titulo: 'Impacto en viviendas',
       subtitulo: 'Viviendas afectadas y destruidas',
       queLlenar: 'Registra el estado de las viviendas por localidad.',
-      pasos: [
-        'N° de viviendas afectadas',
-        'N° de viviendas destruidas',
-      ],
-      consejo: 'Confirma con la autoridad local y el listado de familias '
+      pasos: ['N° de viviendas afectadas', 'N° de viviendas destruidas'],
+      consejo:
+          'Confirma con la autoridad local y el listado de familias '
           'damnificadas.',
       ejemplo: '8 viviendas afectadas · 3 destruidas en el barrio El Puente',
       obligatorio: true,
@@ -242,7 +256,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Animales (especie y cantidad)',
         'Infraestructura agropecuaria dañada',
       ],
-      consejo: 'Esto es clave para los planes de rehabilitación y '
+      consejo:
+          'Esto es clave para los planes de rehabilitación y '
           'reconstrucción.',
       ejemplo: '5 ha de maíz afectadas · 20 cabezas de ganado perdidas',
       obligatorio: true,
@@ -287,11 +302,9 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       titulo: 'Responsable del formulario',
       subtitulo: 'Quién llena y respalda el EDAN',
       queLlenar: 'Identifica al responsable que respalda la información.',
-      pasos: [
-        'Nombre del responsable',
-        'Teléfono de contacto',
-      ],
-      consejo: 'El cargo ya no bloquea el envío; basta con el nombre. Es quien '
+      pasos: ['Nombre del responsable', 'Teléfono de contacto'],
+      consejo:
+          'El cargo ya no bloquea el envío; basta con el nombre. Es quien '
           'responde por la veracidad de los datos.',
       ejemplo: 'Nombre: Juan Pérez · Teléfono: 71234567',
       obligatorio: true,
@@ -305,7 +318,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       numero: 'L1',
       titulo: 'Ver localidades',
       subtitulo: 'Pestaña Localidades — Vista por defecto: Sin consolidar',
-      queLlenar: 'Observa todas las localidades reportadas por los líderes '
+      queLlenar:
+          'Observa todas las localidades reportadas por los líderes '
           'de tu municipio, agrupadas por tipo de evento.',
       pasos: [
         'En la pestaña Localidades ves las localidades "Sin consolidar"',
@@ -313,9 +327,11 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Toca el chip "Consolidadas" para ver las ya agrupadas en un EDAN',
         'Usa la barra de búsqueda para filtrar por nombre, tipo o responsable',
       ],
-      consejo: 'Las localidades se ordenan por fecha más reciente primero. '
+      consejo:
+          'Las localidades se ordenan por fecha más reciente primero. '
           'Cada tarjeta muestra el estado con un badge de color.',
-      ejemplo: 'Inundación (3) → Comunidad X (Borrador) · Barrio Y (Enviado) · Zona Z (Aprobado)',
+      ejemplo:
+          'Inundación (3) → Comunidad X (Borrador) · Barrio Y (Enviado) · Zona Z (Aprobado)',
       obligatorio: false,
       icon: Icons.location_on_outlined,
       color: AppColors.pending,
@@ -331,9 +347,11 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Si está "En revisión", aprueba o rechaza con los botones',
         'Las aprobadas quedan listas para consolidar',
       ],
-      consejo: 'Solo puedes cambiar estado desde estados específicos. '
+      consejo:
+          'Solo puedes cambiar estado desde estados específicos. '
           'El badge de color te indica el estado actual.',
-      ejemplo: 'Enviado UGR → En revisión (automático) → Aprobado UGR → Lista para consolidar',
+      ejemplo:
+          'Enviado UGR → En revisión (automático) → Aprobado UGR → Lista para consolidar',
       obligatorio: false,
       icon: Icons.how_to_reg,
       color: AppColors.primary,
@@ -342,7 +360,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       numero: 'L3',
       titulo: 'Consolidar localidades',
       subtitulo: 'Agrupa localidades aprobadas en un EDAN municipal',
-      queLlenar: 'Selecciona localidades del mismo tipo de evento '
+      queLlenar:
+          'Selecciona localidades del mismo tipo de evento '
           'y consolídalas en un solo EDAN.',
       pasos: [
         'Presiona el ícono de capas en la vista "Sin consolidar"',
@@ -350,7 +369,8 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         'Deben ser del mismo tipo de evento y estado aprobado',
         'Confirma → se crea el EDAN con código automático',
       ],
-      consejo: 'Las localidades consolidadas pasan a la vista "Consolidadas". '
+      consejo:
+          'Las localidades consolidadas pasan a la vista "Consolidadas". '
           'El EDAN se crea con código formato: municipio/año/secuencia.',
       ejemplo: '3 localidades aprobadas de Inundación → EDAN 70101/2026/001',
       obligatorio: false,
@@ -387,7 +407,9 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       final rutas = prefs.getStringList(_prefsKey) ?? const <String>[];
       for (final r in rutas) {
         if (!File(r).existsSync()) continue;
-        final id = int.tryParse(r.split(RegExp(r'[\\/]')).last.split('_').first);
+        final id = int.tryParse(
+          r.split(RegExp(r'[\\/]')).last.split('_').first,
+        );
         if (id == null || !mounted) continue;
         setState(() => _rutasDescargados[id] = r);
       }
@@ -397,10 +419,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
   Future<void> _guardarDescargados() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setStringList(
-        _prefsKey,
-        _rutasDescargados.values.toList(),
-      );
+      await prefs.setStringList(_prefsKey, _rutasDescargados.values.toList());
     } catch (_) {}
   }
 
@@ -433,8 +452,10 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       return;
     }
     try {
-      final docs = await MotorIA.instance
-          .listarDocumentos(tipoId: _tipoSeleccionado, q: _busquedaCtrl.text);
+      final docs = await MotorIA.instance.listarDocumentos(
+        tipoId: _tipoSeleccionado,
+        q: _busquedaCtrl.text,
+      );
       if (mounted) {
         setState(() {
           _documentos = docs;
@@ -466,8 +487,10 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
     }
     setState(() => _descargando.add(doc.id));
     try {
-      final path = await MotorIA.instance
-          .descargarDocumento(doc.id, titulo: doc.titulo);
+      final path = await MotorIA.instance.descargarDocumento(
+        doc.id,
+        titulo: doc.titulo,
+      );
       if (!mounted) return;
       setState(() => _rutasDescargados[doc.id] = path);
       _guardarDescargados();
@@ -522,10 +545,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
           _buildTabBar(primary),
           Expanded(
             child: TabBarView(
-              children: [
-                _buildGuiaList(primary),
-                _buildBiblioteca(primary),
-              ],
+              children: [_buildGuiaList(primary), _buildBiblioteca(primary)],
             ),
           ),
         ],
@@ -613,12 +633,21 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
           for (var i = 0; i < _secciones.length; i++)
             _animado(6 + i, _buildSeccionCard(_secciones[i])),
           const SizedBox(height: 16),
-          _animado(6 + _secciones.length, _Titulo('Gestión de Localidades', primary)),
+          _animado(
+            6 + _secciones.length,
+            _Titulo('Gestión de Localidades', primary),
+          ),
           const SizedBox(height: 8),
           for (var i = 0; i < _guiaLocalidades.length; i++)
-            _animado(7 + _secciones.length + i, _buildSeccionCard(_guiaLocalidades[i])),
+            _animado(
+              7 + _secciones.length + i,
+              _buildSeccionCard(_guiaLocalidades[i]),
+            ),
           const SizedBox(height: 6),
-          _animado(7 + _secciones.length + _guiaLocalidades.length, _buildAsistenteTeaser(primary)),
+          _animado(
+            7 + _secciones.length + _guiaLocalidades.length,
+            _buildAsistenteTeaser(primary),
+          ),
         ],
       ),
     );
@@ -749,9 +778,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         duration: const Duration(milliseconds: 250),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: activo
-              ? paso.color.withValues(alpha: 0.08)
-              : Colors.white,
+          color: activo ? paso.color.withValues(alpha: 0.08) : Colors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: activo ? paso.color : AppColors.divider,
@@ -830,7 +857,12 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
         const SizedBox(height: 8),
         _buildCheckGrupo(primary, 'En campo', Icons.hiking, _checkCampo),
         const SizedBox(height: 10),
-        _buildCheckGrupo(primary, 'Sin viajar (remoto)', Icons.smartphone, _checkRemoto),
+        _buildCheckGrupo(
+          primary,
+          'Sin viajar (remoto)',
+          Icons.smartphone,
+          _checkRemoto,
+        ),
       ],
     );
   }
@@ -967,10 +999,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
           'Sección ${s.numero} · ${s.subtitulo}',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
-          style: const TextStyle(
-            fontSize: 12,
-            color: AppColors.textSecondary,
-          ),
+          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
         ),
         children: [_buildSeccionContenido(s, primary)],
       ),
@@ -1101,7 +1130,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
     );
   }
 
-    Widget _buildAsistenteTeaser(Color primary) {
+  Widget _buildAsistenteTeaser(Color primary) {
     final accent = Palettes.edan.accent;
     return Container(
       width: double.infinity,
@@ -1138,7 +1167,15 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
             ),
           ),
           IconButton(
-            onPressed: () => showAsistenteIa(context),
+            onPressed: () {
+              final provider = AsistenteIAProvider();
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => AsistenteIABottomSheet(provider: provider),
+              );
+            },
             style: IconButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: primary,
@@ -1254,9 +1291,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
           fontWeight: FontWeight.w600,
           color: selected ? primary : AppColors.textPrimary,
         ),
-        side: BorderSide(
-          color: selected ? primary : AppColors.divider,
-        ),
+        side: BorderSide(color: selected ? primary : AppColors.divider),
         onSelected: (_) {
           setState(() => _tipoSeleccionado = tipoId);
           _cargarDocumentos();
@@ -1306,8 +1341,11 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       ),
       child: const Column(
         children: [
-          Icon(Icons.folder_off_outlined,
-              size: 32, color: AppColors.textSecondary),
+          Icon(
+            Icons.folder_off_outlined,
+            size: 32,
+            color: AppColors.textSecondary,
+          ),
           SizedBox(height: 8),
           Text(
             'No hay documentos para este tipo.',
@@ -1335,8 +1373,9 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: (yaDescargado ? AppColors.completed : primary)
-                  .withValues(alpha: 0.1),
+              color: (yaDescargado ? AppColors.completed : primary).withValues(
+                alpha: 0.1,
+              ),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
@@ -1378,7 +1417,9 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
               ? IconButton(
                   onPressed: () => _abrirDocumento(doc),
                   style: IconButton.styleFrom(
-                    backgroundColor: AppColors.completed.withValues(alpha: 0.12),
+                    backgroundColor: AppColors.completed.withValues(
+                      alpha: 0.12,
+                    ),
                     foregroundColor: AppColors.completed,
                   ),
                   tooltip: 'Abrir PDF',

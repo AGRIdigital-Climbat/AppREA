@@ -63,25 +63,41 @@ class EdanNavigationBar extends StatelessWidget {
             Expanded(
               flex: 2,
               child: isLastPage
-                  ? ElevatedButton.icon(
-                      onPressed: saving ? null : (onEnviar ?? onNext),
-                      icon: saving
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.white,
-                              ),
-                            )
-                          : const Icon(Icons.send, size: 18),
-                      label: Text(saving ? 'Guardando…' : 'Enviar'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor:
-                            isPreview ? const Color(0xFF4CAF50) : color,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    )
+                  ? (onEnviar != null
+                      ? ElevatedButton.icon(
+                          onPressed: saving ? null : onEnviar,
+                          icon: saving
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send, size: 18),
+                          label: Text(saving ? 'Guardando…' : 'Enviar'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor:
+                                isPreview ? const Color(0xFF4CAF50) : color,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        )
+                      : Tooltip(
+                          message: 'Faltan secciones por completar',
+                          child: ElevatedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(Icons.send, size: 18),
+                            label: const Text('Enviar'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.divider,
+                              foregroundColor: AppColors.textSecondary,
+                              disabledBackgroundColor: AppColors.divider,
+                              disabledForegroundColor: AppColors.textSecondary,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                          ),
+                        ))
                   : ElevatedButton.icon(
                       onPressed: saving ? null : onNext,
                       icon: const Icon(Icons.arrow_forward, size: 18),

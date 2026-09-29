@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_staggered_animations/flutter_staggered_animations.dart';
 import '../../../config/theme.dart';
-import '../../../widgets/asistente_ia.dart';
+import '../../../providers/asistente_ia_provider.dart';
+import '../../../widgets/asistente_ia/asistente_ia_bottom_sheet.dart';
 
 class RespGuiaTab extends StatefulWidget {
   const RespGuiaTab({super.key});
@@ -240,7 +241,9 @@ class _RespGuiaTabState extends State<RespGuiaTab>
               end: Alignment.bottomRight,
             ),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.pending.withValues(alpha: 0.35)),
+            border: Border.all(
+              color: AppColors.pending.withValues(alpha: 0.35),
+            ),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -340,7 +343,15 @@ class _RespGuiaTabState extends State<RespGuiaTab>
             ),
           ),
           IconButton(
-            onPressed: () => showAsistenteIa(context),
+            onPressed: () {
+              final provider = AsistenteIAProvider();
+              showModalBottomSheet(
+                context: context,
+                isScrollControlled: true,
+                backgroundColor: Colors.transparent,
+                builder: (_) => AsistenteIABottomSheet(provider: provider),
+              );
+            },
             style: IconButton.styleFrom(
               backgroundColor: Colors.white,
               foregroundColor: primary,

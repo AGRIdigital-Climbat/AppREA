@@ -2,7 +2,6 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 
 class PermissionService {
   static Future<bool> requestCameraPermission() async {
@@ -34,33 +33,6 @@ class PermissionService {
         permission == LocationPermission.whileInUse;
   }
 
-  static Future<bool> requestGalleryPermission() async {
-    if (Platform.isWindows) return true;
-    if (Platform.isAndroid) {
-      final androidInfo = await DeviceInfoPlugin().androidInfo;
-
-      if (androidInfo.version.sdkInt >= 33) {
-        final status = await Permission.photos.status;
-        if (status.isGranted || status.isLimited) return true;
-
-        final result = await Permission.photos.request();
-        return result.isGranted || result.isLimited;
-      } else {
-        final status = await Permission.storage.status;
-        if (status.isGranted) return true;
-
-        final result = await Permission.storage.request();
-        return result.isGranted;
-      }
-    }
-
-    final status = await Permission.photos.status;
-    if (status.isGranted || status.isLimited) return true;
-
-    final result = await Permission.photos.request();
-    return result.isGranted || result.isLimited;
-  }
-
   static Future<bool> requestNotificationPermission() async {
     if (Platform.isWindows) return true;
     final status = await Permission.notification.status;
@@ -68,6 +40,32 @@ class PermissionService {
 
     final result = await Permission.notification.request();
     return result.isGranted;
+  }
+
+  static Future<bool> requestMicrophonePermission() async {
+    if (Platform.isWindows) return true;
+    final status = await Permission.microphone.status;
+    if (status.isGranted) return true;
+    if (status.isPermanentlyDenied) return false;
+
+    final result = await Permission.microphone.request();
+    return result.isGranted;
+  }
+
+  /// Verifica los permisos de ejecución del formulario EDAN (cámara +
+  /// ubicación) para Android/iOS y solicita ÚNICAMENTE los que están
+  /// inactivos (no concede los ya activos). En Windows no requiere nada y
+  /// devuelve `true`. No muestra diálogos: si un permiso queda negado o el
+  /// servicio de ubicación está apagado devuelve `false` y el flujo de captura
+  /// (foto/coordenadas) muestra el aviso correspondiente. Cada llamada vuelve
+  /// a verificar el estado real del sistema.
+  static Future<bool> asegurarPermisosFormulario() async {
+    if (Platform.isWindows) return true;
+
+    final camOk = await requestCameraPermission();
+    if (!camOk) return false;
+
+    return await requestLocationPermission();
   }
 
   static void showPermissionDeniedDialog(

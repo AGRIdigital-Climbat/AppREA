@@ -25,67 +25,78 @@ class EdanResumenPage extends StatefulWidget {
   });
 
   /// Calcula el mapa de secciones completas para una localidad.
-  /// Replica exactamente la lógica del wizard: solo incluye secciones
-  /// cuyo flag imp_* esté activado en page01.
+  /// Retorna `true` solo si la sección tiene datos REALES, no solo
+  /// porque el flag imp_* esté activado en page01.
   static Map<String, bool> calcularSeccionesCompletas(EdanLocalidad l) {
     return {
-      '01': l.nombre.trim().isNotEmpty || l.impPoblacion || l.impSalud,
+      '01': l.nombre.trim().isNotEmpty && l.idTipoEvento != null,
       '02': l.totalPoblacionAfectada > 0 ||
           l.totalFamiliasAfectadas > 0 ||
           l.totalFamiliasDamnificadas > 0,
-      if (l.impPoblacion) '03': _seccionTieneDatos03(l),
-      if (l.impSalud) '04': _seccionTieneDatos04(l),
+      if (l.impPoblacion)
+        '03': _seccionTieneDatos03(l) && l.sumaGruposEtarios <= l.totalPoblacionAfectada,
+      if (l.impSalud)
+        '04': _seccionTieneDatos04(l) &&
+            (l.sumaSaludPersonal + (l.necesidadSalud?.numeroPersonas ?? 0)) <= l.totalPoblacionAfectada,
       if (l.impInfraestructura) '05': _seccionTieneDatos05(l),
-      if (l.impServicios)
-        '06': l.impServiciosBasicos
-            ? true
-            : l.serviciosBasicos.any((s) => s.tieneDatos),
+      if (l.impServicios) '06': _seccionTieneDatos06(l),
       if (l.impEducacion)
-        '07': l.impUnidadesEducativas
-            ? true
-            : l.unidadesEducativas.isNotEmpty,
-      if (l.impVivienda)
-        '08': l.impDanosVivienda
-            ? true
-            : l.danosVivienda.isNotEmpty,
+        '07': _seccionTieneDatos07(l) && l.sumaUnidadesEducativas <= l.totalPoblacionAfectada,
+      if (l.impVivienda) '08': _seccionTieneDatos08(l),
       if (l.impAgropecuario) '09': _seccionTieneDatos09(l),
       if (l.impProteccion)
-        '10': l.impProteccion
-            ? true
-            : l.proteccion.any((g) => g.tieneDatos),
-      if (l.impNecesidades)
-        '11': l.impNecesidadHumanitaria
-            ? true
-            : (l.necesidadHumanitaria?.tieneDatos ?? false),
+        '10': _seccionTieneDatos10(l) && l.sumaProteccion <= l.totalPoblacionAfectada,
+      if (l.impNecesidades) '11': _seccionTieneDatos11(l),
       '13': (l.responsable?.nombre.trim().isNotEmpty ?? false) &&
           (l.responsable?.cargo.trim().isNotEmpty ?? false),
     };
   }
 
+  /// Retorna true si el formulario está completo (todas las secciones
+  /// activadas tienen datos reales).
+  static bool formularioCompleto(EdanLocalidad l) {
+    final secciones = calcularSeccionesCompletas(l);
+    return secciones.values.every((completa) => completa);
+  }
+
   static bool _seccionTieneDatos03(EdanLocalidad l) {
-    if (l.impImpactoPoblacion || l.impPrimeraRespuesta) return true;
     return l.impactoPoblacion.any((i) => i.tieneDatosGlobales) ||
         (l.necesidadPrimeraRespuesta?.tieneDatos ?? false);
   }
 
   static bool _seccionTieneDatos04(EdanLocalidad l) {
-    if (l.impSaludEstablecimientos || l.impNecesidadSalud) return true;
     return l.establecimientosSalud.isNotEmpty ||
         (l.necesidadSalud?.tieneDatos ?? false);
   }
 
   static bool _seccionTieneDatos05(EdanLocalidad l) {
-    if (l.impDanosViales || l.impDanosInfraPublica) return true;
     return l.danosViales.isNotEmpty || l.danosInfraPublica.isNotEmpty;
   }
 
+  static bool _seccionTieneDatos06(EdanLocalidad l) {
+    return l.serviciosBasicos.any((s) => s.tieneDatos);
+  }
+
+  static bool _seccionTieneDatos07(EdanLocalidad l) {
+    return l.unidadesEducativas.isNotEmpty;
+  }
+
+  static bool _seccionTieneDatos08(EdanLocalidad l) {
+    return l.danosVivienda.isNotEmpty;
+  }
+
   static bool _seccionTieneDatos09(EdanLocalidad l) {
-    if (l.impDanosAgricultura ||
-        l.impDanosPecuarios ||
-        l.impInfraProductiva) return true;
     return l.danosAgricultura.isNotEmpty ||
         l.danosPecuarios.isNotEmpty ||
         l.infraProductiva.isNotEmpty;
+  }
+
+  static bool _seccionTieneDatos10(EdanLocalidad l) {
+    return l.proteccion.any((g) => g.tieneDatos);
+  }
+
+  static bool _seccionTieneDatos11(EdanLocalidad l) {
+    return l.necesidadHumanitaria?.tieneDatos ?? false;
   }
 
   @override
@@ -178,19 +189,29 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
         const SizedBox(height: 14),
         for (final s in secciones) _tarjetaSeccion(s),
         const SizedBox(height: 8),
-        const Padding(
-          padding: EdgeInsets.only(left: 28),
-          child: Text(
-            'Al presionar "Enviar", el formulario cambiará a estado '
-            '"Enviado UGR".',
-            style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+        if (_puedeEnviar())
+          const Padding(
+            padding: EdgeInsets.only(left: 28),
+            child: Text(
+              'Al presionar "Enviar", el formulario cambiará a estado '
+              '"Enviado UGR".',
+              style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+            ),
           ),
-        ),
       ],
     );
   }
 
   bool _completa(String key) => widget.seccionesCompletas[key] ?? false;
+
+  /// Solo se puede enviar desde los estados borrador (id=1) y rechazadoUgr
+  /// (id=4); en el resto (enviadoUgr, aprobadoUgr, aprobadoAjuste,
+  /// enRevisionUgr) el mensaje de "Enviar" no debe mostrarse.
+  bool _puedeEnviar() {
+    final e = _l.estadoLocalidad;
+    return e == UgrLocalidadEstado.borrador ||
+        e == UgrLocalidadEstado.rechazadoUgr;
+  }
 
   // ─────────────────────────── Tarjeta sección ───────────────────────────
 

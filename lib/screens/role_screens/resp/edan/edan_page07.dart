@@ -49,6 +49,35 @@ class _EdanPage07State extends State<EdanPage07> {
     );
   }
 
+  Widget _avisoSumaPersonas() {
+    final l = widget.localidad;
+    final suma = l.sumaUnidadesEducativas;
+    if (suma <= 0 || suma <= l.totalPoblacionAfectada) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFB300)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_outlined, size: 18, color: Color(0xFFB26A00)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'La suma de personas afectadas ($suma) supera el total de población afectada (${l.totalPoblacionAfectada}). '
+              'Verifica los datos antes de continuar.',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B4A00), height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _agregar() {
     final u = EdanDanoUnidadEducativa();
     _editar(u, esNuevo: true);
@@ -109,7 +138,16 @@ class _EdanPage07State extends State<EdanPage07> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+            ElevatedButton(onPressed: () {
+                  if (_nombre.text.isEmpty && _comunidad.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No hay datos para guardar')),
+                    );
+                    Navigator.pop(ctx, false);
+                  } else {
+                    Navigator.pop(ctx, true);
+                  }
+                }, child: const Text('Guardar')),
           ],
         ),
       ),
@@ -174,6 +212,7 @@ class _EdanPage07State extends State<EdanPage07> {
               'unidad educativa. Puedes agregar más de una.',
         ),
         const SizedBox(height: 10),
+        _avisoSumaPersonas(),
         EdanSubsectionHeader(
           titulo: 'Unidades educativas afectadas',
           icono: Icons.school_outlined,

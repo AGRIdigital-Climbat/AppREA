@@ -252,6 +252,19 @@ class EdanSeccionesRegistry {
     'impNecesidades': 'Necesidades',
   };
 
+  /// Labels cortos para los badges de impacto (términos completos).
+  static const Map<String, String> _seccionLabelsCortos = {
+    'impPoblacion': 'Población',
+    'impSalud': 'Salud',
+    'impInfraestructura': 'Infraestructura',
+    'impServicios': 'Servicios',
+    'impEducacion': 'Educación',
+    'impVivienda': 'Vivienda',
+    'impAgropecuario': 'Agricultura',
+    'impProteccion': 'Protección',
+    'impNecesidades': 'Necesidades',
+  };
+
   /// Retorna los labels de las secciones activas según los flags imp_* de la localidad.
   /// Refleja exactamente lo que se marca en page01.
   static List<String> seccionesActivasLabels(EdanLocalidad l) {
@@ -265,6 +278,22 @@ class EdanSeccionesRegistry {
     if (l.impAgropecuario) result.add(_seccionLabels['impAgropecuario']!);
     if (l.impProteccion) result.add(_seccionLabels['impProteccion']!);
     if (l.impNecesidades) result.add(_seccionLabels['impNecesidades']!);
+    return result;
+  }
+
+  /// Retorna los labels cortos (estilo UGR) de las secciones activas según los
+  /// flags imp_* de la localidad.
+  static List<String> seccionesActivasLabelsCortos(EdanLocalidad l) {
+    final result = <String>[];
+    if (l.impPoblacion) result.add(_seccionLabelsCortos['impPoblacion']!);
+    if (l.impSalud) result.add(_seccionLabelsCortos['impSalud']!);
+    if (l.impInfraestructura) result.add(_seccionLabelsCortos['impInfraestructura']!);
+    if (l.impServicios) result.add(_seccionLabelsCortos['impServicios']!);
+    if (l.impEducacion) result.add(_seccionLabelsCortos['impEducacion']!);
+    if (l.impVivienda) result.add(_seccionLabelsCortos['impVivienda']!);
+    if (l.impAgropecuario) result.add(_seccionLabelsCortos['impAgropecuario']!);
+    if (l.impProteccion) result.add(_seccionLabelsCortos['impProteccion']!);
+    if (l.impNecesidades) result.add(_seccionLabelsCortos['impNecesidades']!);
     return result;
   }
 }

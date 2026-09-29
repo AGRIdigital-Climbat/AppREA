@@ -5,7 +5,8 @@ import '../models/edan.dart';
 import '../services/edan_secciones_registry.dart';
 
 /// Muestra badges de las secciones activas de una localidad EDAN.
-/// Refleja los flags marcados en page01.
+/// Refleja los flags marcados en page01 con el mismo diseño de píldoras de
+/// impacto que usa el item de UGR (rol 6).
 class EdanSeccionBadges extends StatelessWidget {
   final EdanLocalidad localidad;
 
@@ -13,28 +14,28 @@ class EdanSeccionBadges extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final labels = EdanSeccionesRegistry.seccionesActivasLabels(localidad);
+    final labels =
+        EdanSeccionesRegistry.seccionesActivasLabelsCortos(localidad);
     if (labels.isEmpty) return const SizedBox.shrink();
 
     final primary = PaletteScope.of(context).primary;
     return Wrap(
-      spacing: 6,
-      runSpacing: 6,
+      spacing: 4,
+      runSpacing: 4,
       children: labels
           .map(
             (t) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
                 color: primary.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: primary.withValues(alpha: 0.25)),
+                borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
                 t,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
-                  color: AppColors.textSecondary,
+                  color: primary,
                 ),
               ),
             ),

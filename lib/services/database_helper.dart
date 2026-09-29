@@ -12,6 +12,20 @@ import 'edan_secciones_registry.dart';
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._();
   static DatabaseHelper get instance => _instance;
+
+  /// Ruta alterna del archivo SQLite. Solo la usan las pruebas: en producción
+  /// siempre es `<dir de la app>/rea_database.db`, y abrir la base real de un
+  /// dispositivo desde un test dejaría datos de prueba en la app del usuario.
+  @visibleForTesting
+  static String? rutaDePrueba;
+
+  /// Cierra el handle para que otra ruta pueda abrirse. Solo pruebas.
+  @visibleForTesting
+  Future<void> cerrarParaPrueba() async {
+    await _database?.close();
+    _database = null;
+  }
+
   DatabaseHelper._();
 
   Database? _database;
@@ -23,7 +37,8 @@ class DatabaseHelper {
   }
 
   Future<Database> _initDatabase() async {
-    final path = join(await _localDbPath(), 'rea_database.db');
+    final path =
+        rutaDePrueba ?? join(await _localDbPath(), 'rea_database.db');
     return await openDatabase(
       path,
       version: 29,
@@ -340,29 +355,51 @@ class DatabaseHelper {
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN departamento_nombre TEXT');
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN provincia_nombre TEXT');
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN municipio_nombre TEXT');
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN departamento_nombre TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN provincia_nombre TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN municipio_nombre TEXT',
+      );
     }
     if (oldVersion < 3) {
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN estado_nombre TEXT');
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN estado_nombre TEXT',
+      );
     }
     if (oldVersion < 4) {
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN fotografia_server_path TEXT');
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN fotografia_server_path TEXT',
+      );
     }
     if (oldVersion < 5) {
-      await db.execute('CREATE TABLE catalogo_estados (id_estado INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)');
-      await db.execute('CREATE TABLE catalogo_categorias (id_categoria INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)');
-      await db.execute('CREATE TABLE catalogo_tipos_evento (id_tipo_evento INTEGER PRIMARY KEY, nombre TEXT NOT NULL)');
+      await db.execute(
+        'CREATE TABLE catalogo_estados (id_estado INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)',
+      );
+      await db.execute(
+        'CREATE TABLE catalogo_categorias (id_categoria INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)',
+      );
+      await db.execute(
+        'CREATE TABLE catalogo_tipos_evento (id_tipo_evento INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
+      );
     }
     if (oldVersion < 12) {
-      await db.execute('CREATE TABLE catalogo_tipo_localidad (id_tipo_localidad INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)');
+      await db.execute(
+        'CREATE TABLE catalogo_tipo_localidad (id_tipo_localidad INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)',
+      );
     }
     if (oldVersion < 6) {
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN es_borrador INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN es_borrador INTEGER DEFAULT 0',
+      );
     }
     if (oldVersion < 7) {
-      await db.execute('ALTER TABLE reportes_offline ADD COLUMN imagen_descargada INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE reportes_offline ADD COLUMN imagen_descargada INTEGER DEFAULT 0',
+      );
     }
     if (oldVersion < 8) {
       await db.execute('''
@@ -506,9 +543,15 @@ class DatabaseHelper {
       ''');
     }
     if (oldVersion < 15) {
-      await db.execute('ALTER TABLE localidades_offline ADD COLUMN departamento_nombre TEXT');
-      await db.execute('ALTER TABLE localidades_offline ADD COLUMN provincia_nombre TEXT');
-      await db.execute('ALTER TABLE localidades_offline ADD COLUMN municipio_nombre TEXT');
+      await db.execute(
+        'ALTER TABLE localidades_offline ADD COLUMN departamento_nombre TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE localidades_offline ADD COLUMN provincia_nombre TEXT',
+      );
+      await db.execute(
+        'ALTER TABLE localidades_offline ADD COLUMN municipio_nombre TEXT',
+      );
     }
     if (oldVersion < 16) {
       await db.execute('''
@@ -573,8 +616,9 @@ class DatabaseHelper {
         )
       ''');
       final secciones = EdanSeccionesRegistry.rutasV2Todas();
-      final unionSecciones =
-          secciones.map((s) => "SELECT '$s' AS seccion").join(' UNION ALL ');
+      final unionSecciones = secciones
+          .map((s) => "SELECT '$s' AS seccion")
+          .join(' UNION ALL ');
       await db.execute('''
         INSERT INTO localidad_seccion_sync
           (id_local, seccion, modificada, fecha_modificacion)
@@ -613,10 +657,16 @@ class DatabaseHelper {
     }
     // v23: columna editado en localidades_offline como flag único de pendiente.
     if (oldVersion < 23) {
-      await db.execute('ALTER TABLE localidades_offline ADD COLUMN editado INTEGER NOT NULL DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE localidades_offline ADD COLUMN editado INTEGER NOT NULL DEFAULT 0',
+      );
       // Backfill: sincronizado=0 o pendiente_actualizacion=1 → editado=1.
-      await db.execute('UPDATE localidades_offline SET editado = 1 WHERE sincronizado = 0');
-      await db.execute('UPDATE localidades_offline SET editado = 1 WHERE pendiente_actualizacion = 1');
+      await db.execute(
+        'UPDATE localidades_offline SET editado = 1 WHERE sincronizado = 0',
+      );
+      await db.execute(
+        'UPDATE localidades_offline SET editado = 1 WHERE pendiente_actualizacion = 1',
+      );
       // Backfill desde secciones: si alguna tabla tiene editado=1 para esa localidad.
       for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
         await db.execute(
@@ -1251,19 +1301,29 @@ class DatabaseHelper {
     final columnas = await db.rawQuery('PRAGMA table_info(foto_pendiente)');
     final existentes = columnas.map((c) => c['name'] as String).toSet();
     if (!existentes.contains('descargada')) {
-      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN descargada INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE foto_pendiente ADD COLUMN descargada INTEGER DEFAULT 0',
+      );
     }
     if (!existentes.contains('ruta_descarga')) {
-      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN ruta_descarga TEXT');
+      await db.execute(
+        'ALTER TABLE foto_pendiente ADD COLUMN ruta_descarga TEXT',
+      );
     }
     if (!existentes.contains('intentos_subida')) {
-      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN intentos_subida INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE foto_pendiente ADD COLUMN intentos_subida INTEGER DEFAULT 0',
+      );
     }
     if (!existentes.contains('intentos_descarga')) {
-      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN intentos_descarga INTEGER DEFAULT 0');
+      await db.execute(
+        'ALTER TABLE foto_pendiente ADD COLUMN intentos_descarga INTEGER DEFAULT 0',
+      );
     }
     if (!existentes.contains('ultimo_error')) {
-      await db.execute('ALTER TABLE foto_pendiente ADD COLUMN ultimo_error TEXT');
+      await db.execute(
+        'ALTER TABLE foto_pendiente ADD COLUMN ultimo_error TEXT',
+      );
     }
   }
 
@@ -1323,13 +1383,17 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> updateEstado(int idLocal, int? estadoId, String? estadoNombre) async {
+  Future<int> updateEstado(
+    int idLocal,
+    int? estadoId,
+    String? estadoNombre,
+  ) async {
     final db = await database;
     return await db.update(
       'reportes_offline',
       {
-        'estado_id':? estadoId,
-        'estado_nombre':? estadoNombre,
+        'estado_id': ?estadoId,
+        'estado_nombre': ?estadoNombre,
         'fecha_modificacion': DateTime.now().toIso8601String(),
       },
       where: 'id_local = ?',
@@ -1337,7 +1401,8 @@ class DatabaseHelper {
     );
   }
 
-  Future<void> updateFromServer(int idLocal, {
+  Future<void> updateFromServer(
+    int idLocal, {
     int? estadoId,
     String? estadoNombre,
     String? departamentoNombre,
@@ -1350,23 +1415,39 @@ class DatabaseHelper {
     };
     if (estadoId != null) updates['estado_id'] = estadoId;
     if (estadoNombre != null) updates['estado_nombre'] = estadoNombre;
-    if (departamentoNombre != null) updates['departamento_nombre'] = departamentoNombre;
+    if (departamentoNombre != null)
+      updates['departamento_nombre'] = departamentoNombre;
     if (provinciaNombre != null) updates['provincia_nombre'] = provinciaNombre;
     if (municipioNombre != null) updates['municipio_nombre'] = municipioNombre;
     if (updates.length <= 1) return;
-    await db.update('reportes_offline', updates, where: 'id_local = ?', whereArgs: [idLocal]);
+    await db.update(
+      'reportes_offline',
+      updates,
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
   }
 
   Future<ReporteOffline?> getReporteByServerId(int idServer) async {
     final db = await database;
-    final maps = await db.query('reportes_offline', where: 'id_server = ?', whereArgs: [idServer], limit: 1);
+    final maps = await db.query(
+      'reportes_offline',
+      where: 'id_server = ?',
+      whereArgs: [idServer],
+      limit: 1,
+    );
     if (maps.isEmpty) return null;
     return ReporteOffline.fromMap(maps.first);
   }
 
   Future<ReporteOffline?> getReporteByIdLocal(int idLocal) async {
     final db = await database;
-    final maps = await db.query('reportes_offline', where: 'id_local = ?', whereArgs: [idLocal], limit: 1);
+    final maps = await db.query(
+      'reportes_offline',
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+      limit: 1,
+    );
     if (maps.isEmpty) return null;
     return ReporteOffline.fromMap(maps.first);
   }
@@ -1381,7 +1462,11 @@ class DatabaseHelper {
     return maps.map((map) => ReporteOffline.fromMap(map)).toList();
   }
 
-  Future<bool> updateEstadoByServerId(int idServer, int estadoId, String estadoNombre) async {
+  Future<bool> updateEstadoByServerId(
+    int idServer,
+    int estadoId,
+    String estadoNombre,
+  ) async {
     final db = await database;
     final result = await db.update(
       'reportes_offline',
@@ -1405,7 +1490,11 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> updateSyncAttempts(int idLocal, int intentos, String error) async {
+  Future<int> updateSyncAttempts(
+    int idLocal,
+    int intentos,
+    String error,
+  ) async {
     final db = await database;
     return await db.update(
       'reportes_offline',
@@ -1475,7 +1564,8 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> updateLocationNames(int idLocal, {
+  Future<int> updateLocationNames(
+    int idLocal, {
     String? departamentoNombre,
     String? provinciaNombre,
     String? municipioNombre,
@@ -1483,11 +1573,17 @@ class DatabaseHelper {
     final data = <String, dynamic>{
       'fecha_modificacion': DateTime.now().toIso8601String(),
     };
-    if (departamentoNombre != null) data['departamento_nombre'] = departamentoNombre;
+    if (departamentoNombre != null)
+      data['departamento_nombre'] = departamentoNombre;
     if (provinciaNombre != null) data['provincia_nombre'] = provinciaNombre;
     if (municipioNombre != null) data['municipio_nombre'] = municipioNombre;
     final db = await database;
-    return await db.update('reportes_offline', data, where: 'id_local = ?', whereArgs: [idLocal]);
+    return await db.update(
+      'reportes_offline',
+      data,
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
   }
 
   Future<int> saveFotografiaServerPath(int idLocal, String path) async {
@@ -1507,8 +1603,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final e in estados) {
-      batch.insert('catalogo_estados', e,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_estados',
+        e,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1522,8 +1621,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final c in categorias) {
-      batch.insert('catalogo_categorias', c,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_categorias',
+        c,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1537,8 +1639,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final t in tipos) {
-      batch.insert('catalogo_tipos_evento', t,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_tipos_evento',
+        t,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1552,8 +1657,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final t in tipos) {
-      batch.insert('catalogo_tipo_localidad', t,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_tipo_localidad',
+        t,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1567,8 +1675,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final e in estados) {
-      batch.insert('catalogo_estados_edan', e,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_estados_edan',
+        e,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1582,8 +1693,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final c in cultivos) {
-      batch.insert('catalogo_cultivos', c,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_cultivos',
+        c,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1597,8 +1711,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final g in grupos) {
-      batch.insert('catalogo_pecuario_grupos', g,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_pecuario_grupos',
+        g,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1612,8 +1729,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final g in grupos) {
-      batch.insert('catalogo_grupo_vulnerable', g,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_grupo_vulnerable',
+        g,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1627,8 +1747,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final g in grupos) {
-      batch.insert('catalogo_grupo_etario', g,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_grupo_etario',
+        g,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1638,12 +1761,17 @@ class DatabaseHelper {
     return await db.query('catalogo_grupo_etario', orderBy: 'orden ASC');
   }
 
-  Future<void> saveDepartamentos(List<Map<String, dynamic>> departamentos) async {
+  Future<void> saveDepartamentos(
+    List<Map<String, dynamic>> departamentos,
+  ) async {
     final db = await database;
     final batch = db.batch();
     for (final d in departamentos) {
-      batch.insert('catalogo_departamentos', d,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_departamentos',
+        d,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1657,8 +1785,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final p in provincias) {
-      batch.insert('catalogo_provincias', p,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_provincias',
+        p,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1672,8 +1803,11 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final m in municipios) {
-      batch.insert('catalogo_municipios', m,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_municipios',
+        m,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -1687,19 +1821,28 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final t in tipos) {
-      batch.insert('catalogo_tipos_repositorio', t,
-          conflictAlgorithm: ConflictAlgorithm.replace);
+      batch.insert(
+        'catalogo_tipos_repositorio',
+        t,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     }
     await batch.commit(noResult: true);
   }
 
   Future<List<Map<String, dynamic>>> getTiposRepositorioLocal() async {
     final db = await database;
-    return await db.query('catalogo_tipos_repositorio',
-        where: 'activo = 1', orderBy: 'orden ASC, nombre ASC');
+    return await db.query(
+      'catalogo_tipos_repositorio',
+      where: 'activo = 1',
+      orderBy: 'orden ASC, nombre ASC',
+    );
   }
 
-  Future<bool> upsertReportFromServer(int usuarioId, Map<String, dynamic> data) async {
+  Future<bool> upsertReportFromServer(
+    int usuarioId,
+    Map<String, dynamic> data,
+  ) async {
     final db = await database;
     final idServer = data['id_reporte'] as int?;
     if (idServer == null) return false;
@@ -1713,8 +1856,11 @@ class DatabaseHelper {
 
     final categorias = data['categorias'] != null
         ? (data['categorias'] as List)
-            .map((c) => c is Map ? (c['id_categoria'] ?? c['id']) as int : c as int)
-            .toList()
+              .map(
+                (c) =>
+                    c is Map ? (c['id_categoria'] ?? c['id']) as int : c as int,
+              )
+              .toList()
         : null;
 
     final row = {
@@ -1727,11 +1873,16 @@ class DatabaseHelper {
       'departamento_nombre': data['departamento']?['nombre'] as String?,
       'provincia_nombre': data['provincia']?['nombre'] as String?,
       'municipio_nombre': data['municipio']?['nombre'] as String?,
-      'fecha_evento': (data['fecha_evento'] as String?) ?? DateTime.now().toIso8601String(),
+      'fecha_evento':
+          (data['fecha_evento'] as String?) ?? DateTime.now().toIso8601String(),
       'hora_evento': data['hora_evento'] as String?,
       'tipo_evento_id': (data['id_tipo_evento'] as num?)?.toInt() ?? 0,
-      'coordenada_lat': double.tryParse(data['coordenada_lat']?.toString() ?? ''),
-      'coordenada_lon': double.tryParse(data['coordenada_lon']?.toString() ?? ''),
+      'coordenada_lat': double.tryParse(
+        data['coordenada_lat']?.toString() ?? '',
+      ),
+      'coordenada_lon': double.tryParse(
+        data['coordenada_lon']?.toString() ?? '',
+      ),
       'descripcion': data['descripcion'] as String?,
       'estado_id': (data['id_estado'] as num?)?.toInt() ?? 1,
       'estado_nombre': data['estado']?['nombre'] as String?,
@@ -1740,7 +1891,8 @@ class DatabaseHelper {
       'sincronizado': 1,
       'pendiente_eliminacion': 0,
       'pendiente_actualizacion': 0,
-      'fecha_creacion': data['fecha_reporte'] as String? ?? DateTime.now().toIso8601String(),
+      'fecha_creacion':
+          data['fecha_reporte'] as String? ?? DateTime.now().toIso8601String(),
       'fecha_modificacion': DateTime.now().toIso8601String(),
       'intentos_sync': 0,
       'ultimo_error': null,
@@ -1750,7 +1902,12 @@ class DatabaseHelper {
       final idLocal = existing.first['id_local'] as int;
       row['id_local'] = idLocal;
       row['imagenes'] = existing.first['imagenes'];
-      await db.update('reportes_offline', row, where: 'id_local = ?', whereArgs: [idLocal]);
+      await db.update(
+        'reportes_offline',
+        row,
+        where: 'id_local = ?',
+        whereArgs: [idLocal],
+      );
     } else {
       await db.insert('reportes_offline', row);
     }
@@ -1789,20 +1946,18 @@ class DatabaseHelper {
     required String geojson,
   }) async {
     final db = await database;
-    await db.insert(
-      'municipio_geojson',
-      {
-        'municipio_id': municipioId,
-        'codigo_ine': codigoIne,
-        'nombre': nombre,
-        'geojson': geojson,
-        'fecha_actualizacion': DateTime.now().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('municipio_geojson', {
+      'municipio_id': municipioId,
+      'codigo_ine': codigoIne,
+      'nombre': nombre,
+      'geojson': geojson,
+      'fecha_actualizacion': DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
-  Future<Map<String, dynamic>?> getMunicipioGeojsonLocal(int municipioId) async {
+  Future<Map<String, dynamic>?> getMunicipioGeojsonLocal(
+    int municipioId,
+  ) async {
     final db = await database;
     final maps = await db.query(
       'municipio_geojson',
@@ -1818,7 +1973,8 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query(
       'reportes_offline',
-      where: 'usuario_id = ? AND fotografia_server_path IS NOT NULL AND imagen_descargada = 0 AND (imagenes IS NULL OR imagenes = ?)',
+      where:
+          'usuario_id = ? AND fotografia_server_path IS NOT NULL AND imagen_descargada = 0 AND (imagenes IS NULL OR imagenes = ?)',
       whereArgs: [usuarioId, '[]'],
     );
     return maps.map((map) => ReporteOffline.fromMap(map)).toList();
@@ -1894,7 +2050,8 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query(
       'edans_offline',
-      where: '(sincronizado = 0 OR pendiente_actualizacion = 1) AND pendiente_eliminacion = 0',
+      where:
+          '(sincronizado = 0 OR pendiente_actualizacion = 1) AND pendiente_eliminacion = 0',
       orderBy: 'fecha_creacion ASC',
     );
     return maps.map((map) => _edanFromRow(map)).toList();
@@ -1979,7 +2136,11 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> updateEdanSyncAttempts(int idLocal, int intentos, String error) async {
+  Future<int> updateEdanSyncAttempts(
+    int idLocal,
+    int intentos,
+    String error,
+  ) async {
     final db = await database;
     return await db.update(
       'edans_offline',
@@ -2067,16 +2228,22 @@ class DatabaseHelper {
 
   Future<int?> getLastSyncDate() async {
     final db = await database;
-    final result = await db.rawQuery('SELECT valor FROM config WHERE clave = ?', ['ultima_sync']);
+    final result = await db.rawQuery(
+      'SELECT valor FROM config WHERE clave = ?',
+      ['ultima_sync'],
+    );
     if (result.isEmpty) return null;
     return int.tryParse(result.first['valor']?.toString() ?? '');
   }
 
   Future<void> saveLastSyncDate(int timestamp) async {
     final db = await database;
-    await db.rawInsert('''
+    await db.rawInsert(
+      '''
       INSERT OR REPLACE INTO config (clave, valor) VALUES (?, ?)
-    ''', ['ultima_sync', timestamp]);
+    ''',
+      ['ultima_sync', timestamp],
+    );
   }
 
   Future<Edan?> getEdanByServerId(int idServer) async {
@@ -2123,7 +2290,9 @@ class DatabaseHelper {
     loc.idEdan = _toInt(row['id_edan']);
     loc.idUsuario = _toInt(row['usuario_id']);
     loc.idEdanLocalidadEstado = _toInt(row['id_edan_localidad_estado']);
-    loc.estadoLocalidad = _estadoLocalidadFromNombre(row['estado_localidad'] as String?);
+    loc.estadoLocalidad = _estadoLocalidadFromNombre(
+      row['estado_localidad'] as String?,
+    );
     loc.sincronizado = _toBool(row['sincronizado']);
     loc.pendienteEliminacion = _toBool(row['pendiente_eliminacion']);
     loc.pendienteActualizacion = _toBool(row['pendiente_actualizacion']);
@@ -2154,7 +2323,8 @@ class DatabaseHelper {
     if (n.contains('borrador')) return UgrLocalidadEstado.borrador;
     if (n.contains('enviado')) return UgrLocalidadEstado.enviadoUgr;
     if (n.contains('revision')) return UgrLocalidadEstado.enRevisionUgr;
-    if (n.contains('aprobado') && n.contains('ajuste')) return UgrLocalidadEstado.aprobadoAjuste;
+    if (n.contains('aprobado') && n.contains('ajuste'))
+      return UgrLocalidadEstado.aprobadoAjuste;
     if (n.contains('aprobado')) return UgrLocalidadEstado.aprobadoUgr;
     if (n.contains('rechazado')) return UgrLocalidadEstado.rechazadoUgr;
     return null;
@@ -2210,9 +2380,15 @@ class DatabaseHelper {
       'intentos_sync': 0,
     };
     try {
-      await db.insert('localidades_offline', row, conflictAlgorithm: ConflictAlgorithm.replace);
+      await db.insert(
+        'localidades_offline',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
     } catch (e) {
-      debugPrint('[insertLocalidad] Error insertando localidad ${localidad.idLocal}: $e');
+      debugPrint(
+        '[insertLocalidad] Error insertando localidad ${localidad.idLocal}: $e',
+      );
       rethrow;
     }
     return row['id_local'] as String;
@@ -2240,11 +2416,14 @@ class DatabaseHelper {
     return maps.map((map) => _localidadFromRow(map)).toList();
   }
 
-  Future<List<EdanLocalidad>> getLocalidadesPendientesUsuario(int usuarioId) async {
+  Future<List<EdanLocalidad>> getLocalidadesPendientesUsuario(
+    int usuarioId,
+  ) async {
     final db = await database;
     final maps = await db.query(
       'localidades_offline',
-      where: 'usuario_id = ? AND sincronizado = 0 AND pendiente_eliminacion = 0',
+      where:
+          'usuario_id = ? AND sincronizado = 0 AND pendiente_eliminacion = 0',
       whereArgs: [usuarioId],
       orderBy: 'fecha_creacion DESC',
     );
@@ -2255,29 +2434,41 @@ class DatabaseHelper {
     final db = await database;
     final maps = await db.query(
       'localidades_offline',
-      where: '(sincronizado = 0 OR pendiente_actualizacion = 1) AND pendiente_eliminacion = 0',
+      where:
+          '(sincronizado = 0 OR pendiente_actualizacion = 1) AND pendiente_eliminacion = 0',
       orderBy: 'fecha_creacion ASC',
     );
     return maps.map((map) => _localidadFromRow(map)).toList();
   }
 
   Future<int> countLocalidadesPendientesSync() async {
+    await _asegurarPendientesEliminar();
     final db = await database;
+    // Cuenta localidades con cambios sin subir: cabecera editada,
+    // marcadas para eliminar, o con deletes de ítems 1:N en la cola offline.
+    // La condición de cola excluye las ya contadas por eliminación completa.
     final result = await db.rawQuery(
-      'SELECT COUNT(*) AS total FROM localidades_offline '
-      'WHERE (editado = 1 AND pendiente_eliminacion = 0) '
-      'OR pendiente_eliminacion = 1',
+      'SELECT COUNT(*) AS total FROM localidades_offline lo '
+      'WHERE (lo.editado = 1 AND lo.pendiente_eliminacion = 0) '
+      'OR (lo.pendiente_eliminacion = 1) '
+      'OR (lo.pendiente_eliminacion = 0 AND EXISTS ('
+      '  SELECT 1 FROM pendientes_eliminar pe '
+      '  WHERE pe.sincronizado = 0 AND pe.id_local = lo.id_local'
+      '))',
     );
     if (result.isEmpty) return 0;
     return (result.first['total'] as num?)?.toInt() ?? 0;
   }
 
-  Future<int> updateLocalidad(EdanLocalidad localidad) async {
+  Future<int> updateLocalidad(
+    EdanLocalidad localidad, {
+    String? preserveFechaModificacion,
+  }) async {
     if (localidad.idLocal == null) return 0;
     final db = await database;
     return await db.update(
       'localidades_offline',
-      _localidadToRow(localidad),
+      _localidadToRow(localidad, fechaModificacion: preserveFechaModificacion),
       where: 'id_local = ?',
       whereArgs: [localidad.idLocal],
     );
@@ -2338,8 +2529,9 @@ class DatabaseHelper {
       'sincronizado': (sincronizado ?? l.sincronizado) ? 1 : 0,
       'pendiente_actualizacion':
           (pendienteActualizacion ?? l.pendienteActualizacion) ? 1 : 0,
-      'pendiente_eliminacion':
-          (pendienteEliminacion ?? l.pendienteEliminacion) ? 1 : 0,
+      'pendiente_eliminacion': (pendienteEliminacion ?? l.pendienteEliminacion)
+          ? 1
+          : 0,
       'editado': l.editado ? 1 : 0,
       'fecha_modificacion': fecha,
     };
@@ -2442,16 +2634,12 @@ class DatabaseHelper {
     String? fecha,
   }) async {
     final db = await database;
-    await db.insert(
-      'localidad_seccion_sync',
-      {
-        'id_local': idLocal,
-        'seccion': seccion,
-        'modificada': 1,
-        'fecha_modificacion': fecha ?? DateTime.now().toIso8601String(),
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('localidad_seccion_sync', {
+      'id_local': idLocal,
+      'seccion': seccion,
+      'modificada': 1,
+      'fecha_modificacion': fecha ?? DateTime.now().toIso8601String(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   /// Marca varias secciones como modificadas (p. ej. las de una página del
@@ -2477,10 +2665,7 @@ class DatabaseHelper {
     final fechaFinal = fecha ?? DateTime.now().toIso8601String();
     await db.update(
       'localidad_seccion_sync',
-      {
-        'modificada': 0,
-        'fecha_modificacion': fechaFinal,
-      },
+      {'modificada': 0, 'fecha_modificacion': fechaFinal},
       where: 'id_local = ? AND seccion = ?',
       whereArgs: [idLocal, seccion],
     );
@@ -2498,7 +2683,10 @@ class DatabaseHelper {
   }
 
   /// Limpia la marca `modificada=1` solo para las rutas específicas enviadas.
-  Future<void> clearSeccionesModificadas(String idLocal, Set<String> rutas) async {
+  Future<void> clearSeccionesModificadas(
+    String idLocal,
+    Set<String> rutas,
+  ) async {
     final db = await database;
     for (final ruta in rutas) {
       await db.update(
@@ -2523,7 +2711,10 @@ class DatabaseHelper {
   }
 
   /// Fecha local de modificación de una sección (para LWW en conflictos).
-  Future<String?> getSeccionFechaModificacion(String idLocal, String seccion) async {
+  Future<String?> getSeccionFechaModificacion(
+    String idLocal,
+    String seccion,
+  ) async {
     final db = await database;
     final maps = await db.query(
       'localidad_seccion_sync',
@@ -2547,7 +2738,8 @@ class DatabaseHelper {
   }) async {
     if (localidad.idLocal == null) return 0;
     final db = await database;
-    final fecha = fechaServer ??
+    final fecha =
+        fechaServer ??
         localidad.fechaModificacion ??
         DateTime.now().toIso8601String();
     final row = _localidadToRow(
@@ -2582,7 +2774,11 @@ class DatabaseHelper {
     );
   }
 
-  Future<int> updateLocalidadSyncAttempts(String idLocal, int intentos, String error) async {
+  Future<int> updateLocalidadSyncAttempts(
+    String idLocal,
+    int intentos,
+    String error,
+  ) async {
     final db = await database;
     return await db.update(
       'localidades_offline',
@@ -2612,7 +2808,10 @@ class DatabaseHelper {
     final db = await database;
     UgrLocalidadEstado? estado;
     for (final e in UgrLocalidadEstado.values) {
-      if (e.id == idEstado) { estado = e; break; }
+      if (e.id == idEstado) {
+        estado = e;
+        break;
+      }
     }
     return await db.update(
       'localidades_offline',
@@ -2682,20 +2881,18 @@ class DatabaseHelper {
           whereArgs: [idSeccion],
           limit: 1,
         );
-        row['insertada_en_server'] = (existente.isNotEmpty &&
+        row['insertada_en_server'] =
+            (existente.isNotEmpty &&
                 existente.first['insertada_en_server'] == 1)
             ? 1
             : 0;
       }
       row.remove('marcado_borrar');
       row.remove('_fecha_modificacion');
-      row['fecha_modificacion_local'] =
-          DateTime.now().toUtc().toIso8601String();
-      batch.insert(
-        tabla,
-        row,
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      row['fecha_modificacion_local'] = DateTime.now()
+          .toUtc()
+          .toIso8601String();
+      batch.insert(tabla, row, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await batch.commit(noResult: true);
     if (idEdanLocalidad != null) {
@@ -2726,11 +2923,7 @@ class DatabaseHelper {
     String idLocal,
   ) async {
     final db = await database;
-    return db.query(
-      tabla,
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
+    return db.query(tabla, where: 'id_local = ?', whereArgs: [idLocal]);
   }
 
   /// Elimina las filas de una tabla de secci�n que ya no est�n en el modelo
@@ -2767,11 +2960,7 @@ class DatabaseHelper {
           whereArgs: [idSeccion],
         );
       } else {
-        await db.delete(
-          tabla,
-          where: 'id_seccion = ?',
-          whereArgs: [idSeccion],
-        );
+        await db.delete(tabla, where: 'id_seccion = ?', whereArgs: [idSeccion]);
       }
     }
   }
@@ -2784,11 +2973,7 @@ class DatabaseHelper {
     final db = await database;
     final batch = db.batch();
     for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
-      batch.delete(
-        tabla,
-        where: 'id_local = ?',
-        whereArgs: [idLocal],
-      );
+      batch.delete(tabla, where: 'id_local = ?', whereArgs: [idLocal]);
     }
     await batch.commit(noResult: true);
   }
@@ -2821,10 +3006,7 @@ class DatabaseHelper {
     final db = await database;
     await db.update(
       tabla,
-      {
-        'editado': 0,
-        'insertada_en_server': insertadaEnServer ? 1 : 0,
-      },
+      {'editado': 0, 'insertada_en_server': insertadaEnServer ? 1 : 0},
       where: 'id_seccion = ?',
       whereArgs: [idSeccion],
     );
@@ -2846,10 +3028,7 @@ class DatabaseHelper {
 
   /// Marca una fila de sección borrada (`marcado_borrar=1`). Se usa al eliminar
   /// un ítem 1:N localmente; se elimina del servidor en el siguiente envío.
-  Future<void> marcarFilaSeccionBorrada(
-    String tabla,
-    String idSeccion,
-  ) async {
+  Future<void> marcarFilaSeccionBorrada(String tabla, String idSeccion) async {
     final db = await database;
     await db.update(
       tabla,
@@ -2876,11 +3055,7 @@ class DatabaseHelper {
   /// Elimina localmente una fila de sección (tras borrado confirmado el server).
   Future<void> eliminarFilaSeccion(String tabla, String idSeccion) async {
     final db = await database;
-    await db.delete(
-      tabla,
-      where: 'id_seccion = ?',
-      whereArgs: [idSeccion],
-    );
+    await db.delete(tabla, where: 'id_seccion = ?', whereArgs: [idSeccion]);
   }
 
   // ========== Cola de deletes offline (pendientes_eliminar) ==========
@@ -2953,11 +3128,7 @@ class DatabaseHelper {
   /// Elimina un registro de la cola de pendientes (ya procesado).
   Future<void> eliminarPendienteEliminar(int id) async {
     final db = await database;
-    await db.delete(
-      'pendientes_eliminar',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.delete('pendientes_eliminar', where: 'id = ?', whereArgs: [id]);
   }
 
   // ========== Secciones activas (checkbox → secciones del JSON) ==========
@@ -2975,7 +3146,10 @@ class DatabaseHelper {
   }
 
   /// Desmarca secciones (0) para una localidad.
-  Future<void> desactivarSecciones(String idLocal, List<String> secciones) async {
+  Future<void> desactivarSecciones(
+    String idLocal,
+    List<String> secciones,
+  ) async {
     final db = await database;
     for (final s in secciones) {
       await db.update(
@@ -2988,7 +3162,10 @@ class DatabaseHelper {
   }
 
   /// Reemplaza el set completo de secciones activas ( para pull/sync).
-  Future<void> reemplazarSeccionesActivas(String idLocal, List<String> activas) async {
+  Future<void> reemplazarSeccionesActivas(
+    String idLocal,
+    List<String> activas,
+  ) async {
     final db = await database;
     await db.delete(
       'localidad_secciones_activas',
@@ -2996,10 +3173,11 @@ class DatabaseHelper {
       whereArgs: [idLocal],
     );
     for (final s in activas) {
-      await db.insert(
-        'localidad_secciones_activas',
-        {'id_local': idLocal, 'seccion': s, 'activa': 1},
-      );
+      await db.insert('localidad_secciones_activas', {
+        'id_local': idLocal,
+        'seccion': s,
+        'activa': 1,
+      });
     }
   }
 
@@ -3045,8 +3223,11 @@ class DatabaseHelper {
     for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
       await db.delete(tabla, where: 'id_local = ?', whereArgs: [idLocal]);
     }
-    await db.delete('foto_pendiente',
-        where: 'id_local = ?', whereArgs: [idLocal]);
+    await db.delete(
+      'foto_pendiente',
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
   }
 
   // ========== Carrete de fotos (foto_pendiente) ==========
@@ -3067,22 +3248,18 @@ class DatabaseHelper {
   }) async {
     final db = await database;
     final idFotoFinal = idFoto ?? generarIdLocal();
-    await db.insert(
-      'foto_pendiente',
-      {
-        'id_foto': idFotoFinal,
-        'id_local': idLocal,
-        'id_edan_localidad': idEdanLocalidad,
-        'id_seccion': idSeccion,
-        'ruta_local_archivo': rutaLocalArchivo,
-        'coordenada_lat': lat,
-        'coordenada_lon': lon,
-        'subida': pathServidor != null ? 0 : 0,
-        'descargada': pathServidor != null ? 0 : 1,
-        'path_servidor': pathServidor,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('foto_pendiente', {
+      'id_foto': idFotoFinal,
+      'id_local': idLocal,
+      'id_edan_localidad': idEdanLocalidad,
+      'id_seccion': idSeccion,
+      'ruta_local_archivo': rutaLocalArchivo,
+      'coordenada_lat': lat,
+      'coordenada_lon': lon,
+      'subida': pathServidor != null ? 0 : 0,
+      'descargada': pathServidor != null ? 0 : 1,
+      'path_servidor': pathServidor,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
     return idFotoFinal;
   }
 
@@ -3105,7 +3282,8 @@ class DatabaseHelper {
     final db = await database;
     return await db.query(
       'foto_pendiente',
-      where: 'descargada = 0 AND path_servidor IS NOT NULL '
+      where:
+          'descargada = 0 AND path_servidor IS NOT NULL '
           'AND path_servidor != "" '
           'AND intentos_descarga < ?',
       whereArgs: [maxIntentos],
@@ -3129,10 +3307,7 @@ class DatabaseHelper {
   }
 
   /// Marca una foto como descargada con el path local.
-  Future<void> marcarFotoDescargada(
-    String idFoto,
-    String rutaDescarga,
-  ) async {
+  Future<void> marcarFotoDescargada(String idFoto, String rutaDescarga) async {
     final db = await database;
     await db.update(
       'foto_pendiente',
@@ -3150,29 +3325,33 @@ class DatabaseHelper {
   /// Incrementa el contador de intentos de subida y registra el error.
   Future<void> marcarErrorSubida(String idFoto, String error) async {
     final db = await database;
-    await db.rawUpdate('''
+    await db.rawUpdate(
+      '''
       UPDATE foto_pendiente
       SET intentos_subida = intentos_subida + 1,
           ultimo_error = ?
       WHERE id_foto = ?
-    ''', [error, idFoto]);
+    ''',
+      [error, idFoto],
+    );
   }
 
   /// Incrementa el contador de intentos de descarga y registra el error.
   Future<void> marcarErrorDescarga(String idFoto, String error) async {
     final db = await database;
-    await db.rawUpdate('''
+    await db.rawUpdate(
+      '''
       UPDATE foto_pendiente
       SET intentos_descarga = intentos_descarga + 1,
           ultimo_error = ?
       WHERE id_foto = ?
-    ''', [error, idFoto]);
+    ''',
+      [error, idFoto],
+    );
   }
 
   /// Busca foto_pendiente por id_seccion (para关联ar con la tabla de sección).
-  Future<Map<String, dynamic>?> buscarFotoPorSeccion(
-    String idSeccion,
-  ) async {
+  Future<Map<String, dynamic>?> buscarFotoPorSeccion(String idSeccion) async {
     final db = await database;
     final maps = await db.query(
       'foto_pendiente',
@@ -3234,7 +3413,8 @@ class DatabaseHelper {
     final db = await database;
     return await db.query(
       'foto_pendiente_v2',
-      where: 'descargada = 0 AND path_servidor IS NOT NULL '
+      where:
+          'descargada = 0 AND path_servidor IS NOT NULL '
           'AND path_servidor != "" AND intentos < ?',
       whereArgs: [maxIntentos],
     );
@@ -3243,33 +3423,46 @@ class DatabaseHelper {
   /// Marca una foto como subida exitosamente.
   Future<void> marcarFotoSubidaV2(String idFoto, String pathServidor) async {
     final db = await database;
-    await db.update('foto_pendiente_v2', {
-      'subida': 1,
-      'path_servidor': pathServidor,
-      'intentos': 0,
-      'ultimo_error': null,
-    }, where: 'id_foto = ?', whereArgs: [idFoto]);
+    await db.update(
+      'foto_pendiente_v2',
+      {
+        'subida': 1,
+        'path_servidor': pathServidor,
+        'intentos': 0,
+        'ultimo_error': null,
+      },
+      where: 'id_foto = ?',
+      whereArgs: [idFoto],
+    );
   }
 
   /// Marca una foto como descargada exitosamente.
   Future<void> marcarFotoDescargadaV2(String idFoto, String rutaLocal) async {
     final db = await database;
-    await db.update('foto_pendiente_v2', {
-      'descargada': 1,
-      'ruta_local_archivo': rutaLocal,
-      'intentos': 0,
-      'ultimo_error': null,
-    }, where: 'id_foto = ?', whereArgs: [idFoto]);
+    await db.update(
+      'foto_pendiente_v2',
+      {
+        'descargada': 1,
+        'ruta_local_archivo': rutaLocal,
+        'intentos': 0,
+        'ultimo_error': null,
+      },
+      where: 'id_foto = ?',
+      whereArgs: [idFoto],
+    );
   }
 
   /// Registra error de upload/download e incrementa intentos.
   Future<void> marcarFotoErrorV2(String idFoto, String error) async {
     final db = await database;
-    await db.rawUpdate('''
+    await db.rawUpdate(
+      '''
       UPDATE foto_pendiente_v2
       SET intentos = intentos + 1, ultimo_error = ?
       WHERE id_foto = ?
-    ''', [error, idFoto]);
+    ''',
+      [error, idFoto],
+    );
   }
 
   /// Busca foto_v2 por id_seccion.

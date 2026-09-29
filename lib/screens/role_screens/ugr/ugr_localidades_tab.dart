@@ -6,6 +6,8 @@ import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/edan/edan_localidades_envio_v2_service.dart';
+import '../../../services/edan_secciones_registry.dart';
 import '../../../services/edan_sync_service.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_evento.dart';
@@ -78,6 +80,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
         try {
           final pendientes =
               await DatabaseHelper.instance.getLocalidadesPendientesUsuario(userId);
+          await _resincronizarBadges(pendientes);
           if (mounted) {
             setState(() {
               _localidades = pendientes;
@@ -136,6 +139,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           localidades.addAll(nuevas);
         } catch (_) {}
       }
+
+      await _resincronizarBadges(localidades);
 
       localidades.sort((a, b) {
         final fa = a.fechaModificacion ?? '';
@@ -354,6 +359,40 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
   Future<void> _cambiarEstado(EdanLocalidad localidad, int nuevoEstado) async {
     final idLocalidad = localidad.idServer;
     if (idLocalidad == null) return;
+
+    final estado = UgrLocalidadEstadoX.fromId(nuevoEstado);
+    final esAprobar = estado == UgrLocalidadEstado.aprobadoUgr;
+    final accion = esAprobar ? 'Aprobar' : 'Rechazar';
+    final color = estado.color;
+
+    final confirmado = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        icon: Icon(
+          esAprobar ? Icons.check_circle : Icons.cancel,
+          size: 48,
+          color: color,
+        ),
+        title: Text('$accion localidad'),
+        content: Text(
+          '¿Está seguro de que desea $accion esta localidad?',
+          textAlign: TextAlign.center,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: color),
+            child: Text(accion),
+          ),
+        ],
+      ),
+    );
+    if (confirmado != true || !mounted) return;
+
     if (!ConnectivityService().isConnected) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -365,7 +404,6 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     try {
       await ApiService.instance.cambiarEstadoLocalidad(idLocalidad, nuevoEstado);
       if (mounted) {
-        final estado = UgrLocalidadEstadoX.fromId(nuevoEstado);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Estado cambiado a ${estado.label}'),
@@ -383,18 +421,18 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     }
   }
 
-  List<String> _impactosActivos(EdanLocalidad l) {
-    return [
-      if (l.impPoblacion) 'Población',
-      if (l.impSalud) 'Salud',
-      if (l.impInfraestructura) 'Infra',
-      if (l.impServicios) 'Servicios',
-      if (l.impEducacion) 'Educación',
-      if (l.impVivienda) 'Vivienda',
-      if (l.impAgropecuario) 'Agro',
-      if (l.impProteccion) 'Protección',
-      if (l.impNecesidades) 'Necesidades',
-    ];
+  /// Resincroniza los flags `imp_*` desde `localidad_secciones_activas`
+  /// (fuente autoritativa) o, si no hay fila local/secciones, desde los datos
+  /// cargados en el modelo (unión con los gruesos del server/doc). Mismo
+  /// proceso que los items RESP (sección 9.11): los badges del ítem reflejan
+  /// lo realmente informado, aunque el flag grueso del documento esté viejo.
+  Future<void> _resincronizarBadges(List<EdanLocalidad> localidades) async {
+    if (localidades.isEmpty) return;
+    final sincV2 = EdanLocalidadesEnvioV2Service();
+    for (final loc in localidades) {
+      await sincV2.aplicarFlagsDesdeSeccionesActivas(loc,
+          unionConGuardados: true);
+    }
   }
 
   @override
@@ -778,7 +816,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       localidad: localidad,
       primary: primary,
       usuario: localidad.usuario,
-      impactos: _impactosActivos(localidad),
+      impactos: EdanSeccionesRegistry.seccionesActivasLabelsCortos(localidad),
       modoConsolidacion: _modoConsolidacion,
       seleccionada: _seleccionadas.contains(localidad.idServer),
       seleccionable: seleccionable,
@@ -815,24 +853,32 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
         } catch (_) {}
       }
       if (!mounted) return;
+      final estado = localidad.estadoLocalidad;
+      final esAprobada = estado == UgrLocalidadEstado.aprobadoUgr ||
+          estado == UgrLocalidadEstado.aprobadoAjuste;
+      final esRechazada = estado == UgrLocalidadEstado.rechazadoUgr;
       final cambio = await Navigator.of(context).push<bool>(
         ugrRoute(EdanPreviewRespScreen(
           localidad: localidad,
           modoUGR: true,
-          onAprobar: () async {
-            await ApiService.instance.cambiarEstadoLocalidad(
-              localidad.idServer!,
-              UgrLocalidadEstado.aprobadoUgr.id,
-            );
-            localidad.estadoLocalidad = UgrLocalidadEstado.aprobadoUgr;
-          },
-          onRechazar: () async {
-            await ApiService.instance.cambiarEstadoLocalidad(
-              localidad.idServer!,
-              UgrLocalidadEstado.rechazadoUgr.id,
-            );
-            localidad.estadoLocalidad = UgrLocalidadEstado.rechazadoUgr;
-          },
+          onAprobar: esAprobada
+              ? null
+              : () async {
+                  await ApiService.instance.cambiarEstadoLocalidad(
+                    localidad.idServer!,
+                    UgrLocalidadEstado.aprobadoUgr.id,
+                  );
+                  localidad.estadoLocalidad = UgrLocalidadEstado.aprobadoUgr;
+                },
+          onRechazar: (esAprobada || esRechazada)
+              ? null
+              : () async {
+                  await ApiService.instance.cambiarEstadoLocalidad(
+                    localidad.idServer!,
+                    UgrLocalidadEstado.rechazadoUgr.id,
+                  );
+                  localidad.estadoLocalidad = UgrLocalidadEstado.rechazadoUgr;
+                },
         ), palette: Palettes.rea),
       );
       if (mounted) {
@@ -1176,20 +1222,6 @@ class _LocalidadCard extends StatelessWidget {
                   )).toList(),
                 ),
               ],
-              const SizedBox(height: 10),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 14, color: estado.color),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      estado.descripcion,
-                      style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
-                    ),
-                  ),
-                ],
-              ),
               if (!modoConsolidacion && (onAprobar != null || onRechazar != null)) ...[
                 const SizedBox(height: 10),
                 Row(

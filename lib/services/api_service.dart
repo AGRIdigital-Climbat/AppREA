@@ -1674,6 +1674,21 @@ class ApiService {
     return Map<String, dynamic>.from(body['data'] ?? body);
   }
 
+  Future<Map<String, dynamic>> validarPdfFirma(String pdfBase64) async {
+    final response = await _requestWithRetry(() => http
+        .post(
+          Uri.parse('${ApiConfig.firmaDigitalEndpoint}/validar-pdf'),
+          headers: _headers,
+          body: jsonEncode({
+            'pdfFirmadoBase64': pdfBase64,
+            'contrasenia': null,
+          }),
+        )
+        .timeout(const Duration(seconds: 60)));
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data'] ?? body);
+  }
+
   Future<List<int>> descargarDocRepositorio(int idDocumento) async {
     final response = await http.get(
       Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento/descargar'),

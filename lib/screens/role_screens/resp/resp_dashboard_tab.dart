@@ -6,6 +6,7 @@ import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
 import '../../../services/edan/edan_documento_sync_service.dart';
+import '../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../services/edan/edan_sync_respo_service.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 import '../../../widgets/edan_seccion_badges.dart';
@@ -23,15 +24,23 @@ class RespDashboardTab extends StatefulWidget {
   State<RespDashboardTab> createState() => RespDashboardTabState();
 }
 
-class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingObserver {
+class RespDashboardTabState extends State<RespDashboardTab>
+    with WidgetsBindingObserver {
   List<EdanLocalidad> _localidades = [];
+  bool _wasSyncingMunicipio = false;
 
   Map<String, int> get _indicadores {
     final total = _localidades.length;
     final huerfanas = _localidades.where((l) => l.esHuerfana).length;
-    final enviadas = _localidades.where((l) => l.estadoLocalidad == UgrLocalidadEstado.enviadoUgr).length;
-    final aprobadas = _localidades.where((l) => l.estadoLocalidad == UgrLocalidadEstado.aprobadoUgr).length;
-    final rechazadas = _localidades.where((l) => l.estadoLocalidad == UgrLocalidadEstado.rechazadoUgr).length;
+    final enviadas = _localidades
+        .where((l) => l.estadoLocalidad == UgrLocalidadEstado.enviadoUgr)
+        .length;
+    final aprobadas = _localidades
+        .where((l) => l.estadoLocalidad == UgrLocalidadEstado.aprobadoUgr)
+        .length;
+    final rechazadas = _localidades
+        .where((l) => l.estadoLocalidad == UgrLocalidadEstado.rechazadoUgr)
+        .length;
     return {
       'total': total,
       'huerfanas': huerfanas,
@@ -45,7 +54,29 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _wasSyncingMunicipio =
+        EdanSyncRespoService.instance.sincronizandoMunicipio.value;
+    EdanSyncRespoService.instance.sincronizandoMunicipio.addListener(
+      _onSyncMunicipioChanged,
+    );
     _cargarLocalidades();
+  }
+
+  @override
+  void dispose() {
+    EdanSyncRespoService.instance.sincronizandoMunicipio.removeListener(
+      _onSyncMunicipioChanged,
+    );
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _onSyncMunicipioChanged() {
+    final syncing = EdanSyncRespoService.instance.sincronizandoMunicipio.value;
+    if (_wasSyncingMunicipio && !syncing) {
+      _cargarLocalidades();
+    }
+    _wasSyncingMunicipio = syncing;
   }
 
   @override
@@ -59,12 +90,6 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
     _cargarLocalidades();
   }
 
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
   Future<void> _cargarLocalidades() async {
     final userId = AuthService.instance.userId;
     if (userId == null) {
@@ -73,14 +98,28 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
     try {
       final db = DatabaseHelper.instance;
       final localidades = await db.getLocalidades(userId);
-      final visibles = localidades.where((l) => !l.pendienteEliminacion).toList();
+      final visibles = localidades
+          .where((l) => !l.pendienteEliminacion)
+          .toList();
+      // Resincronizar flags imp_* desde localidad_secciones_activas, en unión
+      // con lo marcado en page01 (flags de datos_json), para que los badges
+      // del item reflejen los GRUPOS activos (pantallas de page01), igual que
+      // el JSON del long press y la vista previa.
+      final sincV2 = EdanLocalidadesEnvioV2Service();
+      for (final loc in visibles) {
+        await sincV2.aplicarFlagsDesdeSeccionesActivas(loc,
+            unionConGuardados: true);
+      }
       // Resolver nombres geográficos desde catálogo si faltan
       if (mounted) {
         final rp = context.read<ReporteProvider>();
         for (final loc in visibles) {
-          if ((loc.departamentoNombre == null || loc.departamentoNombre!.isEmpty) &&
+          if ((loc.departamentoNombre == null ||
+                  loc.departamentoNombre!.isEmpty) &&
               loc.idDepartamento != null) {
-            final match = rp.departamentos.where((d) => d.id == loc.idDepartamento);
+            final match = rp.departamentos.where(
+              (d) => d.id == loc.idDepartamento,
+            );
             if (match.isNotEmpty) loc.departamentoNombre = match.first.nombre;
           }
           if ((loc.provinciaNombre == null || loc.provinciaNombre!.isEmpty) &&
@@ -92,6 +131,13 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
               loc.idMunicipio != null) {
             final match = rp.municipios.where((m) => m.id == loc.idMunicipio);
             if (match.isNotEmpty) loc.municipioNombre = match.first.nombre;
+          }
+          // Resolver tipoLocalidad desde catálogo usando idTipoLocalidad
+          if (loc.idTipoLocalidad != null) {
+            final match = rp.tiposLocalidad.where(
+              (t) => t.idTipoLocalidad == loc.idTipoLocalidad,
+            );
+            if (match.isNotEmpty) loc.tipoLocalidad = match.first.nombre;
           }
         }
       }
@@ -110,7 +156,10 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
 
   Future<void> _editarLocalidad(EdanLocalidad localidad) async {
     final result = await Navigator.of(context).push<bool>(
-      ugrRoute(EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)), palette: Palettes.rea),
+      ugrRoute(
+        EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)),
+        palette: Palettes.rea,
+      ),
     );
     if (result == true && mounted) {
       await _cargarLocalidades();
@@ -127,10 +176,10 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
         content: Text(
           localidad.sincronizado
               ? 'Esta localidad ya fue sincronizada con el servidor.\n\n'
-                  'Se marcará como "pendiente de eliminación" y se eliminará '
-                  'de forma definitiva al sincronizar.'
+                    'Se marcará como "pendiente de eliminación" y se eliminará '
+                    'de forma definitiva al sincronizar.'
               : '¿Estás seguro de eliminar esta localidad?\n\n'
-                  'Esta acción no se puede deshacer.',
+                    'Esta acción no se puede deshacer.',
         ),
         actions: [
           TextButton(
@@ -168,7 +217,10 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e'), backgroundColor: AppColors.error),
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: AppColors.error,
+          ),
         );
       }
     }
@@ -200,8 +252,9 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
       }
       localidad.idEdanLocalidadEstado = estadoDestino.id;
 
-      sincronizada =
-          await EdanDocumentoSyncService().enviarLocalidadDocumento(localidad);
+      sincronizada = await EdanDocumentoSyncService().enviarLocalidadDocumento(
+        localidad,
+      );
 
       if (sincronizada) {
         localidad.estadoLocalidad = estadoDestino;
@@ -227,7 +280,9 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
                 ? mensaje
                 : 'Localidad guardada; pendiente de sincronización',
           ),
-          backgroundColor: sincronizada ? AppColors.aprobado : AppColors.pending,
+          backgroundColor: sincronizada
+              ? AppColors.aprobado
+              : AppColors.pending,
         ),
       );
       await _cargarLocalidades();
@@ -299,11 +354,7 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
       ),
       child: Row(
         children: [
-          Image.asset(
-            'assets/images/SINAGER.png',
-            width: 62,
-            height: 62,
-          ),
+          Image.asset('assets/images/SINAGER.png', width: 62, height: 62),
           const SizedBox(width: 16),
           Expanded(
             child: Column(
@@ -369,8 +420,8 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
               sincronizando
                   ? 'Sincronizando…'
                   : pendientes == 1
-                      ? '1 cambio pendiente de sincronizar'
-                      : '$pendientes cambios pendientes de sincronizar',
+                  ? '1 cambio pendiente de sincronizar'
+                  : '$pendientes cambios pendientes de sincronizar',
               style: const TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
@@ -384,7 +435,10 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
               onPressed: widget.onSync,
               style: FilledButton.styleFrom(
                 backgroundColor: primary,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 minimumSize: const Size(0, 36),
                 textStyle: const TextStyle(
                   fontSize: 12.5,
@@ -421,21 +475,24 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
         label: 'Enviadas UGR',
         icon: Icons.send,
         color: AppColors.inProgress,
-        onTap: () => widget.onVerEnReportes?.call(UgrLocalidadEstado.enviadoUgr),
+        onTap: () =>
+            widget.onVerEnReportes?.call(UgrLocalidadEstado.enviadoUgr),
       ),
       _IndicatorCard(
         value: ind['aprobadas'] ?? 0,
         label: 'Aprobadas',
         icon: Icons.check_circle,
         color: AppColors.aprobado,
-        onTap: () => widget.onVerEnReportes?.call(UgrLocalidadEstado.aprobadoUgr),
+        onTap: () =>
+            widget.onVerEnReportes?.call(UgrLocalidadEstado.aprobadoUgr),
       ),
       _IndicatorCard(
         value: ind['rechazadas'] ?? 0,
         label: 'Rechazadas',
         icon: Icons.feedback,
         color: AppColors.rechazado,
-        onTap: () => widget.onVerEnReportes?.call(UgrLocalidadEstado.rechazadoUgr),
+        onTap: () =>
+            widget.onVerEnReportes?.call(UgrLocalidadEstado.rechazadoUgr),
       ),
     ];
 
@@ -487,15 +544,18 @@ class RespDashboardTabState extends State<RespDashboardTab> with WidgetsBindingO
               final estado = loc.estadoLocalidad ?? UgrLocalidadEstado.borrador;
               final edanTmp = Edan.desdeLocalidad(loc);
               edanTmp.completarResponsableDesdeCache();
-              final completo =
-                  edanTmp.incompletosPorSeccion(exigirAlcalde: true).isEmpty;
+              final completo = edanTmp
+                  .incompletosPorSeccion(exigirAlcalde: true)
+                  .isEmpty;
               return _RespLocalidadCard(
                 localidad: loc,
                 completo: completo,
                 onTap: () async {
                   final confirmado = await Navigator.of(context).push<bool>(
-                    ugrRoute(EdanPreviewRespScreen(localidad: loc),
-                        palette: Palettes.rea),
+                    ugrRoute(
+                      EdanPreviewRespScreen(localidad: loc),
+                      palette: Palettes.rea,
+                    ),
                   );
                   if (confirmado == true && mounted) {
                     await _marcarEnviada(loc);
@@ -588,8 +648,10 @@ class _IndicatorCard extends StatelessWidget {
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style:
-                    TextStyle(fontSize: 10, color: color.withValues(alpha: 0.85)),
+                style: TextStyle(
+                  fontSize: 10,
+                  color: color.withValues(alpha: 0.85),
+                ),
               ),
             ],
           ),
@@ -618,8 +680,10 @@ class _RespLocalidadCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
     final estado = localidad.estadoLocalidad ?? UgrLocalidadEstado.borrador;
-    final esPendienteEnvio = estado == UgrLocalidadEstado.borrador && !localidad.sincronizado;
-    final reporterName = AuthService.instance.userName ??
+    final esPendienteEnvio =
+        estado == UgrLocalidadEstado.borrador && !localidad.sincronizado;
+    final reporterName =
+        AuthService.instance.userName ??
         AuthService.instance.currentToken?.nombre ??
         '';
     return Card(
@@ -627,7 +691,10 @@ class _RespLocalidadCard extends StatelessWidget {
       shape: esPendienteEnvio
           ? RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: AppColors.pending.withValues(alpha: 0.6), width: 1.5),
+              side: BorderSide(
+                color: AppColors.pending.withValues(alpha: 0.6),
+                width: 1.5,
+              ),
             )
           : null,
       child: InkWell(
@@ -645,7 +712,9 @@ class _RespLocalidadCard extends StatelessWidget {
                     child: Text(
                       localidad.tipoLocalidad.isNotEmpty
                           ? '${localidad.tipoLocalidad}: ${localidad.nombre.isNotEmpty ? localidad.nombre : 'Sin nombre'}'
-                          : (localidad.nombre.isNotEmpty ? localidad.nombre : 'Sin nombre'),
+                          : (localidad.nombre.isNotEmpty
+                                ? localidad.nombre
+                                : 'Sin nombre'),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -662,7 +731,11 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  const Icon(Icons.person_outline, size: 14, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.person_outline,
+                    size: 14,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Reportado por: $reporterName',
@@ -678,7 +751,11 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  const Icon(Icons.warning_amber, size: 14, color: AppColors.pending),
+                  const Icon(
+                    Icons.warning_amber,
+                    size: 14,
+                    color: AppColors.pending,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     localidad.tipoEventoNombre ?? 'Sin evento',
@@ -689,7 +766,11 @@ class _RespLocalidadCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.calendar_today,
+                    size: 12,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     localidad.fechaEvento ?? 'Sin fecha',
@@ -705,15 +786,24 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 10),
               if (esPendienteEnvio)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.pending.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.pending.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: AppColors.pending.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.cloud_upload_outlined, size: 16, color: AppColors.pending),
+                      const Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 16,
+                        color: AppColors.pending,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -729,23 +819,6 @@ class _RespLocalidadCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                )
-              else
-                const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, size: 14, color: AppColors.primary),
-                    SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'La información debe ser enviada cuando esté completa desde la vista previa.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               const SizedBox(height: 10),
               Row(

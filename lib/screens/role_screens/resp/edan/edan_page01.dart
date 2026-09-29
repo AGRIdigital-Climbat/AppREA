@@ -28,7 +28,7 @@ class _EdanPage01State extends State<EdanPage01> {
   late final TextEditingController _fechaController;
 
   String? _hora12;
-  String _ampm = 'AM';
+  String _ampm = '';
   int? _idTipoEvento;
 
   @override
@@ -345,6 +345,35 @@ class _EdanPage01State extends State<EdanPage01> {
             _ampmBtn('PM'),
           ],
         ),
+        if (_ampm.isEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF8E1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFFFB300)),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, size: 16, color: Color(0xFFB26A00)),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Seleccione si es AM o PM',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFFB26A00),
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -381,12 +410,13 @@ class _EdanPage01State extends State<EdanPage01> {
   }
 
   void _syncHora() {
-    if (_hora12 == null) return;
+    if (_hora12 == null || _ampm.isEmpty) return;
     widget.localidad.horaEvento = _horaIso();
   }
 
   String _horaIso() {
     if (_hora12 == null) return '';
+    if (_ampm.isEmpty) return '';
     var h = int.parse(_hora12!);
     if (_ampm == 'PM' && h != 12) h += 12;
     if (_ampm == 'AM' && h == 12) h = 0;

@@ -59,7 +59,6 @@ class _WizardPage {
   final String instruccion;
   final IconData icono;
   final Widget Function(BuildContext, EdanLocalidad, VoidCallback) builder;
-  final bool Function(EdanLocalidad)? valida;
   final String? tituloAyuda;
   final List<String>? consejosAyuda;
   final bool? habilitarAyuda;
@@ -70,7 +69,6 @@ class _WizardPage {
     required this.instruccion,
     required this.icono,
     required this.builder,
-    this.valida,
     this.tituloAyuda,
     this.consejosAyuda,
     this.habilitarAyuda,
@@ -198,7 +196,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         instruccion: _introTexto,
         icono: Icons.info_outline,
         builder: (c, loc, _) => _intro(),
-        valida: (l) => l.nombre.trim().isNotEmpty && l.idTipoEvento != null,
       ),
       _WizardPage(
         key: '01',
@@ -209,8 +206,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         icono: Icons.place_outlined,
         builder: (c, loc, reb) =>
             EdanPage01(localidad: loc, onImpactosCambio: rebuild),
-        valida: (l) =>
-            l.nombre.trim().isNotEmpty || l.impPoblacion || l.impSalud,
         // --- Página 01: texto de la guía interactiva ---
         tituloAyuda: 'Datos generales',
         habilitarAyuda:
@@ -230,10 +225,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
             'damnificadas.',
         icono: Icons.people_outline,
         builder: (c, loc, _) => EdanPage02(localidad: loc),
-        valida: (l) =>
-            l.totalPoblacionAfectada > 0 ||
-            l.totalFamiliasAfectadas > 0 ||
-            l.totalFamiliasDamnificadas > 0,
         tituloAyuda: 'Población damnificada',
         consejosAyuda: const [
           'Escribe los totales estimados de familias damnificadas, familias '
@@ -254,7 +245,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'respuesta. Cada grupo tiene su propio ID.',
           icono: Icons.groups_outlined,
           builder: (c, loc, _) => EdanPage03(localidad: loc),
-          valida: (l) => l.sumaGruposEtarios <= l.totalPoblacionAfectada,
           tituloAyuda: 'Impacto en la población',
           consejosAyuda: const [
             'Marca los grupos etarios afectados y registra heridos, fallecidos y '
@@ -277,9 +267,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'de salud. Puede agregar varios establecimientos.',
           icono: Icons.local_hospital_outlined,
           builder: (c, loc, _) => EdanPage04(localidad: loc),
-          valida: (l) =>
-              (l.sumaSaludPersonal + (l.necesidadSalud?.numeroPersonas ?? 0)) <=
-              l.totalPoblacionAfectada,
           tituloAyuda: 'Impacto en la salud',
           consejosAyuda: const [
             'Presiona "Agregar" para registrar cada establecimiento de salud '
@@ -349,7 +336,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'personal.',
           icono: Icons.school_outlined,
           builder: (c, loc, _) => EdanPage07(localidad: loc),
-          valida: (l) => l.sumaUnidadesEducativas <= l.totalPoblacionAfectada,
           tituloAyuda: 'Impacto en educación',
           consejosAyuda: const [
             'Presiona "Agregar" para registrar cada unidad educativa afectada.',
@@ -415,7 +401,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'psicológico.',
           icono: Icons.shield_outlined,
           builder: (c, loc, _) => EdanPage10(localidad: loc),
-          valida: (l) => l.sumaProteccion <= l.totalPoblacionAfectada,
           tituloAyuda: 'Necesidades de protección',
           consejosAyuda: const [
             'Marca los grupos vulnerables afectados y registra el número de '
@@ -456,9 +441,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
             'del usuario.',
         icono: Icons.badge_outlined,
         builder: (c, loc, _) => EdanPage13(localidad: loc),
-        valida: (l) =>
-            (l.responsable?.nombre.trim().isNotEmpty ?? false) &&
-            (l.responsable?.cargo.trim().isNotEmpty ?? false),
         // --- Página 13: texto de la guía interactiva ---
         tituloAyuda: 'Responsable',
         consejosAyuda: const [
@@ -507,68 +489,24 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     final map = <String, bool>{};
     for (final p in _pages) {
       if (p.key == 'intro' || p.key == 'resumen') continue;
-      if (p.valida != null) {
-        map[p.key] = p.valida!(_localidad);
-      } else {
-        map[p.key] = _seccionTieneDatos(p.key);
-      }
+      map[p.key] = _seccionCompleta(p.key);
     }
     return map;
   }
 
-  bool _seccionTieneDatos(String key) {
-    switch (key) {
-      case '03':
-        if (_localidad.impImpactoPoblacion || _localidad.impPrimeraRespuesta) {
-          return true;
-        }
-        return _localidad.impactoPoblacion.any((i) => i.tieneDatosGlobales) ||
-            (_localidad.necesidadPrimeraRespuesta?.tieneDatos ?? false);
-      case '04':
-        if (_localidad.impSaludEstablecimientos ||
-            _localidad.impNecesidadSalud) {
-          return true;
-        }
-        return _localidad.establecimientosSalud.isNotEmpty ||
-            (_localidad.necesidadSalud?.tieneDatos ?? false);
-      case '05':
-        if (_localidad.impDanosViales || _localidad.impDanosInfraPublica) {
-          return true;
-        }
-        return _localidad.danosViales.isNotEmpty ||
-            _localidad.danosInfraPublica.isNotEmpty;
-      case '06':
-        return _localidad.impServiciosBasicos
-            ? true
-            : _localidad.serviciosBasicos.any((s) => s.tieneDatos);
-      case '07':
-        return _localidad.impUnidadesEducativas
-            ? true
-            : _localidad.unidadesEducativas.isNotEmpty;
-      case '08':
-        return _localidad.impDanosVivienda
-            ? true
-            : _localidad.danosVivienda.isNotEmpty;
-      case '09':
-        if (_localidad.impDanosAgricultura ||
-            _localidad.impDanosPecuarios ||
-            _localidad.impInfraProductiva) {
-          return true;
-        }
-        return _localidad.danosAgricultura.isNotEmpty ||
-            _localidad.danosPecuarios.isNotEmpty ||
-            _localidad.infraProductiva.isNotEmpty;
-      case '10':
-        return _localidad.impProteccion
-            ? true
-            : _localidad.proteccion.any((g) => g.tieneDatos);
-      case '11':
-        return _localidad.impNecesidadHumanitaria
-            ? true
-            : (_localidad.necesidadHumanitaria?.tieneDatos ?? false);
-      default:
-        return false;
+  bool _seccionCompleta(String key) {
+    // La página intro se considera completa cuando el EDAN tiene los datos
+    // mínimos (nombre + tipo de evento), igual que el valida original (§9.20).
+    if (key == 'intro') {
+      return _localidad.nombre.trim().isNotEmpty &&
+          _localidad.idTipoEvento != null;
     }
+    if (key == 'resumen') return false;
+    // Completitud por DATOS REALES (misma regla que el resumen §9.7):
+    // los flags imp_* de page01 NO son suficientes; se exige por lo menos un
+    // dato real en la sección y (03/04/07/10) que la suma de personas no
+    // supere el total de población afectada (§9.19).
+    return EdanResumenPage.calcularSeccionesCompletas(_localidad)[key] ?? false;
   }
 
   Widget _intro() {
@@ -1209,20 +1147,5 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       ..setConsejos(p.consejosAyuda ?? [p.instruccion])
       ..setVisibilidad(const Duration(seconds: 8))
       ..show();
-  }
-
-  bool _seccionCompleta(String key) {
-    final p = _pages.firstWhere(
-      (p) => p.key == key,
-      orElse: () => _WizardPage(
-        key: key,
-        titulo: '',
-        instruccion: '',
-        icono: Icons.circle,
-        builder: (c, l, r) => const SizedBox.shrink(),
-      ),
-    );
-    if (p.valida != null) return p.valida!(_localidad);
-    return _seccionTieneDatos(key);
   }
 }

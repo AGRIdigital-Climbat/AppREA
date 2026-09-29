@@ -98,7 +98,7 @@ lib/
 
 **Envío:** diálogo declaración jurada → `_guardar` → estado `enviadoUgr` → si hay conexión: `procesarColaDeletes → eliminarFilasAntesDelPush → enviarLocalidadDocumento` (POST crear / PUT actualizar) → `pop(true)`.
 
-**Validación hard-block:** pages 03, 04, 07, 10 retornan `false` si la suma de personas excede `totalPoblacionAfectada` → bloquea avance y envío. Véase §9.19.
+**Validación hard-block:** pages 03, 04, 07, 10 retornan `false` (step indicator "Pendiente" + bloquea envío) si la suma de personas excede `totalPoblacionAfectada`. Vive en la fuente canónica `EdanResumenPage.calcularSeccionesCompletas()` (`&& suma <= total`, §9.19/§9.21); el campo `valida` de `_WizardPage` fue eliminado (§9.21).
 
 **Detección de cambios:** snapshot inicial tras sincronizar flags; comparación `jsonEncode(inicial)!=jsonEncode(actual)` excluyendo claves volátiles (`fecha_modificacion, pendiente_*, id_edan_localidad_estado, id_local, id_seccion, id_grupo_vulnerable_catalogo`).
 
@@ -292,7 +292,7 @@ Mismo bug que 9.11 en RESP: los badges del ítem UGR se construían solo desde l
 **Fix:** Validación hard-block en 3 niveles:
 - **Modelo** (`edan.dart`): Propiedades computadas en `EdanLocalidad`: `sumaGruposEtarios`, `sumaSaludPersonal`, `sumaUnidadesEducativas`, `sumaProteccion`.
 - **UI**: Banner naranja de advertencia en cada página cuando la suma excede el cap.
-- **Validación**: `valida` en `_WizardPage` para pages 03/04/07/10 retorna `false` si suma > cap → bloquea avance (step indicator muestra "Pendiente") y bloquea envío en resumen.
+- **Validación**: La completitud por datos reales (step indicator "Pendiente" y envío bloqueado si suma > cap) vive en `calcularSeccionesCompletas()` de `edan_resumen_page.dart`, que combina `_seccionTieneDatos0X` (datos reales) con `&& suma <= cap`. El `valida` de `_WizardPage` para pages 03/04/07/10 fue eliminado en §9.21 (antes retornaba `false` solo por cap, sin exigir datos).
 
 **Archivos:** `models/edan.dart`, `edan_page03.dart`, `edan_page04.dart`, `edan_page07.dart`, `edan_page10.dart`, `edan_form_wizard.dart`, `edan_resumen_page.dart`.
 
@@ -307,6 +307,27 @@ Mismo bug que 9.11 en RESP: los badges del ítem UGR se construían solo desde l
 - **Nota:** La navegación entre páginas (`_next`) NO está bloqueada — el usuario puede avanzar libremente para revisar, pero no puede guardar un EDAN vacío.
 
 **Archivos:** `edan_form_wizard.dart`, `CORRECCIONES_EXHAUSTIVAS.md`.
+
+### 9.21 Step indicator pintaba secciones de verde solo con flags (sin datos reales) ✅ CORREGIDO
+
+**Problema:** Al marcar un checkbox en page01 (p.ej. `impSalud`, `impPoblacion`, `impEducacion`, `impProteccion`), el step indicator pintaba de verde la sección correspondiente (03, 04, 07, 10) aunque no hubiera ningún dato real ingresado. Dos causas:
+1. `_seccionesCompletas()` y `_seccionCompleta()` del wizard usaban el campo `valida` de `_WizardPage`, y en pages 03/04/07/10 ese `valida` era solo la comprobación de cap (§9.19) `suma <= totalPoblacionAfectada`, que es `true` con `0 <= 0` sin datos. Además page01 marcaba completa con `nombre || impPoblacion || impSalud`.
+2. `_seccionTieneDatos()` devolvía `true` con solo los flags detallados `imp*` (p.ej. `impImpactoPoblacion || impPrimeraRespuesta`), sin exigir datos en arrays.
+
+**Fix:** Unificación de la completitud en UNA sola fuente canónica (espejo del resumen §9.7):
+- Se eliminó el campo `valida` de `_WizardPage` y todos sus usos (dead code).
+- Se eliminó `_seccionTieneDatos(key)` (lógica redundante que confiaba en flags).
+- `_seccionCompleta(key)` ahora delega en `EdanResumenPage.calcularSeccionesCompletas(_localidad)`, que exige DATOS REALES por sección (+ el hard-block de sumas §9.19 vía `&& suma <= total`). `_seccionesCompletas()` llama a `_seccionCompleta`.
+- La página 'intro' conserva su regla §9.20 (nombre + tipo de evento).
+
+**Comportamiento resultante (ambos procedimientos, crear desde cero y entrar a editar un borrador):**
+- Crear desde cero: marcar checkboxes en page01 ya no pinta verde ninguna sección; las páginas se pintan verdes solo al ingresar datos reales.
+- Entrar a editar: al reabrir, `_sincronizarFlagsDesdeSeccionesActivas()` recarga arrays desde SQLite y `calcularSeccionesCompletas` devuelve verde solo para las secciones que efectivamente tienen datos guardados.
+- El botón "Enviar" ya usaba `formularioCompleto()` (misma fuente §9.7), por lo que queda consistente con la vista del step indicator.
+
+**Archivos:** `edan_form_wizard.dart` (el `seccionesCompletas` del resumen y la lógica `_seccionTieneDatos03..11` estaban correctos desde §9.7), `CORRECCIONES_EXHAUSTIVAS.md`.
+
+**Verificación:** `flutter analyze` 0 errores / 0 warnings nuevos (solo infos preexistentes). Los tests que fallan (`api_flow_test.dart`, `proteccion_endpoint_test.dart`) son de serialización `toApiJson()`/`fotografia` del modelo y son preexistentes, ajenos a este cambio.
 
 ---
 
@@ -365,14 +386,19 @@ Flujo: usuario habla o escribe → `asistente_ia_service.dart` → `POST {ApiCon
 | Parámetro | Valor |
 |---|---|
 | Endpoint | `POST {ApiConfig.ragBaseUrl}/chat` |
-| `pregunta` | Texto + prefijo `"[Voz] Corrige errores de voz. Responde solo en español. "` |
-| `limite` | `15` |
-| `umbral` | `0.3` |
+| `pregunta` | Texto del usuario, SIN prefijos (limpio). El contexto de sección va en `termino`. |
+| `limite` | `15` (solo chat global, sin `grupo_id`) |
 | `max_tokens` | `700` |
-| `documentoIds` | `[21]` (opcional, filtra por documento) |
+| `grupo_id` | `2` (opcional, filtra por grupo documental) |
+| `termino` | Nombre de la sección/pantalla (solo con `grupo_id`; p.ej. `"Datos Generales"`) |
 | Header | `X-API-Key` (opcional) |
 
-**SSE:** líneas `data: {"type":"token","content":"..."}` hasta `data: {"type":"done","fuentes":[...]}`. Fuentes descartadas.
+**Errores antes del stream (JSON):**
+- `404 {"detail":"Grupo no encontrado"}` → `grupo_id` inválido.
+- `400 {"detail":"El grupo no tiene documentos"}` → grupo vacío.
+- El cliente extrae `detail` y lo incluye en el error (`Error MotorIA 404: Grupo no encontrado`).
+
+**SSE:** líneas `data: {"type":"token","content":"..."}` hasta `data: {"type":"done","fuentes":[...]}`. Las fuentes se muestran en el chat en una tarjeta expandible (ver §13.9).
 
 ### 13.3 Modo voz / texto
 
@@ -392,7 +418,7 @@ Flujo: usuario habla o escribe → `asistente_ia_service.dart` → `POST {ApiCon
 
 Widget reutilizable insertado en `edan_form_wizard.dart`:
 - Posicionado `Positioned(bottom: 80, right: 16)`.
-- `_documentoIds = [21]` → filtra las fuentes RAG por el documento EDAN.
+- `_grupoId = 2` → filtra las fuentes RAG por el grupo documental EDAN (`grupo_id`).
 - Muestra saludo contextual basado en `pageTitle` / `pageKey` de la página actual del wizard.
 - Abre el bottom sheet del Asistente IA con contexto de sección.
 
@@ -402,6 +428,79 @@ Widget reutilizable insertado en `edan_form_wizard.dart`:
 - **`builtInKotlin=false`** (revertido): `flutter_tts-4.2.5` usa `kotlin-android` legacy y no tiene versión Built-in Kotlin. La migración completa está **bloqueada** — alternativa: reemplazar por `google_text_to_speech`.
 - Build compila: `flutter build apk --debug` sin errores.
 
+### 13.7 Filtro por grupo documental (`grupo_id: 2`)
+
+El asistente vinculado al wizard EDAN (`AsistenteIaFormFab`) enviaba antes `documento_ids: [21]` (documento suelto). Ahora envía `grupo_id: 2` (grupo documental completo) con `termino` de sección:
+
+```json
+{
+  "pregunta": "<texto del usuario>",
+  "max_tokens": 700,
+  "grupo_id": 2,
+  "termino": "Datos Generales"
+}
+```
+
+- `AsistenteIaFormFab._grupoId = 2` y `contextoPantalla: pageTitle` → `AsistenteIAProvider(grupoId: ..., contextoPantalla: ...)` → `AsistenteIAService._buildBody(pregunta, grupoId, termino)`.
+- Cuando `grupoId == null` (asistente global sin wizard) se sigue enviando `limite: 15`; sin `grupo_id`, sin `termino` ni `llm_externo`.
+- **Regla estricta:** nunca se envían `"grupo_id": 0` ni `"termino": "string"`. `grupo_id` solo aparece si es un entero `> 0` (el FAB genérico de Inicio/Navegación crea `AsistenteIAProvider()` sin grupo → el body queda solo `{pregunta, max_tokens, limite}`). `termino` solo se incluye cuando hay `grupo_id` válido y texto no vacío.
+- `chatStream()` y `chat()` del service usan los mismos parámetros por consistencia.
+
+### 13.8 Contexto de sección como `termino`
+
+El asistente vinculado al wizard envía la sección actual en el campo `termino` (NO concatenada a la pregunta):
+
+```json
+{
+  "pregunta": "<texto del usuario>",
+  "max_tokens": 700,
+  "grupo_id": 2,
+  "termino": "<pageTitle>"
+}
+```
+
+- `termino` = `page.titulo` (p.ej. `"Datos Generales"`, `"Impacto en viviendas"`) pasado vía `AsistenteIaFormFab.contextoPantalla` → `AsistenteIAProvider.contextoPantalla` → `chatStream(termino: contextoPantalla)`.
+- **Regla backend:** `termino` solo se aplica si va con `grupo_id`; sin `grupo_id` se ignora (chats normales intactos). Si `termino` no coincide con ninguna sección, cae a la búsqueda normal del grupo (fallback, no falla).
+- `pregunta` se envía **limpia** (solo el texto del usuario); el saludo visible del bottom sheet sí muestra la sección, pero no va en el payload.
+- `_ultimaPreguntaFallida` conserva el texto original; al reintentar se re-envía con el mismo `termino`.
+
+### 13.9 Documentos de referencia (fuentes)
+
+El evento `done` del SSE de `/chat` trae un array `fuentes` y un mapa `citas`:
+
+```json
+{
+  "documento_id": 21,
+  "titulo": "Ley Nº 28611 — Ley General del Ambiente",
+  "tipo": "Ley",
+  "prioridad": 1,
+  "numerals": ["Artículo 72", "Artículo 73"],
+  "similitud": 0.98,
+  "numerals_truncados": true
+}
+```
+
+```json
+"citas": {
+  "1": {"documento_id": 14, "titulo": "Comité de Operaciones", "numeral": "Artículo 72 (parte 4)"},
+  "5": {"documento_id": 7, "titulo": "Unidad de gestión de riesgos municipal", "numeral": "Artículo 22"}
+}
+```
+
+**Flujo en la app:**
+- `AsistenteIAService.chatStream()` recibe callbacks `onFuentes` y `onCitas`: al llegar `type == 'done'` parsea `fuentes` y `citas` (claves string → `AsistenteCita` con documentoId/titulo/numeral) y los invoca.
+- `AsistenteIAProvider.enviarPregunta()` los captura y adjunta al mensaje del asistente: `AsistenteChatMessage(role: 'assistant', content: ..., fuentes: [...], citas: {...})`. Mensajes de error no llevan metadatos.
+- Modelo: `lib/models/ai/asistente_chat_message.dart` define `AsistenteFuente`, `AsistenteCita` y `AsistenteChatMessage` con `fuentes` (`List<AsistenteFuente>?`) y `citas` (`Map<String, AsistenteCita>?`).
+
+**UI (bottom sheet):** debajo de cada respuesta IA (mensajes terminados, no el que streamea) se muestra una tarjeta **colapsada por defecto** "Referencias (N)":
+- Header: `Icons.description_outlined` + contador + flecha para expandir/colapsar (chevron). Pegada a la burbuja de la respuesta.
+- Al expandir (máx. 220px, scroll): cada fuente es un ítem con **número en círculo**, título (negrita, 2 líneas), `tipo` + numerales citados, badge verde de similitud `(similitud * 100).round()`%, y fila morada `Cita: <numeral>` cuando el `documento_id` coincide con una `citas` del `done`.
+- Solo información: no abre ni descarga el documento.
+
+**Citas en el texto de la respuesta:** al renderizar el markdown se expanden los marcadores `[N]` del LLM con `_expandirCitas()` (regex `\[(\d+)\]`): si `citas[N]` existe → `[<documento_id>] <titulo> (<numeral>)` (mantiene el marcador `[·]` visible para guiar hacia el listado numerado); si no existe, se deja `[N]` tal cual. El copiado conserva el texto original con `[N]` sin expandir. Durante el streaming (aún sin `done`) se muestra el texto crudo y se expande al recibir las citas.
+
+**Acciones por mensaje (dentro del contenedor de la respuesta):** fila de iconos dentro del fondo de la burbuja gris — copiar, voz (si `soportaVoz`) y reintentar (solo en error, `Icons.refresh` rojo). El timeout del provider pasó de 30s a **90s** (señal lenta); el `request.send()` del service cubre solo conexión/headers (60s), el límite real del chat lo marca el provider.
+
 ---
 
-> **Este archivo se actualizará conforme se identifiquen y corrijan problemas.**
+> **Este archivo se actualizará conforme se identifiquen y corrijan problemas.

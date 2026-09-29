@@ -160,7 +160,16 @@ class _EdanPage04State extends State<EdanPage04> {
                 onPressed: () => Navigator.pop(ctx, false),
                 child: const Text('Cancelar')),
             ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
+              onPressed: () {
+                if (_nombre.text.isEmpty && _comunidad.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('No hay datos para guardar')),
+                  );
+                  Navigator.pop(ctx, false);
+                } else {
+                  Navigator.pop(ctx, true);
+                }
+              },
               child: const Text('Guardar'),
             ),
           ],
@@ -234,6 +243,35 @@ class _EdanPage04State extends State<EdanPage04> {
     return null;
   }
 
+  Widget _avisoSumaPersonas() {
+    final l = widget.localidad;
+    final suma = l.sumaSaludPersonal + (l.necesidadSalud?.numeroPersonas ?? 0);
+    if (suma <= 0 || suma <= l.totalPoblacionAfectada) return const SizedBox.shrink();
+    return Container(
+      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFB300)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_outlined, size: 18, color: Color(0xFFB26A00)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'La suma de personas ($suma) supera el total de población afectada (${l.totalPoblacionAfectada}). '
+              'Verifica los datos antes de continuar.',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B4A00), height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _campoNum(TextEditingController c, String label) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -261,6 +299,7 @@ class _EdanPage04State extends State<EdanPage04> {
               'establecimiento de salud. Puedes agregar más de uno.',
         ),
         const SizedBox(height: 10),
+        _avisoSumaPersonas(),
         EdanSubsectionHeader(
           titulo: 'Establecimientos de salud',
           icono: Icons.local_hospital_outlined,

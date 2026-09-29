@@ -91,7 +91,16 @@ class _EdanPage08State extends State<EdanPage08> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+            ElevatedButton(onPressed: () {
+                  if (_comunidad.text.isEmpty && _parcial.text.isEmpty && _total.text.isEmpty && _nec.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No hay datos para guardar')),
+                    );
+                    Navigator.pop(ctx, false);
+                  } else {
+                    Navigator.pop(ctx, true);
+                  }
+                }, child: const Text('Guardar')),
           ],
         ),
       ),

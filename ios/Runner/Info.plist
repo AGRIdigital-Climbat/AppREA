@@ -74,5 +74,9 @@
 	<string>Se utiliza tu ubicación para registrar la ubicación precisa del evento adverso.</string>
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>Se utilizan notificaciones para informarte sobre el estado de tus reportes.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Se requiere acceso al micrófono para el asistente de llenado por voz del formulario EDAN.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Se utiliza el reconocimiento de voz para facilitar el llenado del formulario EDAN.</string>
 </dict>
 </plist>

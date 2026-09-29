@@ -43,7 +43,16 @@ class EdanSyncRespoService {
 
   Future<SyncResult> sincronizar() async {
     if (_isSyncing) {
-      return SyncResult(exito: false, mensaje: 'Ya hay una sincronización en curso');
+      return SyncResult(
+        exito: false,
+        mensaje: 'Ya hay una sincronización en curso',
+      );
+    }
+    if (sincronizandoMunicipio.value) {
+      return SyncResult(
+        exito: false,
+        mensaje: 'Carga inicial de localidades en curso',
+      );
     }
 
     _isSyncing = true;
@@ -58,23 +67,24 @@ class EdanSyncRespoService {
       }
 
       final db = DatabaseHelper.instance;
+      final docSync = EdanDocumentoSyncService();
 
       // ===== Diagnóstico local =====
       final locales = await db.getLocalidades(userId);
       final pendientesDelete = await db.getLocalidadesPendingDeletion();
-      debugPrint('[SyncC] Diagnóstico: ${locales.length} total, '
-          '${pendientesDelete.length} para delete');
+      debugPrint(
+        '[SyncC] Diagnóstico: ${locales.length} total, '
+        '${pendientesDelete.length} para delete',
+      );
       if (kSyncDebugMode) {
         SyncDebugCollector.instance.addFase('Diagnóstico local');
         final fotosLocal = await _fotosLocalesPendientes(db, locales);
-        SyncDebugCollector.instance.addDiagnostico(
-          'Estado local antes de sincronizar',
-          {
-            'total_localidades': locales.length,
-            'pendientes_delete': pendientesDelete.length,
-            'fotos_pendientes': fotosLocal,
-          },
-        );
+        SyncDebugCollector.instance
+            .addDiagnostico('Estado local antes de sincronizar', {
+              'total_localidades': locales.length,
+              'pendientes_delete': pendientesDelete.length,
+              'fotos_pendientes': fotosLocal,
+            });
       }
 
       // ===== FASE 1: FOTOS (upload) =====
@@ -86,6 +96,11 @@ class EdanSyncRespoService {
       // ===== FASE 2: DATOS (push) =====
       // DELETE primero → luego UPDATE/CREATE.
       if (kSyncDebugMode) SyncDebugCollector.instance.addFase('Fase 2: Datos');
+      // La cola de deletes de ítems 1:N (`pendientes_eliminar`) se procesa a
+      // nivel global: un borrado hecho sin conexión debe propagarse aunque la
+      // localidad no esté "sucia" (editado=0 y sin secciones modificadas), o
+      // el DELETE quedaría huérfano hasta que otra localidad se ensucie.
+      await docSync.procesarColaDeletes();
       await _eliminarPendientes(result);
       await _subirSucios(locales, result);
 
@@ -95,25 +110,23 @@ class EdanSyncRespoService {
       await _pullDatos(result);
 
       // ===== Download fotos del server =====
-      if (kSyncDebugMode) SyncDebugCollector.instance.addFase('Fase 3b: Download Fotos');
+      if (kSyncDebugMode)
+        SyncDebugCollector.instance.addFase('Fase 3b: Download Fotos');
       await _descargarFotosPendientes();
 
       // ===== Resumen global (contadores visibles en el debug) =====
       if (kSyncDebugMode) {
         SyncDebugCollector.instance.addFase('Resumen sincronización');
-        SyncDebugCollector.instance.addDiagnostico(
-          'Contadores finales',
-          {
-            'creados': result.creados,
-            'actualizados': result.actualizados,
-            'enviados': result.enviados,
-            'eliminados': result.eliminados,
-            'fallidos': result.fallidos,
-            'fotos_pendientes': result.fotosPendientes,
-            'fotos_subidas': result.fotosSubidas,
-            'fotos_fallidas': result.fotosFallidas,
-          },
-        );
+        SyncDebugCollector.instance.addDiagnostico('Contadores finales', {
+          'creados': result.creados,
+          'actualizados': result.actualizados,
+          'enviados': result.enviados,
+          'eliminados': result.eliminados,
+          'fallidos': result.fallidos,
+          'fotos_pendientes': result.fotosPendientes,
+          'fotos_subidas': result.fotosSubidas,
+          'fotos_fallidas': result.fotosFallidas,
+        });
       }
 
       return result;
@@ -155,7 +168,9 @@ class EdanSyncRespoService {
     for (final local in locales) {
       final idLocal = local.idLocal;
       if (idLocal == null) continue;
-      for (final desc in EdanSeccionesRegistry.secciones.where((s) => s.usaFoto)) {
+      for (final desc in EdanSeccionesRegistry.secciones.where(
+        (s) => s.usaFoto,
+      )) {
         try {
           final filas = await db.leerFilasSeccion(desc.tablaSqlite, idLocal);
           for (final fila in filas) {
@@ -171,17 +186,17 @@ class EdanSyncRespoService {
       }
     }
 
-    return {
-      'total': total,
-      'por_localidad': porLocalidad,
-    };
+    return {'total': total, 'por_localidad': porLocalidad};
   }
 
   // =====================================================================
   //  FASE 1: SUBIR FOTOS PENDIENTES
   // =====================================================================
 
-  Future<void> _subirFotosPendientes(List<EdanLocalidad> locales, SyncResult result) async {
+  Future<void> _subirFotosPendientes(
+    List<EdanLocalidad> locales,
+    SyncResult result,
+  ) async {
     final db = DatabaseHelper.instance;
     int subidas = 0;
     int fallidas = 0;
@@ -193,11 +208,15 @@ class EdanSyncRespoService {
 
       // 1) Buscar en foto_pendiente_v2
       final pendientesV2 = await db.leerFotosPendientesUploadV2();
-      final fotosLocal = pendientesV2.where((f) => f['id_local'] == idLocal).toList();
+      final fotosLocal = pendientesV2
+          .where((f) => f['id_local'] == idLocal)
+          .toList();
 
       // 2) Fallback: buscar en tablas de secciones donde fotografia empiece con /data/
       if (fotosLocal.isEmpty) {
-        for (final desc in EdanSeccionesRegistry.secciones.where((s) => s.usaFoto)) {
+        for (final desc in EdanSeccionesRegistry.secciones.where(
+          (s) => s.usaFoto,
+        )) {
           try {
             final filas = await db.leerFilasSeccion(desc.tablaSqlite, idLocal);
             for (final fila in filas) {
@@ -237,14 +256,16 @@ class EdanSyncRespoService {
         final idSeccion = fotoRow['id_seccion']?.toString() ?? '';
 
         if (ruta == null || ruta.isEmpty) {
-          if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Ruta vacía');
+          if (idFoto.isNotEmpty)
+            await db.marcarFotoErrorV2(idFoto, 'Ruta vacía');
           fallidas++;
           continue;
         }
 
         final file = File(ruta);
         if (!await file.exists()) {
-          if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Archivo no encontrado');
+          if (idFoto.isNotEmpty)
+            await db.marcarFotoErrorV2(idFoto, 'Archivo no encontrado');
           fallidas++;
           continue;
         }
@@ -263,12 +284,7 @@ class EdanSyncRespoService {
             // Actualizar la sección en SQLite con el path del server
             final tabla = await _tablaPorSeccion(idSeccion);
             if (tabla.isNotEmpty) {
-              await db.marcarFotografiaSeccion(
-                tabla,
-                idLocal,
-                idSeccion,
-                path,
-              );
+              await db.marcarFotografiaSeccion(tabla, idLocal, idSeccion, path);
             }
             // Actualizar el modelo en memoria para que el documento que se arme
             // en Fase 2b use el path del server (no el /data/ local), incluso si
@@ -277,11 +293,13 @@ class EdanSyncRespoService {
             subidas++;
             debugPrint('[SyncC]   Foto OK: $idSeccion → $path');
           } else {
-            if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, 'Server no devolvió path');
+            if (idFoto.isNotEmpty)
+              await db.marcarFotoErrorV2(idFoto, 'Server no devolvió path');
             fallidas++;
           }
         } catch (e) {
-          if (idFoto.isNotEmpty) await db.marcarFotoErrorV2(idFoto, e.toString());
+          if (idFoto.isNotEmpty)
+            await db.marcarFotoErrorV2(idFoto, e.toString());
           fallidas++;
           debugPrint('[SyncC]   Foto FALLO: $idSeccion → $e');
         }
@@ -291,12 +309,15 @@ class EdanSyncRespoService {
     result.fotosPendientes = pendientes;
     result.fotosSubidas = subidas;
     result.fotosFallidas = fallidas;
-    debugPrint('[SyncC] Fase 1 completada: $subidas subidas, $fallidas fallidas, $pendientes pendientes');
+    debugPrint(
+      '[SyncC] Fase 1 completada: $subidas subidas, $fallidas fallidas, $pendientes pendientes',
+    );
     if (kSyncDebugMode) {
-      SyncDebugCollector.instance.addDiagnostico(
-        'Resultado Fase 1: Fotos',
-        {'pendientes': pendientes, 'subidas': subidas, 'fallidas': fallidas},
-      );
+      SyncDebugCollector.instance.addDiagnostico('Resultado Fase 1: Fotos', {
+        'pendientes': pendientes,
+        'subidas': subidas,
+        'fallidas': fallidas,
+      });
     }
   }
 
@@ -311,7 +332,11 @@ class EdanSyncRespoService {
   /// `id_seccion` coincide, reemplazando el path local `/data/` por el path del
   /// servidor. Así el documento que se construye en Fase 2b serializa la ruta
   /// servida, no la local.
-  void _actualizarFotoModelo(EdanLocalidad local, String idSeccion, String path) {
+  void _actualizarFotoModelo(
+    EdanLocalidad local,
+    String idSeccion,
+    String path,
+  ) {
     for (final item in _itemsConFoto(local)) {
       if (idSeccionDe(item) == idSeccion) {
         _setFotografiaItem(item, path);
@@ -321,27 +346,54 @@ class EdanSyncRespoService {
   }
 
   List<Object> _itemsConFoto(EdanLocalidad local) => [
-        ...local.establecimientosSalud,
-        ...local.danosViales,
-        ...local.danosInfraPublica,
-        ...local.serviciosBasicos,
-        ...local.unidadesEducativas,
-        ...local.danosVivienda,
-        ...local.danosAgricultura,
-        ...local.danosPecuarios,
-        ...local.infraProductiva,
-      ];
+    ...local.establecimientosSalud,
+    ...local.danosViales,
+    ...local.danosInfraPublica,
+    ...local.serviciosBasicos,
+    ...local.unidadesEducativas,
+    ...local.danosVivienda,
+    ...local.danosAgricultura,
+    ...local.danosPecuarios,
+    ...local.infraProductiva,
+  ];
 
   void _setFotografiaItem(Object item, String path) {
-    if (item is EdanEstablecimientoSalud) { item.fotografia = path; return; }
-    if (item is EdanDanoVial) { item.fotografia = path; return; }
-    if (item is EdanDanoInfraPublica) { item.fotografia = path; return; }
-    if (item is EdanServicioBasicoDetalle) { item.fotografia = path; return; }
-    if (item is EdanDanoUnidadEducativa) { item.fotografia = path; return; }
-    if (item is EdanDanoVivienda) { item.fotografia = path; return; }
-    if (item is EdanDanoAgricultura) { item.fotografia = path; return; }
-    if (item is EdanDanoPecuario) { item.fotografia = path; return; }
-    if (item is EdanInfraProductiva) { item.fotografia = path; return; }
+    if (item is EdanEstablecimientoSalud) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanDanoVial) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanDanoInfraPublica) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanServicioBasicoDetalle) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanDanoUnidadEducativa) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanDanoVivienda) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanDanoAgricultura) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanDanoPecuario) {
+      item.fotografia = path;
+      return;
+    }
+    if (item is EdanInfraProductiva) {
+      item.fotografia = path;
+      return;
+    }
   }
 
   // =====================================================================
@@ -378,19 +430,24 @@ class EdanSyncRespoService {
       try {
         if (idServer != null) {
           // Tiene idServer → DELETE al backend
-          final ok = await EdanDocumentoSyncService().eliminarLocalidadDocumento(idServer);
+          final ok = await EdanDocumentoSyncService()
+              .eliminarLocalidadDocumento(idServer);
           if (!ok) {
             // 403: consolidada en EDAN → no borrar local
             conservadas++;
-            debugPrint('[SyncC]   DELETE $idLocal → consolidada (403), se conserva');
+            debugPrint(
+              '[SyncC]   DELETE $idLocal → consolidada (403), se conserva',
+            );
             if (kSyncDebugMode) {
-              SyncDebugCollector.instance.add(SyncApiEntry(
-                fase: SyncDebugCollector.instance.currentPhase,
-                metodo: 'DELETE',
-                endpoint: '$idServer/documento (403 consolidada)',
-                localidadId: idLocal,
-                error: 'Localidad consolidada en EDAN, no se borra local',
-              ));
+              SyncDebugCollector.instance.add(
+                SyncApiEntry(
+                  fase: SyncDebugCollector.instance.currentPhase,
+                  metodo: 'DELETE',
+                  endpoint: '$idServer/documento (403 consolidada)',
+                  localidadId: idLocal,
+                  error: 'Localidad consolidada en EDAN, no se borra local',
+                ),
+              );
             }
             continue;
           }
@@ -405,26 +462,25 @@ class EdanSyncRespoService {
         debugPrint('[SyncC]   DELETE $idLocal → ERROR: $e');
         result.fallidos++;
         if (kSyncDebugMode) {
-          SyncDebugCollector.instance.add(SyncApiEntry(
-            fase: SyncDebugCollector.instance.currentPhase,
-            metodo: 'DELETE',
-            endpoint: 'error-localidad-pendiente',
-            localidadId: idLocal,
-            error: e.toString(),
-          ));
+          SyncDebugCollector.instance.add(
+            SyncApiEntry(
+              fase: SyncDebugCollector.instance.currentPhase,
+              metodo: 'DELETE',
+              endpoint: 'error-localidad-pendiente',
+              localidadId: idLocal,
+              error: e.toString(),
+            ),
+          );
         }
       }
     }
     if (kSyncDebugMode) {
-      SyncDebugCollector.instance.addDiagnostico(
-        'Fase 2a: Resultado',
-        {
-          'total_pendientes': pendientes.length,
-          'eliminadas': eliminadas,
-          'conservadas_403': conservadas,
-          'errores': errores,
-        },
-      );
+      SyncDebugCollector.instance.addDiagnostico('Fase 2a: Resultado', {
+        'total_pendientes': pendientes.length,
+        'eliminadas': eliminadas,
+        'conservadas_403': conservadas,
+        'errores': errores,
+      });
     }
   }
 
@@ -432,7 +488,10 @@ class EdanSyncRespoService {
   //  FASE 2b: SUBIR LOCALIDADES SUCIAS
   // =====================================================================
 
-  Future<void> _subirSucios(List<EdanLocalidad> locales, SyncResult result) async {
+  Future<void> _subirSucios(
+    List<EdanLocalidad> locales,
+    SyncResult result,
+  ) async {
     final db = DatabaseHelper.instance;
     final sincV2 = EdanLocalidadesEnvioV2Service(db: db);
     final docSync = EdanDocumentoSyncService();
@@ -446,7 +505,8 @@ class EdanSyncRespoService {
 
       // Verificar si necesita push
       final modificadas = await db.getSeccionesModificadas(idLocal);
-      final needPush = !local.sincronizado || local.editado || modificadas.isNotEmpty;
+      final needPush =
+          !local.sincronizado || local.editado || modificadas.isNotEmpty;
       if (!needPush) continue;
 
       debugPrint('[SyncC] Fase 2b: Push $idLocal (${local.nombre})');
@@ -463,7 +523,10 @@ class EdanSyncRespoService {
         await docSync.eliminarFilasAntesDelPush(local);
 
         // Enviar documento completo
-        final ok = await docSync.enviarLocalidadDocumento(local, skipFotos: true);
+        final ok = await docSync.enviarLocalidadDocumento(
+          local,
+          skipFotos: true,
+        );
 
         if (ok) {
           final idEdan = local.idServer;
@@ -489,38 +552,44 @@ class EdanSyncRespoService {
           fallidos++;
           debugPrint('[SyncC]   PUSH $idLocal → FALLÓ');
           if (kSyncDebugMode) {
-            SyncDebugCollector.instance.add(SyncApiEntry(
-              fase: SyncDebugCollector.instance.currentPhase,
-              metodo: 'PUSH',
-              endpoint: '${local.nombre} — enviarLocalidadDocumento=false',
-              localidadId: idLocal,
-              error: 'enviar documento devolvió false (id_local vacío?)',
-            ));
+            SyncDebugCollector.instance.add(
+              SyncApiEntry(
+                fase: SyncDebugCollector.instance.currentPhase,
+                metodo: 'PUSH',
+                endpoint: '${local.nombre} — enviarLocalidadDocumento=false',
+                localidadId: idLocal,
+                error: 'enviar documento devolvió false (id_local vacío?)',
+              ),
+            );
           }
         }
       } catch (e) {
         fallidos++;
         debugPrint('[SyncC]   PUSH $idLocal → ERROR: $e');
         if (kSyncDebugMode) {
-          SyncDebugCollector.instance.add(SyncApiEntry(
-            fase: SyncDebugCollector.instance.currentPhase,
-            metodo: 'PUSH',
-            endpoint: '${local.nombre} — error no-API',
-            localidadId: idLocal,
-            error: e.toString(),
-          ));
+          SyncDebugCollector.instance.add(
+            SyncApiEntry(
+              fase: SyncDebugCollector.instance.currentPhase,
+              metodo: 'PUSH',
+              endpoint: '${local.nombre} — error no-API',
+              localidadId: idLocal,
+              error: e.toString(),
+            ),
+          );
         }
       }
     }
 
     result.enviados = enviados;
     result.fallidos += fallidos;
-    debugPrint('[SyncC] Fase 2b completada: $enviados enviados, $fallidos fallidos');
+    debugPrint(
+      '[SyncC] Fase 2b completada: $enviados enviados, $fallidos fallidos',
+    );
     if (kSyncDebugMode) {
-      SyncDebugCollector.instance.addDiagnostico(
-        'Resultado Fase 2: Datos',
-        {'enviados': enviados, 'fallidos': fallidos},
-      );
+      SyncDebugCollector.instance.addDiagnostico('Resultado Fase 2: Datos', {
+        'enviados': enviados,
+        'fallidos': fallidos,
+      });
     }
   }
 
@@ -553,6 +622,17 @@ class EdanSyncRespoService {
     final locales = await db.getLocalidades(userId);
     int creados = 0;
     int actualizados = 0;
+
+    // Cargar catálogo de tipos para resolver tipoLocalidad en INSERT
+    final mapaTiposPull = <int, String>{};
+    try {
+      final tiposRows = await db.getTiposLocalidadLocal();
+      for (final row in tiposRows) {
+        final id = row['id_tipo_localidad'] as int?;
+        final nombre = row['nombre'] as String?;
+        if (id != null && nombre != null) mapaTiposPull[id] = nombre;
+      }
+    } catch (_) {}
 
     for (final local in locales) {
       final idLocal = local.idLocal;
@@ -611,16 +691,29 @@ class EdanSyncRespoService {
       if (item.pendienteEliminacion) continue;
       if (item.idEdan == null) continue;
 
-      final existe = locales.any((l) =>
-          l.idLocal == item.idLocal ||
-          (l.idServer != null && l.idServer == item.idEdan));
+      final existe = locales.any(
+        (l) =>
+            l.idLocal == item.idLocal ||
+            (l.idServer != null && l.idServer == item.idEdan),
+      );
       if (existe) continue;
 
       try {
         final doc = await api.obtenerDocumento('${item.idEdan!}');
 
         final nueva = EdanLocalidad.fromJson(doc);
-        final idLocal = nueva.idLocal ?? 'pull-${DateTime.now().millisecondsSinceEpoch}';
+
+        if (nueva.idTipoLocalidad != null &&
+            mapaTiposPull.containsKey(nueva.idTipoLocalidad)) {
+          nueva.tipoLocalidad = mapaTiposPull[nueva.idTipoLocalidad]!;
+        } else if (nueva.tipoLocalidad.isEmpty &&
+            nueva.idTipoLocalidad != null) {
+          final nombre = mapaTiposPull[nueva.idTipoLocalidad];
+          if (nombre != null) nueva.tipoLocalidad = nombre;
+        }
+
+        final idLocal =
+            nueva.idLocal ?? 'pull-${DateTime.now().millisecondsSinceEpoch}';
         nueva.idLocal = idLocal;
         nueva.idUsuario = userId;
         nueva.deduplicarSecciones();
@@ -637,12 +730,14 @@ class EdanSyncRespoService {
 
     result.creados = creados;
     result.actualizados = actualizados;
-    debugPrint('[SyncC] Fase 3 completada: $creados creados, $actualizados actualizados');
+    debugPrint(
+      '[SyncC] Fase 3 completada: $creados creados, $actualizados actualizados',
+    );
     if (kSyncDebugMode) {
-      SyncDebugCollector.instance.addDiagnostico(
-        'Resultado Fase 3: Pull',
-        {'creados': creados, 'actualizados': actualizados},
-      );
+      SyncDebugCollector.instance.addDiagnostico('Resultado Fase 3: Pull', {
+        'creados': creados,
+        'actualizados': actualizados,
+      });
     }
   }
 
@@ -656,12 +751,15 @@ class EdanSyncRespoService {
       final fotosDir = Directory('${appDir.path}/edan_fotos');
       await fotosDir.create(recursive: true);
 
-      final pendientes = await DatabaseHelper.instance.leerFotosPendientesDownloadV2();
+      final pendientes = await DatabaseHelper.instance
+          .leerFotosPendientesDownloadV2();
       if (pendientes.isEmpty) {
         debugPrint('[FotosEDAN] No hay fotos pendientes de descarga');
         return;
       }
-      debugPrint('[FotosEDAN] ${pendientes.length} fotos pendientes de descarga');
+      debugPrint(
+        '[FotosEDAN] ${pendientes.length} fotos pendientes de descarga',
+      );
 
       int descargadas = 0;
       int fallidas = 0;
@@ -676,21 +774,35 @@ class EdanSyncRespoService {
         final savePath = '${fotosDir.path}/$fileName';
 
         if (await File(savePath).exists()) {
-          await DatabaseHelper.instance.marcarFotoDescargadaV2(idFoto, savePath);
+          await DatabaseHelper.instance.marcarFotoDescargadaV2(
+            idFoto,
+            savePath,
+          );
           continue;
         }
 
-        final result = await ApiService.instance.downloadImage(serverPath, savePath);
+        final result = await ApiService.instance.downloadImage(
+          serverPath,
+          savePath,
+        );
         if (result != null) {
-          await DatabaseHelper.instance.marcarFotoDescargadaV2(idFoto, savePath);
+          await DatabaseHelper.instance.marcarFotoDescargadaV2(
+            idFoto,
+            savePath,
+          );
           descargadas++;
         } else {
-          await DatabaseHelper.instance.marcarFotoErrorV2(idFoto, 'Error descargando $serverPath');
+          await DatabaseHelper.instance.marcarFotoErrorV2(
+            idFoto,
+            'Error descargando $serverPath',
+          );
           fallidas++;
         }
       }
 
-      debugPrint('[FotosEDAN] Fin: $descargadas descargadas, $fallidas fallidas');
+      debugPrint(
+        '[FotosEDAN] Fin: $descargadas descargadas, $fallidas fallidas',
+      );
     } catch (e) {
       debugPrint('[FotosEDAN] Error: $e');
     }
@@ -712,11 +824,15 @@ class EdanSyncRespoService {
     if (local.idServer == null) {
       // Sin idServer → borrado directo local
       await db.deleteLocalidad(idLocal);
-      debugPrint('[SyncC] eliminarLocalidad: $idLocal borrada localmente (sin server)');
+      debugPrint(
+        '[SyncC] eliminarLocalidad: $idLocal borrada localmente (sin server)',
+      );
     } else {
       // Con idServer → marcar para delete en próximo sync
       await db.markLocalidadAsPendingDeletion(idLocal);
-      debugPrint('[SyncC] eliminarLocalidad: $idLocal marcada para delete (server)');
+      debugPrint(
+        '[SyncC] eliminarLocalidad: $idLocal marcada para delete (server)',
+      );
     }
     await recargarPendientes();
   }
@@ -729,7 +845,44 @@ class EdanSyncRespoService {
     if (sincronizandoMunicipio.value) return;
     sincronizandoMunicipio.value = true;
     try {
-      debugPrint('[SyncC] recargarLocalidades: Descargando localidades del usuario $idUsuario...');
+      debugPrint(
+        '[SyncC] recargarLocalidades: Descargando localidades del usuario $idUsuario...',
+      );
+      final db = DatabaseHelper.instance;
+
+      // PASO 1: Descargar catálogo de tipos de localidad y guardarlo en SQLite
+      final Map<int, String> mapaTipos = {};
+      try {
+        final tipos = await ApiService.instance.getTipoLocalidad();
+        await db.saveTiposLocalidad(
+          tipos
+              .map(
+                (t) => {
+                  'id_tipo_localidad': t.idTipoLocalidad,
+                  'nombre': t.nombre,
+                  'descripcion': t.descripcion,
+                  'orden': t.orden,
+                },
+              )
+              .toList(),
+        );
+        for (final t in tipos) {
+          mapaTipos[t.idTipoLocalidad] = t.nombre;
+        }
+      } catch (e) {
+        debugPrint('[SyncC] Error descargando catálogo tipo-localidad: $e');
+        // Fallback: intentar cargar desde SQLite local
+        try {
+          final local = await db.getTiposLocalidadLocal();
+          for (final row in local) {
+            final id = row['id_tipo_localidad'] as int?;
+            final nombre = row['nombre'] as String?;
+            if (id != null && nombre != null) mapaTipos[id] = nombre;
+          }
+        } catch (_) {}
+      }
+
+      // PASO 2: Obtener mis reportes del servidor
       final lista = await ApiService.instance.getLocalidadesMisReportes(
         idUsuario: idUsuario,
         soloHuerfanas: true,
@@ -737,7 +890,6 @@ class EdanSyncRespoService {
       );
       debugPrint('[SyncC] Recibidas ${lista.length} localidades del servidor');
 
-      final db = DatabaseHelper.instance;
       final sincV2 = EdanLocalidadesEnvioV2Service(db: db);
 
       for (final item in lista) {
@@ -746,20 +898,48 @@ class EdanSyncRespoService {
           final idLocal = localidad.idLocal;
           if (idLocal == null) continue;
 
+          // Resolver tipoLocalidad desde catálogo usando idTipoLocalidad
+          if (localidad.idTipoLocalidad != null &&
+              mapaTipos.containsKey(localidad.idTipoLocalidad)) {
+            localidad.tipoLocalidad = mapaTipos[localidad.idTipoLocalidad]!;
+          } else if (localidad.tipoLocalidad.isEmpty &&
+              localidad.idTipoLocalidad != null) {
+            // Si tipoLocalidad vino vacío pero tenemos el id, resolver del mapa
+            final nombre = mapaTipos[localidad.idTipoLocalidad];
+            if (nombre != null) localidad.tipoLocalidad = nombre;
+          }
+
           final existente = await db.getLocalidadByIdLocal(idLocal);
           if (existente != null) {
-            if (existente.editado || !existente.sincronizado) continue;
-
-            final modificadasLocales = await db.getSeccionesModificadas(idLocal);
-            if (modificadasLocales.isNotEmpty) continue;
-
-            _preservarEncabezado(localidad, existente);
+            // No pisar trabajo local pendiente: los cambios sin subir van por
+            // el push (Fase 2b) y los marcados para eliminar se conservan.
+            final modificadasLocales =
+                await db.getSeccionesModificadas(idLocal);
+            if (existente.editado ||
+                !existente.sincronizado ||
+                existente.pendienteEliminacion ||
+                modificadasLocales.isNotEmpty) {
+              debugPrint(
+                '[SyncC] recargarLocalidades: salta $idLocal (dirty)',
+              );
+              continue;
+            }
             _mergeSecciones(existente, localidad);
             localidad.idLocal = idLocal;
             localidad.deduplicarSecciones();
-            await db.updateLocalidad(localidad);
+            await db.updateLocalidad(
+              localidad,
+              preserveFechaModificacion: existente.fechaModificacion,
+            );
             if (localidad.idServer != null) {
-              await db.markLocalidadAsSynced(idLocal, localidad.idServer!);
+              // Conservar la fecha del server (autoridad LWW): no sobrescribir
+              // con DateTime.now() para no enmascarar futuras ediciones remotas.
+              await db.markLocalidadAsSyncedConFecha(
+                idLocal,
+                localidad.idServer!,
+                existente.fechaModificacion ??
+                    DateTime.now().toIso8601String(),
+              );
             }
             await sincV2.popularSeccionesDesdeServer(localidad);
           } else {
@@ -776,7 +956,9 @@ class EdanSyncRespoService {
 
       await recargarPendientes();
       _descargarFotosPendientes();
-      debugPrint('[SyncC] recargarLocalidades finalizado. Pendientes: ${pendientes.value}');
+      debugPrint(
+        '[SyncC] recargarLocalidades finalizado. Pendientes: ${pendientes.value}',
+      );
     } catch (e) {
       debugPrint('[SyncC] Error general en recargarLocalidades: $e');
     } finally {
@@ -797,7 +979,31 @@ class EdanSyncRespoService {
   }
 
   void _preservarEncabezado(EdanLocalidad server, EdanLocalidad local) {
-    if (server.nombreAlcalde.isEmpty) server.nombreAlcalde = local.nombreAlcalde;
+    // Preservar todos los campos de cabecera que el usuario editó.
+    // Solo se usa el valor del server si el local está vacío.
+    if (local.nombre.isNotEmpty) server.nombre = local.nombre;
+    if (local.tipoLocalidad.isNotEmpty)
+      server.tipoLocalidad = local.tipoLocalidad;
+    if (local.departamentoNombre?.isNotEmpty ?? false) {
+      server.departamentoNombre = local.departamentoNombre;
+    }
+    if (local.provinciaNombre?.isNotEmpty ?? false) {
+      server.provinciaNombre = local.provinciaNombre;
+    }
+    if (local.municipioNombre?.isNotEmpty ?? false) {
+      server.municipioNombre = local.municipioNombre;
+    }
+    if (local.fechaEvento?.isNotEmpty ?? false) {
+      server.fechaEvento = local.fechaEvento;
+    }
+    if (local.horaEvento?.isNotEmpty ?? false) {
+      server.horaEvento = local.horaEvento;
+    }
+    if (local.fechaLlenado?.isNotEmpty ?? false) {
+      server.fechaLlenado = local.fechaLlenado;
+    }
+    if (server.nombreAlcalde.isEmpty)
+      server.nombreAlcalde = local.nombreAlcalde;
     if (server.fonoAlcalde.isEmpty) server.fonoAlcalde = local.fonoAlcalde;
     if (server.tipoEventoNombre == null || server.tipoEventoNombre!.isEmpty) {
       server.tipoEventoNombre = local.tipoEventoNombre;
@@ -806,17 +1012,47 @@ class EdanSyncRespoService {
   }
 
   void _mergeSecciones(EdanLocalidad local, EdanLocalidad server) {
-    server.establecimientosSalud = _fusionarSeccion(local.establecimientosSalud, server.establecimientosSalud);
-    server.danosViales = _fusionarSeccion(local.danosViales, server.danosViales);
-    server.danosInfraPublica = _fusionarSeccion(local.danosInfraPublica, server.danosInfraPublica);
-    server.unidadesEducativas = _fusionarSeccion(local.unidadesEducativas, server.unidadesEducativas);
-    server.danosVivienda = _fusionarSeccion(local.danosVivienda, server.danosVivienda);
-    server.danosAgricultura = _fusionarSeccion(local.danosAgricultura, server.danosAgricultura);
-    server.danosPecuarios = _fusionarSeccion(local.danosPecuarios, server.danosPecuarios);
-    server.infraProductiva = _fusionarSeccion(local.infraProductiva, server.infraProductiva);
-    server.serviciosBasicos = _fusionarSeccion(local.serviciosBasicos, server.serviciosBasicos);
+    server.establecimientosSalud = _fusionarSeccion(
+      local.establecimientosSalud,
+      server.establecimientosSalud,
+    );
+    server.danosViales = _fusionarSeccion(
+      local.danosViales,
+      server.danosViales,
+    );
+    server.danosInfraPublica = _fusionarSeccion(
+      local.danosInfraPublica,
+      server.danosInfraPublica,
+    );
+    server.unidadesEducativas = _fusionarSeccion(
+      local.unidadesEducativas,
+      server.unidadesEducativas,
+    );
+    server.danosVivienda = _fusionarSeccion(
+      local.danosVivienda,
+      server.danosVivienda,
+    );
+    server.danosAgricultura = _fusionarSeccion(
+      local.danosAgricultura,
+      server.danosAgricultura,
+    );
+    server.danosPecuarios = _fusionarSeccion(
+      local.danosPecuarios,
+      server.danosPecuarios,
+    );
+    server.infraProductiva = _fusionarSeccion(
+      local.infraProductiva,
+      server.infraProductiva,
+    );
+    server.serviciosBasicos = _fusionarSeccion(
+      local.serviciosBasicos,
+      server.serviciosBasicos,
+    );
     server.proteccion = _fusionarSeccion(local.proteccion, server.proteccion);
-    server.impactoPoblacion = _fusionarSeccion(local.impactoPoblacion, server.impactoPoblacion);
+    server.impactoPoblacion = _fusionarSeccion(
+      local.impactoPoblacion,
+      server.impactoPoblacion,
+    );
   }
 
   List<T> _fusionarSeccion<T>(List<T> local, List<T> server) {
@@ -931,28 +1167,82 @@ class EdanSyncRespoService {
   bool _falta(String? valor) => valor == null || valor.isEmpty;
 
   void _copiarDatosServer(dynamic local, dynamic server) {
-    if (local is EdanEstablecimientoSalud && server is EdanEstablecimientoSalud) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
+    if (local is EdanEstablecimientoSalud &&
+        server is EdanEstablecimientoSalud) {
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
     } else if (local is EdanDanoVial && server is EdanDanoVial) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
-    } else if (local is EdanDanoInfraPublica && server is EdanDanoInfraPublica) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
-    } else if (local is EdanDanoUnidadEducativa && server is EdanDanoUnidadEducativa) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
+    } else if (local is EdanDanoInfraPublica &&
+        server is EdanDanoInfraPublica) {
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
+    } else if (local is EdanDanoUnidadEducativa &&
+        server is EdanDanoUnidadEducativa) {
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
     } else if (local is EdanDanoVivienda && server is EdanDanoVivienda) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
     } else if (local is EdanDanoAgricultura && server is EdanDanoAgricultura) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
     } else if (local is EdanDanoPecuario && server is EdanDanoPecuario) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
     } else if (local is EdanInfraProductiva && server is EdanInfraProductiva) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
-    } else if (local is EdanServicioBasicoDetalle && server is EdanServicioBasicoDetalle) {
-      _aplicarServer(local, server.fotografia, server.coordenadaLat, server.coordenadaLon);
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
+    } else if (local is EdanServicioBasicoDetalle &&
+        server is EdanServicioBasicoDetalle) {
+      _aplicarServer(
+        local,
+        server.fotografia,
+        server.coordenadaLat,
+        server.coordenadaLon,
+      );
     }
   }
 
-  void _aplicarServer(dynamic local, String? fotografia, double lat, double lon) {
+  void _aplicarServer(
+    dynamic local,
+    String? fotografia,
+    double lat,
+    double lon,
+  ) {
     if (local is EdanEstablecimientoSalud) {
       if (_falta(local.fotografia)) local.fotografia = fotografia;
       if (local.coordenadaLat == 0) local.coordenadaLat = lat;
@@ -1009,7 +1299,8 @@ class EdanSyncRespoService {
 
   Future<void> recargarPendientes() async {
     try {
-      pendientes.value = await DatabaseHelper.instance.countLocalidadesPendientesSync();
+      pendientes.value = await DatabaseHelper.instance
+          .countLocalidadesPendientesSync();
     } catch (e) {
       debugPrint('Error recargando pendientes: $e');
     }
@@ -1094,7 +1385,8 @@ class _EstadoItem {
       idEdan: _intEstado(json['id_edan_localidad'] ?? json['id_server']),
       fechaModificacion: json['fecha_modificacion']?.toString(),
       pendienteEliminacion:
-          json['pendiente_eliminacion'] == true || json['pendiente_eliminacion'] == 1,
+          json['pendiente_eliminacion'] == true ||
+          json['pendiente_eliminacion'] == 1,
     );
   }
 

@@ -149,7 +149,16 @@ class _EdanPage05State extends State<EdanPage05> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+            ElevatedButton(onPressed: () {
+                  if (_tramo.text.isEmpty && _km.text.isEmpty && _nec.text.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('No hay datos para guardar')),
+                    );
+                    Navigator.pop(ctx, false);
+                  } else {
+                    Navigator.pop(ctx, true);
+                  }
+                }, child: const Text('Guardar')),
           ],
         ),
       ),
@@ -255,7 +264,7 @@ class _EdanPage05State extends State<EdanPage05> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                _campoTitulo('Observaciones'),
+_campoTitulo('Observaciones'),
                 const SizedBox(height: 6),
                 TextField(
                   controller: _obs,
@@ -267,7 +276,16 @@ class _EdanPage05State extends State<EdanPage05> {
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
-            ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Guardar')),
+            ElevatedButton(onPressed: () {
+              if (_comunidad.text.isEmpty && _obs.text.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('No hay datos para guardar')),
+                );
+                Navigator.pop(ctx, false);
+              } else {
+                Navigator.pop(ctx, true);
+              }
+            }, child: const Text('Guardar')),
           ],
         ),
       ),

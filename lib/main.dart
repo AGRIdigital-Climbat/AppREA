@@ -12,6 +12,7 @@ import 'providers/connectivity_provider.dart';
 import 'screens/splash_screen.dart';
 import 'services/connectivity_service.dart';
 import 'services/debug_log.dart';
+import 'services/ai/asistente_ia_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,6 +29,8 @@ void main() async {
     // ignore: avoid_print
     print('[EDAN-LOG] Shabira depuración en: $rutaLog');
   }
+
+  await AsistenteIAService.instance.init();
 
   FlutterError.onError = (details) {
     DebugLog.instance.e('FlutterError: ${details.exception}', details.exception, details.stack);

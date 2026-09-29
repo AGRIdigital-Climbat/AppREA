@@ -297,12 +297,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   builder: (context, reporteProvider, child) {
                     return Column(
                       children: [
+                        const Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            'Estos campos no representan tu lugar de residencia o nacimiento, '
+                            'sino el lugar que representas: el departamento, provincia y municipio '
+                            'donde desempeñarás tus funciones y registrarás la información.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.textSecondary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedDepartamento,
                           decoration: InputDecoration(
                             labelText: 'Departamento',
                             border: const OutlineInputBorder(),
-                            suffixIcon: reporteProvider.isLoading
+                            suffixIcon: reporteProvider.isLoadingGeografia
                                 ? const Padding(
                                     padding: EdgeInsets.all(12),
                                     child: SizedBox(
@@ -313,7 +326,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       ),
                                     ),
                                   )
-                                : null,
+                                : (reporteProvider.departamentos.isEmpty &&
+                                        reporteProvider.geoError)
+                                    ? IconButton(
+                                        tooltip: 'Reintentar cargar departamentos',
+                                        icon: const Icon(Icons.refresh),
+                                        onPressed: () =>
+                                            reporteProvider.loadGeography(),
+                                      )
+                                    : null,
                           ),
                           items: reporteProvider.departamentos.map((dep) {
                             return DropdownMenuItem(
@@ -321,7 +342,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                               child: Text(dep.nombre),
                             );
                           }).toList(),
-                          onChanged: reporteProvider.isLoading
+                          onChanged: reporteProvider.isLoadingGeografia
                               ? null
                               : (value) {
                                   setState(() {
@@ -334,6 +355,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   }
                                 },
                         ),
+                        if (reporteProvider.geoError &&
+                            reporteProvider.departamentos.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Row(
+                              children: [
+                                Icon(Icons.error_outline,
+                                    size: 14, color: AppColors.error),
+                                SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Sin respuesta. Toca el icono para reintentar.',
+                                    style: TextStyle(
+                                        fontSize: 12, color: AppColors.error),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedProvincia,
@@ -351,7 +391,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       ),
                                     ),
                                   )
-                                : null,
+                                : (_selectedDepartamento != null &&
+                                        reporteProvider.provincias.isEmpty &&
+                                        reporteProvider.provinciasError)
+                                    ? IconButton(
+                                        tooltip: 'Reintentar cargar provincias',
+                                        icon: const Icon(Icons.refresh),
+                                        onPressed: () => reporteProvider
+                                            .loadProvincias(_selectedDepartamento!),
+                                      )
+                                    : null,
                           ),
                           items: reporteProvider.provincias.map((prov) {
                             return DropdownMenuItem(
@@ -375,6 +424,26 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   }
                                 },
                         ),
+                        if (_selectedDepartamento != null &&
+                            reporteProvider.provinciasError &&
+                            reporteProvider.provincias.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Row(
+                              children: [
+                                Icon(Icons.error_outline,
+                                    size: 14, color: AppColors.error),
+                                SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Sin respuesta. Toca el icono para reintentar.',
+                                    style: TextStyle(
+                                        fontSize: 12, color: AppColors.error),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedMunicipio,
@@ -392,7 +461,20 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                       ),
                                     ),
                                   )
-                                : null,
+                                : (_selectedProvincia != null &&
+                                        _selectedDepartamento != null &&
+                                        reporteProvider.municipios.isEmpty &&
+                                        reporteProvider.municipiosError)
+                                    ? IconButton(
+                                        tooltip: 'Reintentar cargar municipios',
+                                        icon: const Icon(Icons.refresh),
+                                        onPressed: () => reporteProvider
+                                            .loadMunicipios(
+                                          _selectedProvincia!,
+                                          _selectedDepartamento!,
+                                        ),
+                                      )
+                                    : null,
                           ),
                           items: reporteProvider.municipios.map((mun) {
                             return DropdownMenuItem(
@@ -409,6 +491,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   });
                                 },
                         ),
+                        if (_selectedProvincia != null &&
+                            _selectedDepartamento != null &&
+                            reporteProvider.municipiosError &&
+                            reporteProvider.municipios.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 6),
+                            child: Row(
+                              children: [
+                                Icon(Icons.error_outline,
+                                    size: 14, color: AppColors.error),
+                                SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Sin respuesta. Toca el icono para reintentar.',
+                                    style: TextStyle(
+                                        fontSize: 12, color: AppColors.error),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                     );
                   },

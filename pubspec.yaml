@@ -1,7 +1,7 @@
 ﻿name: rea
 description: "Sistema de Reporte de Eventos Adversos - VIDECI"
 publish_to: 'none'
-version: 1.0.7+7
+version: 1.1.4+15
 
 environment:
   sdk: ^3.12.2
@@ -26,7 +26,7 @@ dependencies:
   sqflite: ^2.3.0
   sqflite_common_ffi: ^2.3.6
   path: ^1.8.0
-  
+
   # Connectivity
   connectivity_plus: ^6.0.0
   
@@ -66,6 +66,13 @@ dependencies:
 
   # File Picker
   file_picker: ^12.0.0
+
+  # Voice Assistant (Asistente IA)
+  flutter_tts: ^4.2.0
+  speech_to_text: ^7.0.0
+  
+  # Markdown rendering
+  flutter_markdown: ^0.7.7+1
 
 dev_dependencies:
   flutter_test:

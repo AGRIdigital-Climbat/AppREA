@@ -139,6 +139,11 @@ class _EdanPage03State extends State<EdanPage03> {
         ),
         const SizedBox(height: 12),
         for (final g in _grupos) _grupoEtarioBlock(g),
+        const SizedBox(height: 12),
+        if (widget.localidad.sumaGruposEtarios >
+                widget.localidad.totalPoblacionAfectada &&
+            widget.localidad.totalPoblacionAfectada > 0)
+          _avisoSumaExcede(),
         const SizedBox(height: 18),
         const Text(
           'Necesidades de primera respuesta',
@@ -344,6 +349,35 @@ class _EdanPage03State extends State<EdanPage03> {
   void _onEdit() {
     _sincronizarTotales();
     setState(() {});
+  }
+
+  Widget _avisoSumaExcede() {
+    final l = widget.localidad;
+    final suma = l.sumaGruposEtarios;
+    final total = l.totalPoblacionAfectada;
+    return Container(
+      padding: const EdgeInsets.all(10),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF8E1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFFFFB300)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.warning_outlined, size: 18, color: Color(0xFFB26A00)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'La suma de grupos etarios ($suma) supera el total de población afectada ($total). '
+              'Verifica los datos antes de continuar.',
+              style: const TextStyle(fontSize: 12, color: Color(0xFF6B4A00), height: 1.35),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _campoNum(TextEditingController c, String label, IconData icono,

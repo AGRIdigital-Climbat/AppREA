@@ -1873,6 +1873,14 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
               final tipoRaw = doc['tipo_documento'] ?? doc['tipo'];
               final tipo = tipoRaw is Map ? (tipoRaw['nombre'] ?? '') : (tipoRaw ?? '');
               final fecha = doc['fecha_documento'] ?? doc['fechaDocumento'] ?? '';
+              final firmaRaw = doc['tiene_firma_digital'];
+              final bool? tieneFirma = firmaRaw is bool
+                  ? firmaRaw
+                  : firmaRaw is num
+                      ? firmaRaw == 1
+                      : firmaRaw is String
+                          ? firmaRaw.toLowerCase() == 'true'
+                          : null;
               return Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(10),
@@ -1903,6 +1911,44 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
                             [if ('$tipo'.isNotEmpty) tipo, if ('$fecha'.isNotEmpty) fecha].join(' · '),
                             style: const TextStyle(fontSize: 11, color: AppColors.textSecondary),
                           ),
+                          if (tieneFirma != null) ...[
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: (tieneFirma
+                                        ? AppColors.aprobado
+                                        : AppColors.pending)
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    tieneFirma
+                                        ? Icons.verified_user
+                                        : Icons.error_outline,
+                                    size: 11,
+                                    color: tieneFirma
+                                        ? AppColors.aprobado
+                                        : AppColors.pending,
+                                  ),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    tieneFirma ? 'Firmado' : 'Sin firma',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: tieneFirma
+                                          ? AppColors.aprobado
+                                          : AppColors.pending,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),

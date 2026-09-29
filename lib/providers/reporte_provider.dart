@@ -34,9 +34,13 @@ class ReporteProvider extends ChangeNotifier {
   MunicipioGeojson? _municipioGeojson;
   int _pendingCount = 0;
   bool _isLoading = false;
+  bool _isLoadingGeografia = false;
   bool _isLoadingProvincias = false;
   bool _isLoadingMunicipios = false;
   bool _isInitializing = false;
+  bool _geoError = false;
+  bool _provinciasError = false;
+  bool _municipiosError = false;
   String _downloadPhase = '';
 
   List<ReporteOffline> get reportes => _reportes;
@@ -56,9 +60,13 @@ class ReporteProvider extends ChangeNotifier {
   MunicipioGeojson? get municipioGeojson => _municipioGeojson;
   int get pendingCount => _pendingCount;
   bool get isLoading => _isLoading;
+  bool get isLoadingGeografia => _isLoadingGeografia;
   bool get isLoadingProvincias => _isLoadingProvincias;
   bool get isLoadingMunicipios => _isLoadingMunicipios;
   bool get isInitializing => _isInitializing;
+  bool get geoError => _geoError;
+  bool get provinciasError => _provinciasError;
+  bool get municipiosError => _municipiosError;
   String get downloadPhase => _downloadPhase;
 
   StreamSubscription<int>? _pendingSubscription;
@@ -170,19 +178,25 @@ class ReporteProvider extends ChangeNotifier {
   }
 
   Future<void> loadGeography() async {
+    _isLoadingGeografia = true;
+    _geoError = false;
+    notifyListeners();
     try {
       _departamentos = await _api.getDepartamentos();
       // Cachear en SQLite para offline
       await _db.saveDepartamentos(
           _departamentos.map((d) => d.toJson()).toList());
-      notifyListeners();
     } catch (e) {
-      // Manejar error silenciosamente
+      _geoError = true;
+      _departamentos = [];
     }
+    _isLoadingGeografia = false;
+    notifyListeners();
   }
 
   Future<void> loadProvincias(int idDepartamento) async {
     _isLoadingProvincias = true;
+    _provinciasError = false;
     _provincias = [];
     _municipios = [];
     notifyListeners();
@@ -192,7 +206,7 @@ class ReporteProvider extends ChangeNotifier {
       await _db.saveProvincias(
           _provincias.map((p) => p.toJson()).toList());
     } catch (e) {
-      // Manejar error silenciosamente
+      _provinciasError = true;
     }
     _isLoadingProvincias = false;
     notifyListeners();
@@ -200,6 +214,7 @@ class ReporteProvider extends ChangeNotifier {
 
   Future<void> loadMunicipios(int idProvincia, int idDepartamento) async {
     _isLoadingMunicipios = true;
+    _municipiosError = false;
     _municipios = [];
     notifyListeners();
     try {
@@ -211,7 +226,7 @@ class ReporteProvider extends ChangeNotifier {
       await _db.saveMunicipios(
           _municipios.map((m) => m.toJson()).toList());
     } catch (e) {
-      // Manejar error silenciosamente
+      _municipiosError = true;
     }
     _isLoadingMunicipios = false;
     notifyListeners();

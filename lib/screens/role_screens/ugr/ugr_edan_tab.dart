@@ -176,7 +176,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
             unselectedLabelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
             tabs: const [
               Tab(text: 'EDANs'),
-              Tab(text: 'Recursos'),
+              Tab(text: 'Documentos'),
             ],
           ),
         ),

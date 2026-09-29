@@ -6,6 +6,7 @@ import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
 import '../../../services/edan/edan_documento_sync_service.dart';
+import '../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../services/edan/edan_sync_respo_service.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 import '../../../widgets/edan_seccion_badges.dart';
@@ -20,11 +21,13 @@ class RespEdanLocalidadTab extends StatefulWidget {
   State<RespEdanLocalidadTab> createState() => RespEdanLocalidadTabState();
 }
 
-class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with WidgetsBindingObserver {
+class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
+    with WidgetsBindingObserver {
   List<EdanLocalidad> _localidades = [];
   bool _cargando = true;
   UgrLocalidadEstado? _filtro;
   String _query = '';
+  bool _wasSyncingMunicipio = false;
 
   void refresh() {
     _cargarLocalidades();
@@ -41,6 +44,11 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _wasSyncingMunicipio =
+        EdanSyncRespoService.instance.sincronizandoMunicipio.value;
+    EdanSyncRespoService.instance.sincronizandoMunicipio.addListener(
+      _onSyncMunicipioChanged,
+    );
     _cargarLocalidades();
   }
 
@@ -53,8 +61,19 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
 
   @override
   void dispose() {
+    EdanSyncRespoService.instance.sincronizandoMunicipio.removeListener(
+      _onSyncMunicipioChanged,
+    );
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  void _onSyncMunicipioChanged() {
+    final syncing = EdanSyncRespoService.instance.sincronizandoMunicipio.value;
+    if (_wasSyncingMunicipio && !syncing) {
+      _cargarLocalidades();
+    }
+    _wasSyncingMunicipio = syncing;
   }
 
   Future<void> _cargarLocalidades() async {
@@ -66,14 +85,26 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
     try {
       final db = DatabaseHelper.instance;
       final localidades = await db.getLocalidades(userId);
-      final visibles = localidades.where((l) => !l.pendienteEliminacion).toList();
+      final visibles = localidades
+          .where((l) => !l.pendienteEliminacion)
+          .toList();
+      // Resincronizar flags imp_* desde localidad_secciones_activas (fuente
+      // autoritativa) para que los badges del item reflejen lo realmente
+      // marcado, igual que el JSON del long press y la vista previa.
+      final sincV2 = EdanLocalidadesEnvioV2Service();
+      for (final loc in visibles) {
+        await sincV2.aplicarFlagsDesdeSeccionesActivas(loc);
+      }
       // Resolver nombres geográficos desde catálogo si faltan
       if (mounted) {
         final rp = context.read<ReporteProvider>();
         for (final loc in visibles) {
-          if ((loc.departamentoNombre == null || loc.departamentoNombre!.isEmpty) &&
+          if ((loc.departamentoNombre == null ||
+                  loc.departamentoNombre!.isEmpty) &&
               loc.idDepartamento != null) {
-            final match = rp.departamentos.where((d) => d.id == loc.idDepartamento);
+            final match = rp.departamentos.where(
+              (d) => d.id == loc.idDepartamento,
+            );
             if (match.isNotEmpty) loc.departamentoNombre = match.first.nombre;
           }
           if ((loc.provinciaNombre == null || loc.provinciaNombre!.isEmpty) &&
@@ -85,6 +116,13 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
               loc.idMunicipio != null) {
             final match = rp.municipios.where((m) => m.id == loc.idMunicipio);
             if (match.isNotEmpty) loc.municipioNombre = match.first.nombre;
+          }
+          // Resolver tipoLocalidad desde catálogo usando idTipoLocalidad
+          if (loc.idTipoLocalidad != null) {
+            final match = rp.tiposLocalidad.where(
+              (t) => t.idTipoLocalidad == loc.idTipoLocalidad,
+            );
+            if (match.isNotEmpty) loc.tipoLocalidad = match.first.nombre;
           }
         }
       }
@@ -106,7 +144,10 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
 
   Future<void> _editarLocalidad(EdanLocalidad localidad) async {
     final result = await Navigator.of(context).push<bool>(
-      ugrRoute(EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)), palette: Palettes.rea),
+      ugrRoute(
+        EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)),
+        palette: Palettes.rea,
+      ),
     );
     if (result == true && mounted) {
       await _cargarLocalidades();
@@ -124,10 +165,10 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
         content: Text(
           localidad.sincronizado
               ? 'Esta localidad ya fue sincronizada con el servidor.\n\n'
-                  'Se marcará como "pendiente de eliminación" y se eliminará '
-                  'de forma definitiva al sincronizar.'
+                    'Se marcará como "pendiente de eliminación" y se eliminará '
+                    'de forma definitiva al sincronizar.'
               : '¿Estás seguro de eliminar esta localidad?\n\n'
-                  'Esta acción no se puede deshacer.',
+                    'Esta acción no se puede deshacer.',
         ),
         actions: [
           TextButton(
@@ -151,7 +192,9 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Localidad marcada para eliminación. Se borrará al sincronizar.'),
+            content: Text(
+              'Localidad marcada para eliminación. Se borrará al sincronizar.',
+            ),
             backgroundColor: AppColors.pending,
           ),
         );
@@ -203,8 +246,9 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
       }
       localidad.idEdanLocalidadEstado = estadoDestino.id;
 
-      sincronizada =
-          await EdanDocumentoSyncService().enviarLocalidadDocumento(localidad);
+      sincronizada = await EdanDocumentoSyncService().enviarLocalidadDocumento(
+        localidad,
+      );
 
       if (sincronizada) {
         localidad.estadoLocalidad = estadoDestino;
@@ -230,7 +274,9 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
                 ? mensaje
                 : 'Localidad guardada; pendiente de sincronización',
           ),
-          backgroundColor: sincronizada ? AppColors.aprobado : AppColors.pending,
+          backgroundColor: sincronizada
+              ? AppColors.aprobado
+              : AppColors.pending,
         ),
       );
       await _cargarLocalidades();
@@ -245,9 +291,11 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
     final q = _query.trim().toLowerCase();
     if (q.isNotEmpty) {
       list = list
-          .where((l) =>
-              l.nombre.toLowerCase().contains(q) ||
-              l.tipoLocalidad.toLowerCase().contains(q))
+          .where(
+            (l) =>
+                l.nombre.toLowerCase().contains(q) ||
+                l.tipoLocalidad.toLowerCase().contains(q),
+          )
           .toList();
     }
     return list;
@@ -411,8 +459,10 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab> with Widgets
           completo: completo,
           onTap: () async {
             final confirmado = await Navigator.of(context).push<bool>(
-              ugrRoute(EdanPreviewRespScreen(localidad: localidad),
-                  palette: Palettes.rea),
+              ugrRoute(
+                EdanPreviewRespScreen(localidad: localidad),
+                palette: Palettes.rea,
+              ),
             );
             if (confirmado == true && mounted) {
               await _marcarEnviada(localidad);
@@ -451,8 +501,10 @@ class _RespLocalidadCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
     final estado = localidad.estadoLocalidad ?? UgrLocalidadEstado.borrador;
-    final esPendienteEnvio = estado == UgrLocalidadEstado.borrador && !localidad.sincronizado;
-    final reporterName = AuthService.instance.userName ??
+    final esPendienteEnvio =
+        estado == UgrLocalidadEstado.borrador && !localidad.sincronizado;
+    final reporterName =
+        AuthService.instance.userName ??
         AuthService.instance.currentToken?.nombre ??
         '';
     return Card(
@@ -460,7 +512,10 @@ class _RespLocalidadCard extends StatelessWidget {
       shape: esPendienteEnvio
           ? RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
-              side: BorderSide(color: AppColors.pending.withValues(alpha: 0.6), width: 1.5),
+              side: BorderSide(
+                color: AppColors.pending.withValues(alpha: 0.6),
+                width: 1.5,
+              ),
             )
           : null,
       child: InkWell(
@@ -478,7 +533,9 @@ class _RespLocalidadCard extends StatelessWidget {
                     child: Text(
                       localidad.tipoLocalidad.isNotEmpty
                           ? '${localidad.tipoLocalidad}: ${localidad.nombre.isNotEmpty ? localidad.nombre : 'Sin nombre'}'
-                          : (localidad.nombre.isNotEmpty ? localidad.nombre : 'Sin nombre'),
+                          : (localidad.nombre.isNotEmpty
+                                ? localidad.nombre
+                                : 'Sin nombre'),
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
@@ -495,7 +552,11 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 10),
               Row(
                 children: [
-                  const Icon(Icons.person_outline, size: 14, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.person_outline,
+                    size: 14,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     'Reportado por: $reporterName',
@@ -511,7 +572,11 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  const Icon(Icons.warning_amber, size: 14, color: AppColors.pending),
+                  const Icon(
+                    Icons.warning_amber,
+                    size: 14,
+                    color: AppColors.pending,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     localidad.tipoEventoNombre ?? 'Sin evento',
@@ -522,7 +587,11 @@ class _RespLocalidadCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Icon(Icons.calendar_today, size: 12, color: AppColors.textSecondary),
+                  const Icon(
+                    Icons.calendar_today,
+                    size: 12,
+                    color: AppColors.textSecondary,
+                  ),
                   const SizedBox(width: 4),
                   Text(
                     localidad.fechaEvento ?? 'Sin fecha',
@@ -538,15 +607,24 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 10),
               if (esPendienteEnvio)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.pending.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: AppColors.pending.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: AppColors.pending.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.cloud_upload_outlined, size: 16, color: AppColors.pending),
+                      const Icon(
+                        Icons.cloud_upload_outlined,
+                        size: 16,
+                        color: AppColors.pending,
+                      ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -562,23 +640,6 @@ class _RespLocalidadCard extends StatelessWidget {
                       ),
                     ],
                   ),
-                )
-              else
-                const Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(Icons.info_outline, size: 14, color: AppColors.primary),
-                    SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'La información debe ser enviada cuando esté completa desde la vista previa.',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textSecondary,
-                        ),
-                      ),
-                    ),
-                  ],
                 ),
               const SizedBox(height: 10),
               Row(

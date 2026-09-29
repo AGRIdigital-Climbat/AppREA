@@ -2,12 +2,14 @@ import 'dart:math';
 
 /// Genera un ID único para una sección del EDAN en formato espec v2.
 ///
-/// Formato: `{timestamp_base32}-{uuid_short}` (~24 caracteres)
+/// Formato: `{prefijo}{timestamp_base32}-{uuid_short}` (~27 caracteres)
+/// - `prefijo`: dos letras de la sección (`im_`, `po_`, `sv_`...). Es
+///   informativo: el servidor trata `id_seccion` como clave opaca de UPSERT.
 /// - `timestamp_base32`: milisegundos desde epoch en base32 (~10 chars)
 /// - `uuid_short`: 13 caracteres hexadecimales aleatorios (desambigua
 ///   creaciones simultáneas)
 ///
-/// Ejemplo: `1a0357323cb-659d0c9c3d415`
+/// Ejemplo: `po_1a0357323cb-659d0c9c3d415`
 ///
 /// IMPORTANTE: Generar una sola vez al crear la sección. NUNCA regenerar al
 /// editar. El servidor lo usa únicamente como clave de UPSERT, nunca lo genera.
@@ -15,7 +17,7 @@ String generarIdSeccion(String prefijo) {
   final ts = DateTime.now().millisecondsSinceEpoch;
   final timestampBase32 = ts.toRadixString(32);
   final uuidShort = _randomHex(13);
-  return '$timestampBase32-$uuidShort';
+  return '${prefijo}_$timestampBase32-$uuidShort';
 }
 
 /// Helpers por sección: cada uno genera el `id_seccion` de UNA sección

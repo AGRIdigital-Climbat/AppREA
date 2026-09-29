@@ -23,22 +23,27 @@ class _EdanPage02State extends State<EdanPage02> {
     super.initState();
     final l = widget.localidad;
     _poblacion = TextEditingController(
-        text: l.totalPoblacionAfectada > 0 ? '${l.totalPoblacionAfectada}' : '');
+      text: l.totalPoblacionAfectada > 0 ? '${l.totalPoblacionAfectada}' : '',
+    );
     _familiasAfectadas = TextEditingController(
-        text: l.totalFamiliasAfectadas > 0 ? '${l.totalFamiliasAfectadas}' : '');
+      text: l.totalFamiliasAfectadas > 0 ? '${l.totalFamiliasAfectadas}' : '',
+    );
     _familiasDamnificadas = TextEditingController(
-        text: l.totalFamiliasDamnificadas > 0 ? '${l.totalFamiliasDamnificadas}' : '');
+      text: l.totalFamiliasDamnificadas > 0
+          ? '${l.totalFamiliasDamnificadas}'
+          : '',
+    );
     _poblacion.addListener(_onPoblacion);
     _familiasAfectadas.addListener(_onFamiliasAfectadas);
     _familiasDamnificadas.addListener(_onFamiliasDamnificadas);
   }
 
-  void _onPoblacion() =>
-      widget.localidad.totalPoblacionAfectada = int.tryParse(_poblacion.text) ?? 0;
-  void _onFamiliasAfectadas() =>
-      widget.localidad.totalFamiliasAfectadas = int.tryParse(_familiasAfectadas.text) ?? 0;
-  void _onFamiliasDamnificadas() =>
-      widget.localidad.totalFamiliasDamnificadas = int.tryParse(_familiasDamnificadas.text) ?? 0;
+  void _onPoblacion() => widget.localidad.totalPoblacionAfectada =
+      int.tryParse(_poblacion.text) ?? 0;
+  void _onFamiliasAfectadas() => widget.localidad.totalFamiliasAfectadas =
+      int.tryParse(_familiasAfectadas.text) ?? 0;
+  void _onFamiliasDamnificadas() => widget.localidad.totalFamiliasDamnificadas =
+      int.tryParse(_familiasDamnificadas.text) ?? 0;
 
   @override
   void dispose() {
@@ -53,7 +58,6 @@ class _EdanPage02State extends State<EdanPage02> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-
         CustomTextField(
           label: 'N° Total de familias damnificadas *',
           hint: 'Ej: 10',
@@ -76,7 +80,7 @@ class _EdanPage02State extends State<EdanPage02> {
           controller: _poblacion,
           keyboardType: TextInputType.number,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        )
+        ),
       ],
     );
   }

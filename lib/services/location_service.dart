@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../config/theme.dart';
+import 'permission_service.dart';
 
 /// Servicio de ubicación multiplataforma.
 /// - Android/iOS: GPS real via geolocator
@@ -166,17 +167,8 @@ class LocationService {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) return null;
 
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.deniedForever) return null;
-
-      if (permission != LocationPermission.always &&
-          permission != LocationPermission.whileInUse) {
-        return null;
-      }
+      final granted = await PermissionService.requestLocationPermission();
+      if (!granted) return null;
 
       return await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
