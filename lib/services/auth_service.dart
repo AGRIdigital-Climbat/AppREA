@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/app_roles.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
 
@@ -16,12 +17,19 @@ class AuthService {
 
   TokenResponse? _currentToken;
   String? _lastError;
+  bool _ultimoErrorRolNoPermitido = false;
   int? _idRol;
   String? _rolName;
   dynamic _permisos;
 
   TokenResponse? get currentToken => _currentToken;
   String? get lastError => _lastError;
+
+  /// `true` cuando el ultimo fallo fue un rol sin acceso a la app movil
+  /// (credenciales correctas). Permite no mostrar "usuario o contrasena
+  /// incorrectos" a un usuario que si se autentico bien.
+  bool get ultimoErrorRolNoPermitido => _ultimoErrorRolNoPermitido;
+
   bool get isAuthenticated => _currentToken != null;
   int? get userId => _currentToken?.userId;
   int? get idRol => _idRol;
@@ -62,6 +70,11 @@ class AuthService {
 
         final tokenVigente = await _verificarToken(token, idRol, lastLogin);
         if (tokenVigente) {
+          if (!AppRoles.puedeIngresar(idRol)) {
+            debugPrint('Sesion de rol $idRol sin acceso a la app, cerrando');
+            await logout();
+            return;
+          }
           await _loadUserProfile();
           return;
         }
@@ -201,8 +214,14 @@ class AuthService {
   }
 
   Future<bool> login(String usuario, String contrasena) async {
+    _ultimoErrorRolNoPermitido = false;
     try {
       final token = await _api.login(usuario, contrasena);
+      // Las credenciales son validas, pero el rol no tiene acceso a la app.
+      // Se corta aqui para no persistir una sesion no autorizada.
+      if (!AppRoles.puedeIngresar(token.idRol)) {
+        throw RolNoPermitidoException(token.idRol);
+      }
       _currentToken = token;
       _api.setToken(token.accessToken);
 
@@ -242,6 +261,10 @@ class AuthService {
       });
 
       return true;
+    } on RolNoPermitidoException {
+      _ultimoErrorRolNoPermitido = true;
+      _lastError = AppRoles.mensajeSinAcceso;
+      return false;
     } catch (e) {
       _lastError = e.toString();
       return false;

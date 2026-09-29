@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../config/app_roles.dart';
 import '../services/auth_service.dart';
 import '../services/edan_sync_service.dart';
 import '../services/edan/edan_sync_respo_service.dart';
@@ -48,12 +49,21 @@ class AuthProvider extends ChangeNotifier {
 
     _isLoading = false;
     if (!success) {
-      _error = 'Usuario o contraseña incorrectos';
+      _error = _errorDeLogin();
     } else {
       _dispararCargaEdansMunicipio();
     }
     notifyListeners();
     return success;
+  }
+
+  /// Traduce el fallo del servicio a un mensaje para el usuario.
+  /// Distingue "credenciales incorrectas" de "rol sin acceso a la app".
+  String _errorDeLogin() {
+    if (_authService.ultimoErrorRolNoPermitido) {
+      return AppRoles.mensajeSinAcceso;
+    }
+    return 'Usuario o contraseña incorrectos';
   }
 
   Future<bool> register({
@@ -95,7 +105,9 @@ class AuthProvider extends ChangeNotifier {
 
     _isLoading = false;
     if (!success) {
-      _error = _authService.lastError ?? 'Error al registrar usuario';
+      _error = _authService.ultimoErrorRolNoPermitido
+          ? AppRoles.mensajeSinAcceso
+          : (_authService.lastError ?? 'Error al registrar usuario');
     } else {
       _dispararCargaEdansMunicipio();
     }
