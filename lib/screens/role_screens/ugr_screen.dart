@@ -6,6 +6,7 @@ import '../../providers/reporte_provider.dart';
 import '../../services/edan_sync_service.dart';
 import '../../services/api_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/connectivity_service.dart';
 import '../../models/edan.dart';
 import '../../widgets/asistente_ia.dart';
 import '../../widgets/perfil_tab.dart';
@@ -39,9 +40,11 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final connectivity = context.read<ConnectivityProvider>();
       _connectivity = connectivity;
-      _wasOnline = connectivity.isConnected;
+      // Si el primer chequeo de red sigue en curso, asumimos "offline" como
+      // punto de partida: es lo que garantiza que la transicion a online
+      // dispare la sincronizacion, en vez de poder perderse.
+      _wasOnline = connectivity.chequeoCompletado && connectivity.isConnected;
       connectivity.addListener(_onConnectivityChanged);
-      connectivity.initialize();
       EdanSyncService.instance.recargarPendientes();
       context.read<ReporteProvider>().initializeUgr();
     });
@@ -284,17 +287,27 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
       listenable: Listenable.merge([
         EdanSyncService.instance.pendientes,
         EdanSyncService.instance.sincronizando,
+        ?_connectivity,
       ]),
       builder: (context, _) {
         final pendientes = EdanSyncService.instance.pendientes.value;
         final sincronizando = EdanSyncService.instance.sincronizando.value;
+        // Sin conexion verificada el boton se apaga en vez de dejar que el
+        // usuario lo presione y se le muestre un error. Sin esta distincion
+        // habia dos ventanas (13 s al arrancar, 45 s de histeresis) en las que
+        // la app creia tener red y cada request fallaba.
+        final online = _connectivity?.isConnected ?? false;
+        final chequeado = _connectivity?.chequeoCompletado ?? false;
+        final puedeIntentar = online && chequeado && !sincronizando;
         return IconButton(
           tooltip: sincronizando
               ? 'Sincronizando...'
-              : pendientes > 0
-                  ? 'Sincronizar ($pendientes pendientes)'
-                  : 'Sincronizar',
-          onPressed: sincronizando ? null : () => _sincronizar(auto: false),
+              : !puedeIntentar
+                  ? 'Sin conexión. Se sincronizará automáticamente al recuperar la red.'
+                  : pendientes > 0
+                      ? 'Sincronizar ($pendientes pendientes)'
+                      : 'Sincronizar',
+          onPressed: puedeIntentar ? () => _sincronizar(auto: false) : null,
           icon: Badge(
             isLabelVisible: pendientes > 0 && !sincronizando,
             label: Text('$pendientes'),
@@ -304,7 +317,11 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.cloud_upload_outlined),
+                : Icon(
+                    puedeIntentar
+                        ? Icons.cloud_upload_outlined
+                        : Icons.cloud_off_outlined,
+                  ),
           ),
         );
       },
@@ -313,15 +330,16 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
 
   Future<void> _sincronizar({bool auto = false}) async {
     if (EdanSyncService.instance.isSyncing) return;
-    if (!(_connectivity?.isConnected ?? true)) {
-      if (!auto && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sin conexión: los cambios están guardados localmente.'),
-            backgroundColor: AppColors.pending,
-          ),
-        );
-      }
+
+    // Chequeo real antes de cualquier trabajo de red. El estado cacheado puede
+    // tener hasta 45 s de retraso por la histeresis: sin esto, un estado viejo
+    // "online" lanza una corrida completa que va a fallar y a pintar un error.
+    final online = await ConnectivityService().checkNow();
+    if (!mounted) return;
+    if (!online) {
+      // Sin conexion no es un error: no se perdio nada, esta todo en SQLite, y
+      // el reenvio automatico se dispara solo al volver la red. El chip de la
+      // AppBar ya informa del estado, asi que un snackbar aqui seria ruido.
       return;
     }
 
@@ -333,12 +351,17 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
     EdanSyncService.instance.recargarPendientes();
 
     if (auto &&
-        result.exito &&
-        result.enviados == 0 &&
-        result.fallidos == 0 &&
-        result.eliminados == 0) {
+        (result.enviados == 0 &&
+            result.fallidos == 0 &&
+            result.eliminados == 0)) {
       return;
     }
+
+    // Rojo solo cuando hubo red verificada y el servidor rechazo el dato, o
+    // cuando el fallo no se puede atribuir a la red. Un fallo de transporte
+    // aqui significa que se cayo la red durante la corrida: no hay nada que el
+    // usuario pueda hacer, asi que no se molesta con un error.
+    if (result.sinConexion) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(

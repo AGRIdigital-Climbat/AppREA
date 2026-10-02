@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
 import '../../models/edan.dart';
 import '../../providers/connectivity_provider.dart';
 import '../../providers/reporte_provider.dart';
+import '../../services/connectivity_service.dart';
 import '../../services/edan/edan_sync_respo_service.dart';
 import '../../services/sync_debug_config.dart';
 import '../../screens/sync_debug_screen.dart';
@@ -11,9 +13,11 @@ import '../../widgets/perfil_tab.dart';
 import '../../widgets/asistente_ia.dart';
 import 'resp/resp_dashboard_tab.dart';
 import 'resp/edan/edan_ia_elegir_creacion.dart';
+import 'resp/edan/edan_form_wizard.dart';
 import 'resp/resp_edan_localidad_tab.dart';
 import 'resp/resp_guia_tab.dart';
 import 'resp/resp_mapa_tab.dart';
+import 'ugr/ugr_route.dart';
 
 class RespScreen extends StatefulWidget {
   const RespScreen({super.key});
@@ -37,9 +41,11 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final connectivity = context.read<ConnectivityProvider>();
       _connectivity = connectivity;
-      _wasOnline = connectivity.isConnected;
+      // Si el primer chequeo de red sigue en curso, asumimos "offline" como
+      // punto de partida: es lo que garantiza que la transicion a online
+      // dispare la sincronizacion, en vez de poder perderse.
+      _wasOnline = connectivity.chequeoCompletado && connectivity.isConnected;
       connectivity.addListener(_onConnectivityChanged);
-      connectivity.initialize();
       EdanSyncRespoService.instance.recargarPendientes();
       context.read<ReporteProvider>().initializeResp();
     });
@@ -278,17 +284,27 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       listenable: Listenable.merge([
         EdanSyncRespoService.instance.pendientes,
         EdanSyncRespoService.instance.sincronizando,
+        ?_connectivity,
       ]),
       builder: (context, _) {
         final pendientes = EdanSyncRespoService.instance.pendientes.value;
         final sincronizando = EdanSyncRespoService.instance.sincronizando.value;
+        // Sin conexion verificada el boton se apaga en vez de dejar que el
+        // usuario lo presione y se le muestre un error. Sin esta distincion
+        // habia dos ventanas (13 s al arrancar, 45 s de histeresis) en las que
+        // la app creia tener red y cada request fallaba.
+        final online = _connectivity?.isConnected ?? false;
+        final chequeado = _connectivity?.chequeoCompletado ?? false;
+        final puedeIntentar = online && chequeado && !sincronizando;
         return IconButton(
           tooltip: sincronizando
               ? 'Sincronizando...'
-              : pendientes > 0
-                  ? 'Sincronizar ($pendientes pendientes)'
-                  : 'Sincronizar',
-          onPressed: sincronizando ? null : () => _sincronizar(auto: false),
+              : !puedeIntentar
+                  ? 'Sin conexión. Se sincronizará automáticamente al recuperar la red.'
+                  : pendientes > 0
+                      ? 'Sincronizar ($pendientes pendientes)'
+                      : 'Sincronizar',
+          onPressed: puedeIntentar ? () => _sincronizar(auto: false) : null,
           icon: Badge(
             isLabelVisible: pendientes > 0 && !sincronizando,
             label: Text('$pendientes'),
@@ -298,7 +314,11 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.cloud_upload_outlined),
+                : Icon(
+                    puedeIntentar
+                        ? Icons.cloud_upload_outlined
+                        : Icons.cloud_off_outlined,
+                  ),
           ),
         );
       },
@@ -307,15 +327,16 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
 
   Future<void> _sincronizar({bool auto = false}) async {
     if (EdanSyncRespoService.instance.isSyncing) return;
-    if (!(_connectivity?.isConnected ?? true)) {
-      if (!auto && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Sin conexión: los cambios están guardados localmente.'),
-            backgroundColor: AppColors.pending,
-          ),
-        );
-      }
+
+    // Chequeo real antes de cualquier trabajo de red. El estado cacheado puede
+    // tener hasta 45 s de retraso por la histeresis: sin esto, un estado viejo
+    // "online" lanza una corrida completa que va a fallar y a pintar un error.
+    final online = await ConnectivityService().checkNow();
+    if (!mounted) return;
+    if (!online) {
+      // Sin conexion no es un error: no se perdio nada, esta todo en SQLite, y
+      // el reenvio automatico se dispara solo al volver la red. El chip de la
+      // AppBar ya informa del estado, asi que un snackbar aqui seria ruido.
       return;
     }
 
@@ -327,12 +348,17 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     EdanSyncRespoService.instance.recargarPendientes();
 
     if (auto &&
-        result.exito &&
-        result.enviados == 0 &&
-        result.fallidos == 0 &&
-        result.eliminados == 0) {
+        (result.enviados == 0 &&
+            result.fallidos == 0 &&
+            result.eliminados == 0)) {
       return;
     }
+
+    // Rojo solo cuando hubo red verificada y el servidor rechazo el dato, o
+    // cuando el fallo no se puede atribuir a la red. Un fallo de transporte
+    // aqui significa que se cayo la red durante la corrida: no hay nada que el
+    // usuario pueda hacer, asi que no se molesta con un error.
+    if (result.sinConexion) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -366,9 +392,9 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     switch (_selectedIndex) {
       case 0:
       case 1:
-        // Inicio y Reportes: el `+` abre el diálogo para elegir wizard o IA.
+        // Inicio y Reportes: el `+` abre directo el wizard EDAN.
         return FloatingActionButton(
-          onPressed: () => _crearFicha(_selectedIndex),
+          onPressed: () => _abrirWizardDirecto(),
           tooltip: 'Nuevo reporte',
           backgroundColor: PaletteScope.of(context).primary,
           child: const Icon(Icons.add, color: Colors.white),
@@ -378,8 +404,31 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Abre el wizard EDAN directo, sin pasar por el diálogo de elección.
+  /// El código del asistente con IA se conserva pero no se expone desde el FAB.
+  Future<void> _abrirWizardDirecto() async {
+    final creado = await Navigator.of(context).push<bool>(
+      ugrRoute(const EdanFormWizard(), palette: Palettes.rea),
+    );
+    if (creado != true || !mounted) return;
+
+    _dashboardTabKey.currentState?.refresh();
+    _edanTabKey.currentState?.refresh();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Reporte guardado correctamente.'),
+        backgroundColor: AppColors.completed,
+      ),
+    );
+  }
+
   /// Abre el diálogo de creación y, según el modo elegido, el wizard o el
   /// asistente con IA. Solo refresca si la ficha quedó guardada.
+  ///
+  /// **MÉTODO DESACTIVADO**: el FAB ahora llama a `_abrirWizardDirecto`.
+  /// Este método se conserva para reactivar el asistente cuando el modelo
+  /// esté estable.
+  @visibleForTesting
   Future<void> _crearFicha(int tabActual) async {
     final modo = await pedirModoCreacionEdan(context);
     if (modo == null || !mounted) return;

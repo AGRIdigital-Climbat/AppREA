@@ -3,6 +3,7 @@ import '../models/edan.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/database_helper.dart';
+import '../services/sync_error_classifier.dart';
 import 'edan/edan_documento_service.dart';
 import 'edan/edan_documento_sync_service.dart';
 import 'edan/edan_localidades_envio_v2_service.dart';
@@ -100,6 +101,7 @@ class EdanSyncService {
       return SyncResult(
         exito: false,
         mensaje: 'Error: ${e.toString()}',
+        sinConexion: esFalloDeRed(e),
       );
     } finally {
       _isSyncing = false;
@@ -175,6 +177,7 @@ class EdanSyncService {
           } catch (e) {
             debugPrint('Error recibiendo localidad del servidor: $e');
             result.fallidos++;
+            if (esFalloDeRed(e)) result.sinConexion = true;
           }
         }
         skip += items.length;
@@ -184,6 +187,7 @@ class EdanSyncService {
       debugPrint('Error en pull: $e');
       result.mensaje = 'Error al recibir EDANs: ${e.toString()}';
       result.exito = false;
+      if (esFalloDeRed(e)) result.sinConexion = true;
     }
   }
 
@@ -261,12 +265,14 @@ class EdanSyncService {
         } catch (e) {
           debugPrint('Error eliminando EDAN ${edan.idLocal}: $e');
           result.fallidos++;
+          if (esFalloDeRed(e)) result.sinConexion = true;
         }
       }
     } catch (e) {
       debugPrint('Error en push de eliminaciones: $e');
       result.mensaje = 'Error al eliminar EDANs: ${e.toString()}';
       result.exito = false;
+      if (esFalloDeRed(e)) result.sinConexion = true;
     }
   }
 
@@ -318,6 +324,7 @@ class EdanSyncService {
           } catch (e) {
             todosOk = false;
             result.fallidos++;
+            if (esFalloDeRed(e)) result.sinConexion = true;
             debugPrint('Error enviando localidad ${loc.nombre}: $e');
           }
         }
@@ -334,6 +341,7 @@ class EdanSyncService {
       debugPrint('Error en push: $e');
       result.mensaje = 'Error al enviar EDANs: ${e.toString()}';
       result.exito = false;
+      if (esFalloDeRed(e)) result.sinConexion = true;
     }
   }
 }
@@ -347,9 +355,16 @@ class SyncResult {
   int fallidos = 0;
   int eliminados = 0;
 
+  /// `true` cuando el fallo fue por no poder hablar con el servidor, no porque
+  /// el servidor haya rechazado el dato. La UI usa esto para no mostrar un
+  /// error rojo por algo que el usuario no puede resolver y que ademas ya
+  /// reintenta solo al volver la red.
+  bool sinConexion;
+
   SyncResult({
     required this.exito,
     this.mensaje = '',
+    this.sinConexion = false,
   });
 
   String get resumen {

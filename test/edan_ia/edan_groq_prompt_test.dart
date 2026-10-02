@@ -133,10 +133,24 @@ void main() {
       expect(p, contains('un solo signo `?`'));
     });
 
-    test('permite no preguntar nada cuando la persona sigue contando', () {
+    test('la pregunta se escribe dentro de la respuesta', () {
+      // Medido contra el puente real: 7 de 7 turnos con `siguiente_pregunta`
+      // en `null` y ninguna frase terminada en `?`, con lo que la entrevista se
+      // clavaba. La pregunta tiene que salir de la prosa del modelo, que es
+      // donde le suena natural, no de un campo aparte.
       final p = prompt();
-      expect(p, contains('dejá que termine'));
+      expect(p, contains('La pregunta va adentro de la frase'));
+      expect(p, contains('**Tu mensaje termina en `?`.**'));
+      expect(p, contains('Todos tus mensajes terminan en una pregunta'));
+    });
+
+    test('solo deja de preguntar cuando se cierra', () {
+      final p = prompt();
+      expect(p, contains('La **única** vez que tu mensaje no termina en `?`'));
       expect(p, contains('`siguiente_pregunta` en `null`'));
+      // Antes había una salida que habilitaba no preguntar nada cada turno y
+      // el modelo la usaba siempre.
+      expect(p, isNot(contains('dejá que termine')));
     });
 
     test('manda a preguntar por lo que surja, no por la lista', () {

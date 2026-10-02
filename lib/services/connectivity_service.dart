@@ -4,6 +4,19 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 
+/// Estado de red de la app.
+///
+/// No basta con saber que hay interfaz de WiFi: un portal cautivo o un API
+/// caido responden igual. Por eso se valida contra el servidor real.
+///
+/// Importante: hay dos ventanas historicas en las que esta clase mentia y por
+/// eso la app mostraba errores rojos al usuario que solo estaba sin internet:
+///   - `_isConnected` arrancaba en `true` y el primer chequeo puede tardar
+///     hasta 13 s (3 s de connectivity_plus + 10 s del HEAD).
+///   - La histeresis de 3 fallos daba 45 s para "`darse cuenta`" de que se
+///     cayo la red mientras la app estaba abierta.
+/// Para ambas, usar [chequeoCompletado] como puerta antes de disparar trabajo
+/// de red, o [checkNow] para una verificacion real sin histeresis.
 class ConnectivityService {
   static final ConnectivityService _instance = ConnectivityService._();
   factory ConnectivityService() => _instance;
@@ -15,53 +28,74 @@ class ConnectivityService {
 
   Stream<bool> get connectionStream => _connectionController.stream;
   bool _isConnected = true;
+  bool _chequeoCompletado = false;
   int _consecutiveFailures = 0;
   static const int _maxConsecutiveFailures = 3;
   Timer? _periodicTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
+  bool _initialized = false;
 
   bool get isConnected => _isConnected;
 
-  Future<void> initialize() async {
-    try {
-      _isConnected = await _checkConnection();
-      _connectionController.add(_isConnected);
-    } catch (e) {
-      debugPrint('[Connectivity] init error: $e');
-      _isConnected = false;
-      _connectionController.add(false);
-    }
+  /// `true` cuando ya se resolvio el primer chequeo real de red.
+  ///
+  /// Mientras sea `false`, [isConnected] es un valor optimista heredado y NO
+  /// sirve como puerta para lanzar operaciones de red: haria exactamente lo
+  /// que se queria evitar, creyendo que hay internet cuando no lo hay.
+  bool get chequeoCompletado => _chequeoCompletado;
 
-    _connectivity.onConnectivityChanged.listen((results) async {
-      try {
-        final connected = await _checkConnection();
-        _updateState(connected);
-      } catch (e) {}
+  /// Idempotente: se puede llamar desde varias pantallas sin duplicar la
+  /// suscripcion a `onConnectivityChanged` ni el timer periodico. Antes cada
+  /// entrada a una pantalla de rol suma un timer de 15 s que nunca se cancela.
+  Future<void> initialize() async {
+    if (_initialized) return;
+    _initialized = true;
+
+    _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
+      _,
+    ) async {
+      await _consultarYActualizar();
     });
+
+    await _consultarYActualizar();
 
     _periodicTimer = Timer.periodic(const Duration(seconds: 15), (_) async {
-      try {
-        final connected = await _checkConnection();
-        _updateState(connected);
-      } catch (e) {}
+      await _consultarYActualizar();
     });
+  }
+
+  Future<void> _consultarYActualizar() async {
+    final connected = await _checkConnection();
+    if (_chequeoCompletado) {
+      _updateState(connected);
+      return;
+    }
+    // El primer chequeo NO pasa por la histeresis: si estamos sin red hay que
+    // saberlo ya, no 45 segundos despues.
+    _chequeoCompletado = true;
+    _consecutiveFailures = connected ? 0 : _maxConsecutiveFailures;
+    _aplicarEstado(connected);
+    // Traza unica: deja registro de con que estado arranco la sesion, que es
+    // lo primero que hay que saber cuando el modo offline se comporta raro.
+    debugPrint('[Connectivity] primer chequeo: ${connected ? 'online' : 'offline'}');
+  }
+
+  void _aplicarEstado(bool connected) {
+    if (connected == _isConnected) return;
+    _isConnected = connected;
+    _connectionController.add(connected);
   }
 
   void _updateState(bool connected) {
     if (connected) {
-      if (!_isConnected) {
-        _isConnected = true;
-        _connectionController.add(true);
-      }
       _consecutiveFailures = 0;
-    } else {
-      _consecutiveFailures++;
-      if (_isConnected && _consecutiveFailures < _maxConsecutiveFailures) {
-        return;
-      }
-      if (_isConnected) {
-        _isConnected = false;
-        _connectionController.add(false);
-      }
+      _aplicarEstado(true);
+      return;
+    }
+    // Histeresis: un micro-corte de red no debe marcar al usuario como offline.
+    _consecutiveFailures++;
+    if (_consecutiveFailures >= _maxConsecutiveFailures) {
+      _aplicarEstado(false);
     }
   }
 
@@ -77,29 +111,35 @@ class ConnectivityService {
       final response = await http
           .head(Uri.parse(ApiConfig.baseUrl))
           .timeout(const Duration(seconds: 10));
-      return response.statusCode > 0;
+      // Un 5xx no es internet utilizable para esta app: marcarlo "conectado"
+      // solo sirve para que cada peticion posterior falle y muestre un error
+      // rojo que en realidad es un problema del servidor.
+      return response.statusCode < 500;
     } catch (e) {
       return false;
     }
   }
 
+  /// Verificacion inmediata y sin histeresis.
+  ///
+  /// Devuelve lo que se pudo comprobar ahora, no el valor cacheado, para que
+  /// sirva como puerta fiable antes de una operacion de red. A diferencia de
+  /// [isConnected], un fallo aqui SI pasa el estado global a offline de
+  /// inmediato, porque el usuario acaba de pedir la comprobacion.
   Future<bool> checkNow() async {
-    try {
-      final connected = await _checkConnection();
-      _updateState(connected);
-      return _isConnected;
-    } catch (e) {
-      _consecutiveFailures++;
-      if (_consecutiveFailures >= _maxConsecutiveFailures) {
-        _isConnected = false;
-        _connectionController.add(false);
-      }
-      return _isConnected;
-    }
+    final connected = await _checkConnection();
+    _chequeoCompletado = true;
+    _consecutiveFailures = connected ? 0 : _maxConsecutiveFailures;
+    _aplicarEstado(connected);
+    return connected;
   }
 
   void dispose() {
     _periodicTimer?.cancel();
+    _periodicTimer = null;
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
+    _initialized = false;
     _connectionController.close();
   }
 }

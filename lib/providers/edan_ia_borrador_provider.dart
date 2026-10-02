@@ -1,4 +1,4 @@
-/// Estado y bucle de la conversación EDAN con el puente de IA.
+﻿/// Estado y bucle de la conversación EDAN con el puente de IA.
 ///
 /// Es el pegamento entre las cuatro capas, y no hace lógica propia:
 ///
@@ -24,6 +24,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../config/api_config.dart';
 import '../models/edan_borrador_ia.dart';
@@ -35,9 +36,26 @@ import '../services/edan_ia/edan_groq_prompt.dart';
 import '../services/edan_ia/edan_groq_service.dart';
 import '../services/edan_ia/edan_parche.dart';
 import '../services/edan_ia/edan_reglas_poblacion.dart';
+import '../services/edan_ia/edan_salida.dart';
 import '../services/edan_ia/edan_traduccion.dart';
 import '../services/edan_ia/puente_models.dart';
 import '../services/edan_ia/puente_service.dart';
+
+/// Los sonidos del micrófono.
+///
+/// Son cortos y distintos entre sí a propósito: mirando la pantalla se sabe en
+/// qué estado está, pero mirando al horizonte —que es como se carga el
+/// teléfono en el campo— el tono dice si está escuchando o si ya terminó.
+enum EdanPistaVoz { abriendo, transcribiendo, transcrito, cerrado }
+
+/// Voz que además puede dar señales cortas de estado.
+///
+/// [EdanIaVoz] no la declara porque el resto de las pantallas que la usan no
+/// necesitan pistas; si una implementación no las da, el provider sigue
+/// funcionando igual.
+abstract interface class EdanIaVozConPistas implements EdanIaVoz {
+  Future<void> pista(EdanPistaVoz pista);
+}
 
 /// Un mensaje de la conversación, en lo que la UI necesita para pintarlo.
 class EdanIaMensaje {
@@ -51,8 +69,52 @@ class EdanIaMensaje {
       : esUsuario = true,
         fallo = false;
 
-  const EdanIaMensaje.asistente(this.texto, {this.fallo = false})
-      : esUsuario = false;
+  /// Crea un mensaje del asistente pasando [texto] por [edanProsaVisible].
+  ///
+  /// Es el **punto único de control** de lo que la persona puede leer. Todos
+  /// los caminos que agregan mensajes del modelo pasan por este constructor,
+  /// así que agregar otro camino en el futuro no puede volver a colar el
+  /// contrato en el chat: la regla vive en el tipo, no en cada llamador.
+  ///
+  /// Los mensajes del usuario no se tocan: lo que dijo la persona se muestra
+  /// tal cual, aunque contenga llaves.
+  ///
+  /// No es `const` justamente porque hace este trabajo. Las frases fijas
+  /// (`_cierreFotos`, el saludo) salen idénticas, que es lo que exige la UI
+  /// al compararlas por igualdad.
+  EdanIaMensaje.asistente(String texto, {this.fallo = false})
+      : texto = edanProsaVisible(texto),
+        esUsuario = false;
+}
+
+/// Qué está haciendo el micrófono ahora.
+///
+/// Sin esto la persona no sabe si el celular la está oyendo o si ya se cansó de
+/// escucharla: el botón solo cambiaba de color y en el campo, con las manos
+/// ocupadas, eso no se distingue. Son cuatro estados y no dos porque
+/// "transcribiendo" es el más largo de todos y el que más confundía.
+enum EdanIaEstadoVoz {
+  /// Nada: esperando que la persona escriba o toque el micrófono.
+  inactivo,
+
+  /// El micrófono está abierto: está escuchando.
+  escuchando,
+
+  /// Ya dejó de escuchar y está pasando la voz a texto.
+  transcribiendo,
+
+  /// Escuchó, entendió y está contestando.
+  pensando;
+
+  bool get activo => this != EdanIaEstadoVoz.inactivo;
+
+  /// Lo que la persona lee en la barra inferior.
+  String get etiqueta => switch (this) {
+        EdanIaEstadoVoz.inactivo => '',
+        EdanIaEstadoVoz.escuchando => 'Te estoy escuchando…',
+        EdanIaEstadoVoz.transcribiendo => 'Pasando tu voz a texto…',
+        EdanIaEstadoVoz.pensando => 'Estoy pensando tu respuesta…',
+      };
 }
 
 /// Se lanza cuando un desajuste de población impide guardar.
@@ -89,6 +151,15 @@ const _maxReintentosPorTurno = 1;
 /// Tope al que se sube `max_tokens` cuando el puente devuelve `truncado`.
 const _maxTokensTope = 12000;
 
+/// Lo primero que dice la IA al abrir la pantalla.
+///
+/// Una sola pregunta abierta y ninguna lista de secciones: si arranca vaciando
+/// las secciones pendientes, suena a formulario y la persona le contesta una por
+/// una en vez de contar qué pasó. La lista se la da el modelo después, en el
+/// ritmo en que la persona vaya contando.
+const _saludo =
+    'Contame qué pasó. Yo voy anotando y te voy preguntando lo que falte.';
+
 /// La voz, detrás de una interfaz mínima.
 ///
 /// Existe para que las pruebas no dependan de los plugins de TTS/STT: si el
@@ -105,7 +176,7 @@ abstract class EdanIaVoz {
 }
 
 /// Habla de verdad, con los plugins del asistente jurídico.
-class EdanIaVozReal implements EdanIaVoz {
+class EdanIaVozReal implements EdanIaVozConPistas {
   const EdanIaVozReal();
 
   AsistenteVozService get _v => AsistenteVozService.instance;
@@ -125,6 +196,31 @@ class EdanIaVozReal implements EdanIaVoz {
     required void Function() onFin,
   }) =>
       _v.escuchar(onResultado: onResultado, onFin: onFin);
+
+  /// Las pistas de estado suenan y vibran.
+  ///
+  /// Cada estado tiene un sonido y una vibración distintos, y el par es
+  /// deliberado: el tono solo no se escucha si el teléfono está en el bolsillo, y
+  /// la vibración sola no se siente con guantes. Juntos, quien no está mirando la
+  /// pantalla igual sabe si el micrófono está abierto o si ya terminó.
+  @override
+  Future<void> pista(EdanPistaVoz pista) async {
+    // Un tono grave al abrir, uno corto al empezar a transcribir y otro más
+    // agudo al terminar: la secuencia se reconoce sin mirar.
+    switch (pista) {
+      case EdanPistaVoz.abriendo:
+        await SystemSound.play(SystemSoundType.alert);
+        unawaited(HapticFeedback.mediumImpact());
+      case EdanPistaVoz.transcribiendo:
+        await SystemSound.play(SystemSoundType.click);
+        unawaited(HapticFeedback.selectionClick());
+      case EdanPistaVoz.transcrito:
+        await SystemSound.play(SystemSoundType.click);
+        unawaited(HapticFeedback.lightImpact());
+      case EdanPistaVoz.cerrado:
+        unawaited(HapticFeedback.selectionClick());
+    }
+  }
 }
 
 class EdanIaBorradorProvider extends ChangeNotifier {
@@ -148,11 +244,26 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   bool _pensando = false;
   bool _escuchando = false;
 
+  /// El saludo ya se dio en esta sesión de conversación: no se repite.
+  bool _saludoDado = false;
+
+  /// El micrófono ya se cerró y la voz todavía se está pasando a texto: es la
+  /// espera más larga de todo el ciclo y antes no se mostraba.
+  bool _transcribiendo = false;
+
   /// La escucha se cortó a propósito con [detener]: lo que se alcanzó a oír no
   /// se manda, porque el modelo anotaría datos que la persona no dijo.
   bool _escuchaCancelada = false;
 
   String _respuestaEnCurso = '';
+
+  /// Las últimas palabras que el micrófono reconoció, mientras todavía se está
+  /// escuchando.
+  ///
+  /// Sin esto la persona hablaba, esperaba el cierre de la sesión y recién
+  /// después veía lo que dijo: parecía que no la estaba oyendo. Se muestra en
+  /// la burbuja del usuario apenas llega la primera palabra.
+  String _transcripcionEnCurso = '';
   String? _error;
   EdanParche _ultimoParche = EdanParche();
   bool _descartado = false;
@@ -165,11 +276,42 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   List<EdanIaMensaje> get mensajes => List.unmodifiable(_mensajes);
   bool get pensando => _pensando;
   bool get escuchando => _escuchando;
-  bool get ocupado => _pensando || _escuchando;
+  bool get transcribiendo => _transcribiendo;
+
+  /// El estado completo del micrófono, para pintar una sola cosa y no tres
+  /// banderas sueltas que se contradigan.
+  EdanIaEstadoVoz get estadoVoz {
+    if (_escuchando) return EdanIaEstadoVoz.escuchando;
+    if (_transcribiendo) return EdanIaEstadoVoz.transcribiendo;
+    if (_pensando) return EdanIaEstadoVoz.pensando;
+    return EdanIaEstadoVoz.inactivo;
+  }
+
+  bool get ocupado => _pensando || _escuchando || _transcribiendo;
 
   /// Texto que el modelo ya.emitió en este turno. La UI lo muestra como
   /// "escribiendo…" y lo reemplaza cuando llega el mensaje completo.
   String get respuestaEnCurso => _respuestaEnCurso;
+
+  /// Lo que la persona está diciendo, en vivo.
+  String get transcripcionEnCurso => _transcripcionEnCurso;
+
+  /// Para los tests: simular lo que llega token a token sin armar un SSE.
+  @visibleForTesting
+  set debugRespuestaEnCurso(String v) => _respuestaEnCurso = v;
+
+  /// Lo que se dibuja mientras el modelo escribe: nunca JSON, ni completo ni a
+  /// medio escribir.
+  ///
+  /// Si lo que llega es prosa, se muestra tal cual. Si es el contrato, solo
+  /// interesa su campo `respuesta`, que el modelo escribe primero: así la
+  /// frase aparece apenas se cierra la comilla, sin que las llaves del
+  /// envoltorio lleguen a verse nunca. Eso lo decide
+  /// [edanRespuestaEnCurso], la misma separación que usa el turno terminado.
+  ///
+  /// Antes devolvía el buffer de tokens crudo, y por eso en el chat se veía
+  /// `"siguiente_pregunta": null, ...` apareciendo letra por letra.
+  String get respuestaEnCursoLegible => edanRespuestaEnCurso(_respuestaEnCurso);
 
   String? get error => _error;
   EdanParche get ultimoParche => _ultimoParche;
@@ -238,6 +380,9 @@ class EdanIaBorradorProvider extends ChangeNotifier {
     _error = null;
     _descartado = false;
     _respuestaEnCurso = '';
+    // La burbuja de lo que se oyó se reemplaza por el mensaje del usuario en
+    // el mismo `notify`, así que no parpadea ni queda un texto suelto.
+    _transcripcionEnCurso = '';
     _mensajes.add(EdanIaMensaje.usuario(t));
     _pensando = true;
     notifyListeners();
@@ -317,7 +462,7 @@ class EdanIaBorradorProvider extends ChangeNotifier {
               if (e.hayQueExtraer) {
                 _rescatePorExtractor(t);
                 _descartado = true;
-                _mensajes.add(const EdanIaMensaje.asistente(
+                _mensajes.add(EdanIaMensaje.asistente(
                   'No pude anotar eso. ¿Podés repetirlo?',
                   fallo: true,
                 ));
@@ -347,7 +492,27 @@ class EdanIaBorradorProvider extends ChangeNotifier {
         notifyListeners();
       }
 
-      var parche = EdanGroqService.parcheDesdeJson(res.parche ?? {});
+      // -----------------------------------------------------------------
+      // Separación de canales.
+      //
+      // El chat pinta la *respuesta*, no el buffer de tokens. Ese buffer es
+      // exactamente lo que traía el JSON entero cuando el modelo escribía el
+      // contrato en el canal de texto, y era el motivo de que en la pantalla
+      // apareciera `"siguiente_pregunta": null, ...` debajo de la frase.
+      //
+      // El puente ya parseó el envoltorio (`res.json`), así que se lo pasa
+      // directo: es el contrato tal cual lo entendió el transporte. Si no
+      // vino, se decodifica lo crudo. En los dos caminos lo que sale acá está
+      // garantizado como prosa.
+      // -----------------------------------------------------------------
+      final crudo = _respuestaEnCurso.isNotEmpty
+          ? _respuestaEnCurso
+          : res.respuesta;
+      final salida = decodificarSalida(crudo, envoltorio: res.json);
+
+      // Canal de datos: el puente manda; si no vino, el que traía el texto
+      // crudo. Los dos van por `parcheDesdeJson`, que además normaliza.
+      var parche = EdanGroqService.parcheDesdeJson(res.parche ?? salida.parche);
       if (parche.vacio) {
         // Parche vacío o ausente: el modelo conversó en vez de anotar (o
         // `respuesta_no_string` sin `parche`). Una pasada de reparación y, si
@@ -359,28 +524,18 @@ class EdanIaBorradorProvider extends ChangeNotifier {
       }
       _ultimoParche = parche;
 
-      // Lo que se muestra y lo que se dice es solo la prosa limpia: si el modelo
-      // escribió el parche en el canal de texto, ese volcado no va ni a la
-      // burbuja ni a la voz.
+      // Canal de texto: la frase ya separada. El prompt le pide al modelo una
+      // frase para la persona y aparte UNA pregunta; antes la pregunta se
+      // tiraba y la persona se quedaba sin saber qué contar, con la
+      // conversación clavada en "Anotado." un turno tras otro.
       //
-      // Y se le pega la `siguiente_pregunta` del JSON, que antes se tiraba: el
-      // prompt le pide al modelo una frase para la persona y aparte UNA
-      // pregunta. La respuesta sola era "Anotado." y la pregunta se perdía, así
-      // que la persona se quedaba sin saber qué contar y la conversación se
-      // clavaba en "Anotado." un turno tras otro.
       // Ojo: `siguiente_pregunta` es hermano de `parche`, no está dentro. Por
-      // eso se lee de `res.json` y no de `res.parche`, que es solo el objeto de
-      // datos.
-      final pregunta = _siguientePreguntaDe(res.json);
-      final paraMostrar = _prosaVisible(_respuestaEnCurso);
+      // eso se lee del envoltorio y no de `res.parche`, que es solo el objeto
+      // de datos.
+      var pregunta = salida.siguientePregunta ?? '';
+      if (pregunta.isEmpty) pregunta = _siguientePreguntaDe(res.json);
 
-      // El filtro de "tres palabras o más" es para la ruta de texto degradado,
-      // donde una respuesta de dos palabras es ruido del modelo. Aquí el turno
-      // ya trae un parche: "Anotado" o "Listo" son confirmaciones que la
-      // persona quiere leer, así que alcanza con que no sea estructura.
-      var util = paraMostrar.isNotEmpty && !_pareceEstructura(paraMostrar)
-          ? paraMostrar
-          : '';
+      var util = salida.respuesta;
 
       // La pregunta va siempre al final: es lo que la persona tiene que
       // responder. Si ya venía pegada a la respuesta no se repite.
@@ -388,38 +543,47 @@ class EdanIaBorradorProvider extends ChangeNotifier {
         util = util.isEmpty ? pregunta : '$util $pregunta';
       }
 
-      _mensajes.add(EdanIaMensaje.asistente(
-        util.isNotEmpty
-            ? util
-            // El dato quedó anotado aunque el modelo hablara en JSON: preguntar
-            // "¿me contás más?" haría que la persona repitiera lo que ya se
-            // tiene, que es la única forma real de perder información.
-            : (parche.vacio ? '¿Me contás un poco más?' : 'Anotado.'),
-      ));
+      // Un solo texto para la burbuja y para la voz. Antes había dos caminos y
+      // no coincidían: cuando la prosa salía vacía, la burbuja caía al
+      // "Anotado." de rescate pero la voz se callaba, así que la persona
+      // hablaba y no oía nada de vuelta. Y el respaldo era `_respuestaEnCurso`,
+      // que en el caso troublesome es el volcado crudo: leerlo por voz sería
+      // leerse un JSON.
+      //
+      // El dato quedó anotado aunque el modelo hablara en JSON: preguntar
+      // "¿me contás más?" haría que la persona repitiera lo que ya se tiene,
+      // que es la única forma real de perder información.
+      final texto = util.isNotEmpty
+          ? util
+          : (parche.vacio ? '¿Me contás un poco más?' : 'Anotado.');
+
+      _mensajes.add(EdanIaMensaje.asistente(texto));
 
       // El paso de fotos es obligatorio y no se puede dejar en manos del
       // modelo: si la conversación terminó y no lo mencionó, lo dice el
       // provider. Una sola vez, y solo si de verdad ya no falta nada.
-      if (listoParaFotos && !_mencionaFotos(util) && !_yaCerrado) {
-        _mensajes.add(const EdanIaMensaje.asistente(_cierreFotos));
+      if (listoParaFotos && !_mencionaFotos(texto) && !_yaCerrado) {
+        _mensajes.add(EdanIaMensaje.asistente(_cierreFotos));
         await _voz.hablar(_cierreFotos);
       } else {
         // La respuesta se dice con voz: si la persona usó el micrófono, espera
-        // una voz de vuelta, no un texto que tiene que leer. El volcado del
-        // parche nunca se dice: sería leerse un JSON.
-        final paraDecir = util.isNotEmpty ? util : _respuestaEnCurso;
-        if (paraDecir.isNotEmpty && paraDecir == util) {
-          await _voz.hablar(paraDecir);
-        }
+        // una voz de vuelta, no un texto que tiene que leer. Nunca el volcado
+        // del parche.
+        if (texto.isNotEmpty) await _voz.hablar(texto);
       }
     } catch (e) {
       _error = e.toString();
-      _mensajes.add(const EdanIaMensaje.asistente(
+      _mensajes.add(EdanIaMensaje.asistente(
         'Ocurrió un error inesperado. Revisá la conexión.',
         fallo: true,
       ));
     } finally {
       _pensando = false;
+      // La burbuja de "escribiendo" se dibuja mientras esto tenga algo. Si
+      // queda el último fragmento, la pantalla queda con un spinner eterno
+      // debajo del último mensaje y parece que la app se colgó: el turno ya
+      // terminó, la respuesta ya está en `_mensajes`.
+      _respuestaEnCurso = '';
       notifyListeners();
     }
   }
@@ -479,7 +643,15 @@ class EdanIaBorradorProvider extends ChangeNotifier {
     if (codigo == 'truncado') {
       return 'La respuesta quedó cortada. Probá con frases más cortas.';
     }
-    return 'Falló la conexión: $mensaje';
+    // `mensaje` viene del puente y a veces trae el volcado de validación
+    // (un 422 de Pydantic es JSON). Se separa como cualquier otro texto y se
+    // acorta: un error no es una respuesta, no tiene que ocupar la pantalla.
+    final detalle = edanProsaVisible(mensaje);
+    if (detalle.isEmpty) return 'Falló la conexión.';
+    final corto = detalle.length > 160
+        ? '${detalle.substring(0, 160)}…'
+        : detalle;
+    return 'Falló la conexión: $corto';
   }
 
   /// Turno en el que el modelo contestó en prosa y no en el JSON del contrato.
@@ -502,13 +674,46 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   /// `descartado` queda en `true` igual: la UI puede ofrecer "repetir" porque
   /// el contrato no se respetó. Lo que no se hace es tirar el turno.
   Future<void> _turnoEnProsa(String dicho, String prosa) async {
-    final util = _esRespuestaUsable(prosa) ? prosa.trim() : '';
+    // Acá solo llega texto plano: el puente pidió JSON y no vino. Pero ese
+    // texto también puede SER el contrato escrito en el canal de texto, así
+    // que se separa igual que en el camino normal. Un solo filtro para los dos
+    // casos es justamente lo que faltaba.
+    final salida = decodificarSalida(prosa);
+
     _rescatePorExtractor(dicho);
 
-    final mostrar = util.isNotEmpty ? util : 'No pude entender eso. ¿Podés repetirlo?';
+    // Si el contrato venía dentro del texto, los datos no se pierden.
+    if (!salida.parcheVacio) {
+      final p = EdanGroqService.parcheDesdeJson(salida.parche);
+      if (!p.vacio) {
+        _borrador = aplicarParche(_borrador, p);
+        _ultimoParche = p;
+      }
+    }
+
+    final util = _esRespuestaUsable(salida.respuesta)
+        ? salida.respuesta
+        : '';
+
+    var mostrar = util.isNotEmpty
+        ? util
+        : 'No pude entender eso. ¿Podés repetirlo?';
+
+    // Si además trajo la pregunta siguiente, se le pega: sin ella la persona
+    // no sabe qué contar y la conversación se clava. La pregunta la escribe el
+    // modelo dentro de `respuesta` (ver `# Cómo preguntar` en el prompt); este
+    // campo es el caso en que la separó a propósito.
+    final pregunta = salida.siguientePregunta ?? '';
+    if (util.isNotEmpty && pregunta.isNotEmpty && !_contiene(mostrar, pregunta)) {
+      mostrar = '$mostrar $pregunta';
+    }
+
     _descartado = true;
     _mensajes.add(EdanIaMensaje.asistente(mostrar, fallo: util.isEmpty));
-    if (util.isNotEmpty) await _voz.hablar(util);
+    // La voz dice lo mismo que la burbuja, pregunta incluida: decir la frase
+    // y dejar la pregunta en pantalla era que la persona escuche una respuesta
+    // y no sepa que le toca contestar.
+    if (mostrar.isNotEmpty && util.isNotEmpty) await _voz.hablar(mostrar);
   }
 
   /// Último recurso antes de perder lo que dijo la persona.
@@ -541,54 +746,11 @@ class EdanIaBorradorProvider extends ChangeNotifier {
     return limpio.split(RegExp(r'\s+')).length >= 3;
   }
 
-  /// Lo que se escribe en la burbuja: solo la prosa.
-  ///
-  /// El canal de texto del modelo no siempre trae solo prosa. En la corrida
-  /// real, al decir "pasó una granizada" la respuesta llegó con las dos cosas
-  /// pegadas: `entiendo que hubo una granizada, siguiente pregunta` y, detrás,
-  /// el volcado del parche (`null`, `parche:`, `tipoEvento: granizada: true`).
-  /// El `parche` ya viaja aparte y limpio en el evento `json` del puente, así
-  /// que lo que se repite en el texto es ruido; pero al pintarlo tal cual la
-  /// persona lee dos respuestas y ninguna se entiende.
-  ///
-  /// La regla exploits el orden del modelo: la prosa va primero y el volcado
-  /// después, así que se corta en el primer volcado. Nada más se toca; si la
-  /// prosa no queda utilizable, el turno no muestra JSON ni se descarta (eso lo
-  /// decide [_esRespuestaUsable] y quien lo llama).
-  static String _prosaVisible(String texto) {
-    var t = texto.trim();
-    if (t.isEmpty) return '';
-
-    // Bloques cercados: ```json ... ```
-    t = t.replaceAll(RegExp('```[\\s\\S]*?```'), ' ');
-
-    // Objetos JSON balanceados que envuelven el parche (anidados incluidos).
-    t = _sinJsonDelParche(t);
-
-    // A partir de un volcado estructurado ya no hay prosa que valga.
-    final corte = RegExp(
-      r'(^|\n)[ \t]*(null[ \t]*$|parche\b|"parche"|\{)',
-      multiLine: true,
-    ).firstMatch(t);
-    if (corte != null) t = t.substring(0, corte.start);
-
-    // Líneas que son solo estructura: llaves, corchetes, un `null` suelto o una
-    // clave sin valor. Una palabra suelta ("Anotado", "Listo") es una respuesta
-    // válida y se conserva, por eso la clave exige los dos puntos.
-    final lineas = t
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty && !_lineaDeEstructura.hasMatch(l))
-        .toList();
-    return lineas.join(' ').trim();
-  }
-
-  /// Una línea que no es una frase: `{`, `}`, `[`, `]`, `null`, `parche` o
-  /// `tipoEvento:`. El valor suelto (`granizada: true`) no se quita con esto: va
-  /// dentro del bloque que ya se truncó.
-  static final _lineaDeEstructura = RegExp(
-    r'^(\{|\}|\[|\]|null|parche:?|"?[\wáéíóúñ]+"?[ \t]*:)$',
-  );
+  // La regla de "solo prosa" NO vive más acá: está en `edanProsaVisible` y en
+  // `decodificarSalida` (`lib/services/edan_ia/edan_salida.dart`). Acá había
+  // una copia propia, y con el tiempo divergió de la de la voz y de la del
+  // streaming: cada camino tenía su filtro con sus agujeros distintos y la
+  // pantalla terminó viendo el contrato entero. Un solo filtro, un solo lugar.
 
   /// La pregunta que el modelo dejó preparada en `siguiente_pregunta`.
   ///
@@ -598,9 +760,9 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   static String _siguientePreguntaDe(Map<String, dynamic>? json) {
     final cruda = json?['siguiente_pregunta'];
     if (cruda is! String) return '';
-    final limpia = cruda.trim();
-    if (limpia.isEmpty || _pareceEstructura(limpia)) return '';
-    return limpia;
+    // Pasa por el mismo filtro que la respuesta: la pregunta también se
+    // muestra, así que tampoco puede traer estructura.
+    return edanProsaVisible(cruda);
   }
 
   /// ¿`texto` ya dice lo mismo que `frase`?
@@ -622,60 +784,18 @@ class EdanIaBorradorProvider extends ChangeNotifier {
       .replaceAll('ñ', 'n')
       .replaceAll('ü', 'u');
 
-  /// ¿Lo que quedó es estructura y no una frase?
-  ///
-  /// [_prosaVisible] ya quita el volcado del parche; esto es la red detrás, por
-  /// si el modelo escribe un objeto suelto o un mapa sin la palabra `parche`.
-  static bool _pareceEstructura(String texto) {
-    final t = texto.trimLeft();
-    return t.startsWith('{') ||
-        t.startsWith('[') ||
-        t.contains('"parche"') ||
-        t.contains('=>');
-  }
-
-  /// Quita los objetos JSON balanceados que contienen `"parche"`, con
-  /// anidamiento. Un `scan` de llaves, porque un `RegExp` no alcanza cuando el
-  /// volcado trae subobjetos: `{"parche":{"tipoEvento":{"granizada":true}}}`.
-  static String _sinJsonDelParche(String texto) {
-    final limpio = StringBuffer();
-    var i = 0;
-    while (i < texto.length) {
-      final abre = texto.indexOf('{', i);
-      if (abre < 0) {
-        limpio.write(texto.substring(i));
-        break;
-      }
-      limpio.write(texto.substring(i, abre));
-
-      var nivel = 0;
-      var j = abre;
-      for (; j < texto.length; j++) {
-        if (texto[j] == '{') {
-          nivel++;
-        } else if (texto[j] == '}') {
-          nivel--;
-          if (nivel == 0) {
-            j++;
-            break;
-          }
-        }
-      }
-      final fin = j > texto.length ? texto.length : j;
-      final bloque = texto.substring(abre, fin);
-      if (!bloque.contains('"parche"')) limpio.write(bloque);
-      i = fin;
-    }
-    return limpio.toString();
-  }
 
   /// Escucha del micrófono y responde con lo que oyó.
   Future<void> escucharYResponder() async {
-    if (_escuchando || _pensando) return;
+    if (_escuchando || _pensando || _transcribiendo) return;
     _escuchando = true;
     _error = null;
     _escuchaCancelada = false;
     notifyListeners();
+
+    // Aviso de que el micrófono se abrió: en el campo la persona necesita saber
+    // que ya puede hablar, sin mirar la pantalla.
+    _sonar(EdanPistaVoz.abriendo);
 
     // `AsistenteVozService.escuchar` resuelve cuando la sesión EMPIEZA (así
     // funciona `speech_to_text.listen`): la transcripción y el final llegan
@@ -687,7 +807,24 @@ class EdanIaBorradorProvider extends ChangeNotifier {
     final finDeEscucha = Completer<void>();
 
     unawaited(_voz.escuchar(
-      onResultado: (t) => oido = t,
+      onResultado: (t) {
+        oido = t;
+        // Las palabras se pintan apenas llegan, no cuando se cierra la sesión
+        // del reconocedor: con el texto en vivo la persona sabe que la están
+        // oyendo mientras habla, y la espera de silencio ya no se siente.
+        _transcripcionEnCurso = t;
+        // Ya hay palabras: el micrófono se suelta y empieza la transcripción.
+        // Soltarlo acá y no después es lo que hace que "transcribiendo" se vea
+        // de verdad: si se espera al final de la sesión, los dos estados están
+        // activos a la vez, `estadoVoz` prioriza "escuchando" y la pantalla nunca
+        // muestra la espera más larga del ciclo.
+        if (!_transcribiendo) {
+          _escuchando = false;
+          _transcribiendo = true;
+          _sonar(EdanPistaVoz.transcribiendo);
+        }
+        notifyListeners();
+      },
       onFin: () {
         if (!finDeEscucha.isCompleted) finDeEscucha.complete();
       },
@@ -700,18 +837,50 @@ class EdanIaBorradorProvider extends ChangeNotifier {
 
     await finDeEscucha.future;
     _escuchando = false;
+    final hablo = (oido?.trim().isNotEmpty ?? false);
+    _transcribiendo = false;
     notifyListeners();
+    if (hablo) _sonar(EdanPistaVoz.transcrito);
 
     // Lo que se cortó a mitad no se manda: una transcripción incompleta es peor
     // que no mandar nada, porque el modelo anotaría datos que la persona no dijo.
-    if (_escuchaCancelada) return;
+    if (_escuchaCancelada) {
+      _transcripcionEnCurso = '';
+      notifyListeners();
+      return;
+    }
 
     final texto = oido?.trim() ?? '';
-    if (texto.isEmpty) return;
+    if (texto.isEmpty) {
+      // No se oyó nada: la burbuja no puede quedarse con lo anterior.
+      _transcripcionEnCurso = '';
+      notifyListeners();
+      return;
+    }
     // No se repite lo dicho: la respuesta del modelo ya va a confirmar y
     // preguntar. Anunciar "Entendí: ..." por voz hace que la persona espere un
     // tono de máquina y rompe la conversación.
     await enviar(texto);
+  }
+
+  /// Abre la conversación: la IA habla primero.
+  ///
+  /// Se llama al abrir la pantalla. Escribió un mensaje **y** lo dice, porque
+  /// quien llegó apretando el micrófono no va a leer: si la pantalla aparece en
+  /// silencio, la primera impression es que la app no arrancó.
+  ///
+  /// Solo una vez: si la persona ya habló, no se interrumpe.
+  Future<void> saludo() async {
+    if (_mensajes.isNotEmpty || _saludoDado) return;
+    _saludoDado = true;
+    _mensajes.add(EdanIaMensaje.asistente(_saludo));
+    notifyListeners();
+    await _voz.hablar(_saludo);
+  }
+
+  void _sonar(EdanPistaVoz pista) {
+    final s = _voz;
+    if (s is EdanIaVozConPistas) unawaited(s.pista(pista));
   }
 
   /// Corta la escucha o el habla en curso.
@@ -721,6 +890,12 @@ class EdanIaBorradorProvider extends ChangeNotifier {
     await _voz.detener();
     _escuchando = false;
     _pensando = false;
+    // Lo que quedó a medias se va de la pantalla: si se corta el turno a la
+    // mitad, la burbuja de "escribiendo" no puede quedar clavada debajo del
+    // último mensaje pareciendo que la app se colgó.
+    _transcribiendo = false;
+    _respuestaEnCurso = '';
+    _transcripcionEnCurso = '';
     notifyListeners();
   }
 
@@ -728,6 +903,7 @@ class EdanIaBorradorProvider extends ChangeNotifier {
     _borrador = EdanBorradorIa();
     _mensajes.clear();
     _respuestaEnCurso = '';
+    _transcripcionEnCurso = '';
     _error = null;
     _descartado = false;
     _ultimoParche = EdanParche();

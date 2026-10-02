@@ -13,6 +13,7 @@ import 'edan_localidades_envio_v2_service.dart';
 import '../edan_secciones_registry.dart';
 import '../sync_debug_config.dart';
 import '../sync_debug_collector.dart';
+import '../sync_error_classifier.dart';
 
 /// Servicio de sincronización unificado para localidades EDAN (rol 7 RESP).
 ///
@@ -133,7 +134,11 @@ class EdanSyncRespoService {
     } catch (e, st) {
       debugPrint('[SyncC] Error general: $e');
       debugPrint('[SyncC] Stack: $st');
-      return SyncResult(exito: false, mensaje: 'Error: $e');
+      return SyncResult(
+        exito: false,
+        mensaje: 'Error: $e',
+        sinConexion: esFalloDeRed(e),
+      );
     } finally {
       _isSyncing = false;
       sincronizando.value = false;
@@ -461,6 +466,7 @@ class EdanSyncRespoService {
         errores++;
         debugPrint('[SyncC]   DELETE $idLocal → ERROR: $e');
         result.fallidos++;
+        if (esFalloDeRed(e)) result.sinConexion = true;
         if (kSyncDebugMode) {
           SyncDebugCollector.instance.add(
             SyncApiEntry(
@@ -1323,7 +1329,16 @@ class SyncResult {
   int fotosSubidas = 0;
   int fotosFallidas = 0;
 
-  SyncResult({required this.exito, this.mensaje = ''});
+  /// `true` cuando el fallo fue de transporte y no un rechazo del servidor.
+  /// La UI lo usa para no pintar un error rojo por estar sin internet: eso ya
+  /// lo reintenta solo la app cuando vuelve la red.
+  bool sinConexion;
+
+  SyncResult({
+    required this.exito,
+    this.mensaje = '',
+    this.sinConexion = false,
+  });
 
   String get resumen {
     if (!exito) return mensaje;

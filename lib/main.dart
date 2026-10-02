@@ -43,14 +43,22 @@ void main() async {
   };
 
   runZonedGuarded(() {
-    ConnectivityService().initialize();
+    // Unico punto de inicializacion de la conectividad. Las pantallas de rol
+    // ya no la arrancan por su cuenta: cada llamada anterior sumaba un timer
+    // periodico de 15 s y una suscripcion que nunca se cancelaban.
+    unawaited(ConnectivityService().initialize());
+
+    final connectivityProvider = ConnectivityProvider();
+    unawaited(connectivityProvider.initialize());
 
     runApp(
       MultiProvider(
         providers: [
           ChangeNotifierProvider(create: (_) => AuthProvider()),
           ChangeNotifierProvider(create: (_) => ReporteProvider()),
-          ChangeNotifierProvider(create: (_) => ConnectivityProvider()),
+          ChangeNotifierProvider<ConnectivityProvider>.value(
+            value: connectivityProvider,
+          ),
         ],
         child: const MyApp(),
       ),

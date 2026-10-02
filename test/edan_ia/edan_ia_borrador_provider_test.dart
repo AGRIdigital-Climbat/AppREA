@@ -633,6 +633,71 @@ void main() {
     });
   });
 
+  group('lo que se pinta', () {
+    test('el volcado completo termina en prosa, no en JSON', () async {
+      // El bug original: el turno cerró y en la pantalla quedó
+      // {"respuesta":...} entero. El constructor del mensaje del asistente es
+      // el punto único de control, así que se lo prueba acá con el reporte real
+      // entrando por el camino normal de `enviar()`.
+      const reporte = '{"respuesta":"Se registró una granizada muy fuerte.",'
+          '"siguiente_pregunta":"¿Había gente en la zona?",'
+          '"parche":{"municipio":"Yapacaní","totalAfectada":40}}';
+      final voz = _VozFalsa();
+      final p = _conRespuesta(
+        _sse([
+          {'tipo': 'token', 'texto': reporte},
+          _doneDe(respuesta: reporte, json: jsonDecode(reporte)),
+        ]),
+        voz: voz,
+      );
+
+      await p.enviar('hubo granizada en san pedro');
+
+      for (final m in p.mensajes.where((m) => !m.esUsuario)) {
+        expect(m.texto, isNot(contains('{')), reason: m.texto);
+        expect(m.texto, isNot(contains('}')), reason: m.texto);
+        expect(m.texto, isNot(contains('"')), reason: m.texto);
+        expect(m.texto, isNot(contains('```')), reason: m.texto);
+        expect(m.texto, isNot(contains('tipoEvento')));
+        expect(m.texto, isNot(contains('siguiente_pregunta')));
+        expect(m.texto, isNot(contains('"parche"')));
+      }
+
+      // Lo que sí sale: la frase para la persona, la pregunta y la voz.
+      expect(p.mensajes.last.texto, contains('granizada muy fuerte'));
+      expect(p.mensajes.last.texto, contains('¿Había gente en la zona?'));
+      expect(voz.dicho.last, contains('granizada muy fuerte'));
+      expect(voz.dicho.last, isNot(contains('{')));
+
+      // Y el dato queda anotado aunque no se pinte el JSON.
+      expect(p.borrador.municipio, 'Yapacaní');
+      expect(p.borrador.totalAfectada, 40);
+      expect(p.pensando, isFalse);
+      expect(p.descartado, isFalse);
+    });
+
+    test('un solo mensaje por turno, ni la pregunta suelta', () async {
+      // Si la respuesta y la pregunta llegaran como dos mensajes, la UI
+      // pintaría un turno partido y no se sabría qué responder.
+      const reporte = '{"respuesta":"Anotado.",'
+          '"siguiente_pregunta":"¿Y el municipio?",'
+          '"parche":{"totalAfectada":12}}';
+      final p = _conRespuesta(_sse([
+        {'tipo': 'token', 'texto': reporte},
+        _doneDe(respuesta: reporte, json: jsonDecode(reporte)),
+      ]));
+
+      await p.enviar('hay 12 afectados');
+
+      final asistentes = p.mensajes.where((m) => !m.esUsuario);
+      expect(asistentes, hasLength(1));
+      expect(
+        asistentes.single.texto,
+        'Anotado. ¿Y el municipio?',
+      );
+    });
+  });
+
   group('turno de reparación', () {
     test('el modelo puede volver a escribir el parche si se le pide', () async {
       // Lo que se vio en la corrida real: el modelo contestaba largo, preguntaba

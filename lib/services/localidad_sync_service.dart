@@ -14,6 +14,7 @@ import '../services/edan/edan_secciones_envio_factory.dart';
 import '../services/edan_secciones_registry.dart';
 import 'sync_debug_config.dart';
 import 'sync_debug_collector.dart';
+import 'sync_error_classifier.dart';
 
 class LocalidadSyncService {
   static final LocalidadSyncService _instance = LocalidadSyncService._();
@@ -641,6 +642,7 @@ class LocalidadSyncService {
       return SyncResult(
         exito: false,
         mensaje: 'Error: ${e.toString()}',
+        sinConexion: esFalloDeRed(e),
       );
     } finally {
       _isSyncing = false;
@@ -1038,9 +1040,13 @@ class SyncResult {
   int fallidos = 0;
   int eliminados = 0;
 
+  /// `true` cuando el fallo fue de transporte y no un rechazo del servidor.
+  bool sinConexion;
+
   SyncResult({
     required this.exito,
     this.mensaje = '',
+    this.sinConexion = false,
   });
 
   String get resumen {

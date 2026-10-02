@@ -163,7 +163,13 @@ class AsistenteVozService {
         listenOptions: SpeechListenOptions(
           listenMode: ListenMode.dictation,
           listenFor: const Duration(seconds: 60),
-          pauseFor: const Duration(seconds: 8),
+          // De 8 s a 3 s: es cuánto espera el reconocedor después de que
+          // dejás de hablar antes de dar el resultado por terminado. Con 8 s
+          // la persona terminaba de hablar, se quedaba mirando la pantalla
+          // ocho segundos con nada, y recién ahí aparecía lo que dijo. Tres
+          // segundos siguen alcanzando para una pausa natural sin cortar la
+          // frase, y el texto además ya se muestra mientras se habla.
+          pauseFor: const Duration(seconds: 3),
         ),
       );
     } catch (e) {
