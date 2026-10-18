@@ -4,6 +4,12 @@ import '../../../../models/edan.dart';
 import '../../../../services/auth_service.dart';
 
 /// Página 13: Datos del responsable del formulario.
+///
+/// Solo lectura (diseño v1.2.0): la información se completa
+/// automáticamente con los datos del usuario que registra el formulario y
+/// aquí solo se MUESTRA. Si algún campo viene vacío se rellena con el token
+/// para que el resumen y el payload lo tengan, pero no se edita en este
+/// page (antes eran 4 `TextFormField` que permitían cambiar al declarante).
 class EdanPage13 extends StatelessWidget {
   final EdanLocalidad localidad;
 
@@ -12,7 +18,7 @@ class EdanPage13 extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final token = AuthService.instance.currentToken;
-    final r = localidad.responsable!;
+    final r = localidad.responsable ??= EdanResponsable();
     if (r.nombre.isEmpty) r.nombre = token?.nombre ?? '';
     if (r.cargo.isEmpty) r.cargo = token?.cargo ?? '';
     if (r.fono.isEmpty) r.fono = token?.celular ?? '';

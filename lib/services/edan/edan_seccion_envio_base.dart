@@ -1,14 +1,8 @@
-import 'dart:io';
-
-import 'package:flutter/foundation.dart';
-
 import '../../models/edan.dart';
 import '../../models/id_seccion_helper.dart';
 import '../api_service.dart';
 import '../database_helper.dart';
 import '../edan_secciones_registry.dart';
-import '../sync_debug_config.dart';
-import '../sync_debug_collector.dart';
 
 /// Mínimo que cualquier sección EDAN (Modelo A, v20) debe exponer a su servicio
 /// de envío por sección: el descriptor de registro, la lista de filas del modelo
@@ -56,94 +50,6 @@ abstract class EdanSeccionEnvioBase<T> {
       filas.add(row);
     }
     return filas;
-  }
-
-  // ========== Helper de carrete ==========
-
-  /// Sube las fotos pendientes usando `foto/subir` (carrete).
-  /// Lee de `foto_pendiente WHERE subida=0` (solo las que faltan, con retry).
-  /// Después de subir, actualiza `fotografia` en la tabla de sección y en el
-  /// modelo en memoria.
-  Future<void> subirFotosPendientes(EdanLocalidad localidad) async {
-    final pendientes = await _db.leerFotosPendientesSubida();
-    if (pendientes.isEmpty) return;
-
-    // Filtrar solo las fotos de esta sección y esta localidad.
-    final fotosSeccion = pendientes.where((f) {
-      return f['id_local'] == localidad.idLocal &&
-          f['id_seccion'] != null &&
-          (f['id_seccion'] as String).isNotEmpty;
-    }).toList();
-    if (fotosSeccion.isEmpty) return;
-
-    final rutas = <String>[];
-    final idsFotos = <String>[];
-    final idSecciones = <String>[];
-
-    for (final fotoRow in fotosSeccion) {
-      final ruta = fotoRow['ruta_local_archivo']?.toString();
-      final idSeccion = fotoRow['id_seccion']?.toString();
-      final idFoto = fotoRow['id_foto']?.toString();
-      if (ruta == null || idSeccion == null || idFoto == null) continue;
-
-      final file = File(ruta);
-      if (!await file.exists()) {
-        await _db.marcarErrorSubida(idFoto, 'Archivo local no encontrado');
-        continue;
-      }
-
-      rutas.add(ruta);
-      idsFotos.add(idFoto);
-      idSecciones.add(idSeccion);
-    }
-
-    if (rutas.isEmpty) return;
-
-    final idEdan = localidad.idServer ?? localidad.idEdan;
-    try {
-      if (kSyncDebugMode) {
-        SyncDebugCollector.instance.add(SyncApiEntry(
-          fase: SyncDebugCollector.instance.currentPhase,
-          metodo: 'PRE',
-          endpoint: 'Preparar fotos ${descriptor.rutaV2}',
-          requestBody: {'fotos': rutas.length, 'id_secciones': idSecciones},
-          fotos: rutas.map((r) => r.split('/').last).toList(),
-          localidadId: localidad.idLocal,
-          seccion: descriptor.rutaV2,
-        ));
-      }
-      final paths = await _api.subirFotosCarrete(
-        files: rutas,
-        idSecciones: idSecciones,
-        idLocal: localidad.idLocal,
-        idEdanLocalidad: idEdan,
-      );
-
-      for (var i = 0; i < idsFotos.length; i++) {
-        final idFoto = idsFotos[i];
-        final idSeccion = idSecciones[i];
-        final path = paths[idSeccion];
-        if (path != null && path.isNotEmpty) {
-          // Marcar en foto_pendiente.
-          await _db.marcarFotoSubida(idFoto, path);
-          // Actualizar en la tabla de sección.
-          await _db.marcarFotografiaSeccion(
-            descriptor.tablaSqlite,
-            localidad.idLocal!,
-            idSeccion,
-            path,
-          );
-        } else {
-          await _db.marcarErrorSubida(idFoto, 'Server no devolvió path');
-        }
-      }
-    } catch (e) {
-      // Marcar error en todas las fotos de este batch.
-      for (final idFoto in idsFotos) {
-        await _db.marcarErrorSubida(idFoto, e.toString());
-      }
-      debugPrint('[${descriptor.rutaV2}] Error subirFotos: $e');
-    }
   }
 
   /// Devuelve el payload de la API a partir de una fila SQLite. La

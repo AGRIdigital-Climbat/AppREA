@@ -1,7 +1,10 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
@@ -9,11 +12,13 @@ import '../../../../providers/reporte_provider.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
+import '../../../../services/api/edan_api_v2.dart';
 import '../../../../services/permission_service.dart';
-import '../../../../services/edan/edan_documento_sync_service.dart';
+import '../../../../services/sync/edan_sync_engine_v2.dart';
+import '../../../../services/edan/edan_envio_v2.dart';
 import '../../../../services/edan/edan_localidades_envio_v2_service.dart';
+import '../../../../services/edan/edan_store_v2.dart';
 import '../../../../services/edan_secciones_registry.dart';
-import '../../../../services/edan/edan_sync_respo_service.dart';
 import 'edan_navigation_bar.dart';
 import 'edan_page01.dart';
 import 'edan_page02.dart';
@@ -44,7 +49,13 @@ import '../../../../widgets/asistente_ia.dart';
 class EdanFormWizard extends StatefulWidget {
   final Edan? edanAEditar;
 
-  const EdanFormWizard({super.key, this.edanAEditar});
+  /// Store V2 opcional. Cuando se inyecta (rol RESP), el wizard persiste y
+  /// carga las secciones vía [EdanStoreV2] (tablas `formularios` /
+  /// `filas_seccion` / `viviendas`). Si es `null` (UGR/IA o llamadores sin
+  /// inyección), se mantiene el comportamiento Legacy actual (§3.2 del plan).
+  final EdanStoreV2? storeV2;
+
+  const EdanFormWizard({super.key, this.edanAEditar, this.storeV2});
 
   @override
   State<EdanFormWizard> createState() => _EdanFormWizardState();
@@ -98,6 +109,23 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   bool _allowPop = false;
   final DatabaseHelper _db = DatabaseHelper.instance;
 
+  /// Último motivo de fallo de `_guardar` (causa real, no el genérico).
+  /// Se muestra en el snackbar y queda en el log para diagnóstico.
+  String? _ultimoErrorGuardado;
+
+  /// Grupos (checkboxes de page01) que determinan qué secciones muestra el
+  /// wizard. Para un **formulario nuevo** salen de lo que tildó el usuario;
+  /// al **reabrir** un borrador se recalculan desde la auxiliar v31 ∪ las
+  /// secciones que tienen datos reales (Fase 4).
+  ///
+  /// Es la matriz [EdanSeccionesRegistry.matrizGrupoSecciones] en una sola
+  /// dimensión: `grupo → rutas` se resuelve con `rutasDesdeGrupos`, y el
+  /// inverso con `gruposDesdeActivas`.
+  Set<String> _grupos = {};
+
+  /// Store V2 inyectado (solo RESP). Si es `null`, se usa el camino Legacy.
+  EdanStoreV2? get _storeV2 => widget.storeV2;
+
   bool _reconstruyendo = false;
 
   /// Snapshot serializado de la localidad al abrir el wizard, para detectar
@@ -114,6 +142,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   void initState() {
     super.initState();
     _inicializarLocalidad();
+    _grupos = _gruposDesdeModelo();
     _pageController = PageController();
     _pages = _construirPaginas();
     _precargarCatalogo();
@@ -131,18 +160,39 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
 
   /// Espera a que la sincronización de secciones desde SQLite termine
   /// (borradores existentes) y captura el snapshot base en el frame
-  /// siguiente, con la comparación ya normalizada.
+  /// siguiente, con la comparación ya normalizada. Si es un borrador en
+  /// edición, además navega a la primera página aún incompleta para que el
+  /// usuario retome donde se quedó.
   Future<void> _prepararSnapshot() async {
     try {
       await _sincronizarFlagsDesdeSeccionesActivas();
     } catch (e) {
       debugPrint('EdanFormWizard._prepararSnapshot error: $e');
     }
+    // Baseline con `imp` derivados de los datos cargados: así una derivación
+    // posterior (resumen/guardar) no genera falsos "cambios".
+    _localidad.recalcularImpDesdeListas();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       _snapshotInicial = _snapshotComparable(_localidad);
       _snapshotListo = true;
+      if (widget.edanAEditar != null) {
+        _irAPrimeraPaginaIncompleta();
+      }
     });
+  }
+
+  /// Navega a la primera página (excluyendo intro/resumen) que aún no está
+  /// completa según [_seccionCompleta]. Si todo está completo no hace nada.
+  void _irAPrimeraPaginaIncompleta() {
+    for (var i = 0; i < _pages.length; i++) {
+      final key = _pages[i].key;
+      if (key == 'intro' || key == 'resumen') continue;
+      if (!_seccionCompleta(key)) {
+        if (i != _currentPage) _irA(i);
+        return;
+      }
+    }
   }
 
   void _inicializarLocalidad() {
@@ -174,6 +224,24 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     }
   }
 
+  /// Grupos tildados según los flags gruesos del modelo. Es la lectura
+  /// "adelante" de la matriz para un formulario nuevo; al reabrir un borrador
+  /// la reemplaza [_gruposDesdeAuxiliar].
+  Set<String> _gruposDesdeModelo() {
+    final l = _localidad;
+    return {
+      if (l.grupPoblacion) 'grupPoblacion',
+      if (l.grupSalud) 'grupSalud',
+      if (l.grupInfraestructura) 'grupInfraestructura',
+      if (l.grupServicios) 'grupServicios',
+      if (l.grupEducacion) 'grupEducacion',
+      if (l.grupVivienda) 'grupVivienda',
+      if (l.grupAgropecuario) 'grupAgropecuario',
+      if (l.grupProteccion) 'grupProteccion',
+      if (l.grupNecesidades) 'grupNecesidades',
+    };
+  }
+
   void _precargarCatalogo() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       PermissionService.asegurarPermisosFormulario();
@@ -188,7 +256,6 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   }
 
   List<_WizardPage> _construirPaginas() {
-    final l = _localidad;
     final pages = <_WizardPage>[
       _WizardPage(
         key: 'intro',
@@ -204,8 +271,12 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
             'Registre la localidad afectada y marque los impactos. Los impactos '
             'marcados determinan las secciones del formulario.',
         icono: Icons.place_outlined,
-        builder: (c, loc, reb) =>
-            EdanPage01(localidad: loc, onImpactosCambio: rebuild),
+        builder: (c, loc, reb) => EdanPage01(
+          localidad: loc,
+          onImpactosCambio: rebuild,
+          onCambio: _refrescarBloqueos,
+          store: _storeV2,
+        ),
         // --- Página 01: texto de la guía interactiva ---
         tituloAyuda: 'Datos generales',
         habilitarAyuda:
@@ -224,7 +295,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
             'Ingrese los totales estimados de población afectada y familias '
             'damnificadas.',
         icono: Icons.people_outline,
-        builder: (c, loc, _) => EdanPage02(localidad: loc),
+        builder: (c, loc, _) =>
+            EdanPage02(localidad: loc, onCambio: _refrescarBloqueos),
         tituloAyuda: 'Población damnificada',
         consejosAyuda: const [
           'Escribe los totales estimados de familias damnificadas, familias '
@@ -234,7 +306,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       ),
     ];
 
-    if (l.impPoblacion) {
+    if (_grupos.contains('grupPoblacion')) {
       // --- Página 03: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -244,7 +316,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'Registre el impacto por grupo etario y las necesidades de primera '
               'respuesta. Cada grupo tiene su propio ID.',
           icono: Icons.groups_outlined,
-          builder: (c, loc, _) => EdanPage03(localidad: loc),
+          builder: (c, loc, _) => EdanPage03(localidad: loc, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Impacto en la población',
           consejosAyuda: const [
             'Marca los grupos etarios afectados y registra heridos, fallecidos y '
@@ -256,7 +328,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impSalud) {
+    if (_grupos.contains('grupSalud')) {
       // --- Página 04: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -266,7 +338,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'Registre los establecimientos de salud afectados y las necesidades '
               'de salud. Puede agregar varios establecimientos.',
           icono: Icons.local_hospital_outlined,
-          builder: (c, loc, _) => EdanPage04(localidad: loc),
+          builder: (c, loc, _) => EdanPage04(localidad: loc, store: _storeV2, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Impacto en la salud',
           consejosAyuda: const [
             'Presiona "Agregar" para registrar cada establecimiento de salud '
@@ -281,7 +353,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impInfraestructura) {
+    if (_grupos.contains('grupInfraestructura')) {
       // --- Página 05: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -290,7 +362,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
           instruccion:
               'Registre daños en vías, puentes e infraestructura pública.',
           icono: Icons.location_city_outlined,
-          builder: (c, loc, _) => EdanPage05(localidad: loc),
+          builder: (c, loc, _) => EdanPage05(localidad: loc, store: _storeV2, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Impacto en infraestructuras',
           consejosAyuda: const [
             'Registra los daños de vías y/o puentes: tipo, tramo, tipo de daño y '
@@ -303,7 +375,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impServicios) {
+    if (_grupos.contains('grupServicios')) {
       // --- Página 06: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -313,7 +385,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'Indique el estado de los servicios básicos (agua, luz, '
               'alcantarillado, gas, telecomunicaciones).',
           icono: Icons.home_work_outlined,
-          builder: (c, loc, _) => EdanPage06(localidad: loc),
+          builder: (c, loc, _) => EdanPage06(localidad: loc, store: _storeV2, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Servicios básicos',
           consejosAyuda: const [
             'Marca los servicios afectados: energía eléctrica, agua potable, '
@@ -325,7 +397,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impEducacion) {
+    if (_grupos.contains('grupEducacion')) {
       // --- Página 07: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -335,7 +407,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'Registre unidades educativas afectadas, suspensión de clases y '
               'personal.',
           icono: Icons.school_outlined,
-          builder: (c, loc, _) => EdanPage07(localidad: loc),
+          builder: (c, loc, _) => EdanPage07(localidad: loc, store: _storeV2, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Impacto en educación',
           consejosAyuda: const [
             'Presiona "Agregar" para registrar cada unidad educativa afectada.',
@@ -347,7 +419,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impVivienda) {
+    if (_grupos.contains('grupVivienda')) {
       // --- Página 08: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -355,7 +427,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
           titulo: 'Impacto en viviendas',
           instruccion: 'Registre viviendas con daño parcial y total.',
           icono: Icons.home_outlined,
-          builder: (c, loc, _) => EdanPage08(localidad: loc),
+          builder: (c, loc, _) => EdanPage08(localidad: loc, store: _storeV2, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Impacto en viviendas',
           consejosAyuda: const [
             'Presiona "Agregar" para registrar los daños por localidad.',
@@ -366,7 +438,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impAgropecuario) {
+    if (_grupos.contains('grupAgropecuario')) {
       // --- Página 09: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -376,7 +448,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'Registre daños en cultivos, pecuarios e infraestructura productiva. '
               'Cada ítem tiene su propio ID.',
           icono: Icons.agriculture_outlined,
-          builder: (c, loc, _) => EdanPage09(localidad: loc),
+          builder: (c, loc, _) => EdanPage09(localidad: loc, store: _storeV2, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Impacto agropecuario',
           consejosAyuda: const [
             'Registra los daños en cultivos: tipo de cultivo y hectáreas '
@@ -390,7 +462,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impProteccion) {
+    if (_grupos.contains('grupProteccion')) {
       // --- Página 10: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -400,7 +472,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
               'Registre la población vulnerable por sexo y la necesidad de apoyo '
               'psicológico.',
           icono: Icons.shield_outlined,
-          builder: (c, loc, _) => EdanPage10(localidad: loc),
+          builder: (c, loc, _) => EdanPage10(localidad: loc, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Necesidades de protección',
           consejosAyuda: const [
             'Marca los grupos vulnerables afectados y registra el número de '
@@ -412,7 +484,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         ),
       );
     }
-    if (l.impNecesidades) {
+    if (_grupos.contains('grupNecesidades')) {
       // --- Página 11: texto de la guía interactiva ---
       pages.add(
         _WizardPage(
@@ -420,7 +492,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
           titulo: 'Necesidades humanitarias',
           instruccion: 'Marque las necesidades humanitarias de la localidad.',
           icono: Icons.volunteer_activism_outlined,
-          builder: (c, loc, _) => EdanPage11(localidad: loc),
+          builder: (c, loc, _) => EdanPage11(localidad: loc, onCambio: _refrescarBloqueos),
           tituloAyuda: 'Necesidades humanitarias',
           consejosAyuda: const [
             'Marca las necesidades humanitarias de la localidad (alimentos, '
@@ -597,6 +669,9 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   void rebuild() {
     if (_reconstruyendo) return;
     _reconstruyendo = true;
+    // page01 muta los flags gruesos del modelo; las páginas se derivan de
+    // [_grupos], así que se refresca desde el modelo antes de reconstruir.
+    _grupos = _gruposDesdeModelo();
     final nuevas = _construirPaginas();
     setState(() {
       _pages = nuevas;
@@ -609,11 +684,65 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     );
   }
 
-  /// Lee `localidad_secciones_activas` en SQLite y sobreescribe los flags
-  /// del modelo. Se llama al abrir un borrador existente para que las páginas
-  /// del wizard reflejen exactamente lo que está guardado.
+  /// Recalcula [bloqueos] (botón Siguiente) cuando una página hija muta
+  /// datos en `_localidad`. A diferencia de [rebuild], **no** reconstruye
+  /// [_pages] (la lista de páginas la construye solo page01) ni salta de
+  /// página: solo dispara `setState` para que `build()` reevalúe el gate de
+  /// la página actual. Coalescido en post-frame para que varias mutaciones
+  /// en el mismo frame (p. ej. un diálogo que escribe varios campos) den un
+  /// solo rebuild.
+  bool _refrescandoBloqueos = false;
+  void _refrescarBloqueos() {
+    if (!mounted || _refrescandoBloqueos) return;
+    _refrescandoBloqueos = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refrescandoBloqueos = false;
+      if (mounted) setState(() {});
+    });
+  }
+
+  /// Lee las secciones activas y sobreescribe los flags del modelo. Se llama
+  /// al abrir un borrador existente para que las páginas del wizard reflejen
+  /// exactamente lo que está guardado.
+  ///
+  /// **Escenarios que cubre**:
+  /// * *Incompleto (editar)*: se **descifran los grupos** a partir de las
+  ///   secciones realmente activas (auxiliar v31 ∪ filas con datos) con
+  ///   [EdanSeccionesRegistry.gruposDesdeActivas], y así se pinta page01.
+  /// * *Completo (leer)*: mismo camino de lectura; el usuario solo consulta.
+  ///
+  /// Con `storeV2` inyectado (RESP) la fuente de verdad es la tabla auxiliar
+  /// `secciones_grupos_local` ∪ `filas_seccion`. Sin store (Legacy) se usa
+  /// `localidad_secciones_activas` + las tablas `seccion_*`.
   Future<void> _sincronizarFlagsDesdeSeccionesActivas() async {
     final idLocal = _localidad.idLocal;
+    final store = _storeV2;
+
+    // ── Camino V2 (RESP): secciones_grupos_local ∪ filas_seccion ──
+    if (store != null) {
+      final uuid = _localidad.uuidEdanLocalidad ??
+          (idLocal != null && idLocal.isNotEmpty ? idLocal : null);
+      if (uuid != null) {
+        var activas = await store.leerSeccionesActivas(uuid);
+        // Sin auxiliar ni datos (borrador recién creado, o importado por un
+        // pull), no se borra lo que el usuario ya tildó: se respeta el modelo.
+        if (activas.isEmpty) activas = _seccionesDesdeFlags();
+
+        // Derivación INVERSA de la matriz: los grupos de page01 salen de las
+        // secciones activas, no de los flags del modelo (que pueden haber
+        // quedado pisados por `recalcularFlagsImpacto` al guardar local).
+        _aplicarFlagsDesdeActivas(activas);
+        _grupos = EdanSeccionesRegistry.gruposDesdeActivas(activas);
+
+        if (activas.isNotEmpty && mounted) {
+          await store.cargarSecciones(_localidad, tipos: activas);
+          rebuild();
+        }
+      }
+      return;
+    }
+
+    // ── Camino Legacy (UGR/IA): localidad_secciones_activas + seccion_* ──
     if (idLocal == null) return;
 
     // Leer secciones activas (checkboxes de page01). Si no hay,
@@ -632,19 +761,32 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       soloLasActivas: activas,
     );
 
+    _aplicarFlagsDesdeActivas(activas);
+    _grupos = EdanSeccionesRegistry.gruposDesdeActivas(activas);
+
+    // Reconstruye las paginas con los flags actualizados desde SQLite.
+    rebuild();
+  }
+
+  /// Aplica al modelo los flags `imp_*` derivados de las rutas activas.
+  /// Compartido por los caminos V2 y Legacy para que el mapeo de grupos
+  /// (p.ej. `grupAgropecuario` → agricultura/pecuarios/infra-productiva)
+  /// se resuelva igual en ambos.
+  void _aplicarFlagsDesdeActivas(List<String> activas) {
     final flags = EdanSeccionesRegistry.construirFlagsDesdeActivas(activas);
     _localidad
-      ..impPoblacion = flags['imp_poblacion'] ?? _localidad.impPoblacion
-      ..impSalud = flags['imp_salud'] ?? _localidad.impSalud
-      ..impInfraestructura =
-          flags['imp_infraestructura'] ?? _localidad.impInfraestructura
-      ..impServicios = flags['imp_servicios'] ?? _localidad.impServicios
-      ..impEducacion = flags['imp_educacion'] ?? _localidad.impEducacion
-      ..impVivienda = flags['imp_vivienda'] ?? _localidad.impVivienda
-      ..impAgropecuario =
-          flags['imp_agropecuario'] ?? _localidad.impAgropecuario
-      ..impProteccion = flags['imp_proteccion'] ?? _localidad.impProteccion
-      ..impNecesidades = flags['imp_necesidades'] ?? _localidad.impNecesidades
+      ..grupPoblacion = flags['grup_poblacion'] ?? _localidad.grupPoblacion
+      ..grupSalud = flags['grup_salud'] ?? _localidad.grupSalud
+      ..grupInfraestructura =
+          flags['grup_infraestructura'] ?? _localidad.grupInfraestructura
+      ..grupServicios = flags['grup_servicios'] ?? _localidad.grupServicios
+      ..grupEducacion = flags['grup_educacion'] ?? _localidad.grupEducacion
+      ..grupVivienda = flags['grup_vivienda'] ?? _localidad.grupVivienda
+      ..grupAgropecuario =
+          flags['grup_agropecuario'] ?? _localidad.grupAgropecuario
+      ..grupProteccion =
+          flags['grup_proteccion'] ?? _localidad.grupProteccion
+      ..grupNecesidades = flags['grup_necesidades'] ?? _localidad.grupNecesidades
       ..impImpactoPoblacion =
           flags['imp_impacto_poblacion'] ?? _localidad.impImpactoPoblacion
       ..impPrimeraRespuesta =
@@ -669,33 +811,72 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
           flags['imp_danos_pecuarios'] ?? _localidad.impDanosPecuarios
       ..impInfraProductiva =
           flags['imp_infra_productiva'] ?? _localidad.impInfraProductiva
+      ..impProteccion = flags['imp_proteccion'] ?? _localidad.impProteccion
       ..impNecesidadHumanitaria =
           flags['imp_necesidad_humanitaria'] ??
           _localidad.impNecesidadHumanitaria;
-
-    // Reconstruye las paginas con los flags actualizados desde SQLite.
-    rebuild();
   }
 
   Future<void> _next() async {
     _irA(_currentPage + 1);
   }
 
-  Future<void> _guardar(String seccionKey) async {
+  /// Guarda en SQLite las secciones de [seccionKey].
+  ///
+  /// Con [guardarTodasActivas] (usado por el botón de la AppBar, "Guardar y
+  /// salir" y "Enviar") persiste TODAS las secciones activadas por los flags
+  /// de page01, no solo las de la página actual. Así, si el usuario llenó
+  /// varias páginas y guarda desde una sola, las demás no se pierden al
+  /// reabrir el borrador.
+  Future<bool> _guardar(
+    String seccionKey, {
+    bool guardarTodasActivas = false,
+  }) async {
     final token = AuthService.instance.currentToken;
     final envio = EdanLocalidadesEnvioV2Service();
-    try {
-      // Determinar rutas: la página actual, o TODAS si es resumen/página sin mapa.
+    try {      // Determinar rutas: la página actual, o TODAS si es resumen/página sin
+      // mapa. Con guardarTodasActivas se usan las secciones activadas por flags.
       final rutasPagina = EdanSeccionesRegistry.rutasDePagina(seccionKey);
-      final rutasGuardar = rutasPagina.isEmpty
-          ? EdanSeccionesRegistry.rutasV2Todas()
-          : rutasPagina;
+      final List<String> rutasGuardar;
+      if (guardarTodasActivas) {
+        final activas = _seccionesDesdeFlags();
+        rutasGuardar = activas.isNotEmpty
+            ? activas
+            : (rutasPagina.isEmpty
+                ? EdanSeccionesRegistry.rutasV2Todas()
+                : rutasPagina);
+      } else {
+        rutasGuardar = rutasPagina.isEmpty
+            ? EdanSeccionesRegistry.rutasV2Todas()
+            : rutasPagina;
+      }
 
       if (_huboCambios()) {
         _localidad.editado = true;
       }
 
-      if (_localidad.idLocal != null) {
+      // `imp` = datos del momento (grup NO se toca: manda page01). Así el
+      // snapshot `datos_json`, el payload y el resumen cuentan lo mismo.
+      _localidad.recalcularImpDesdeListas();
+
+      final store = _storeV2;
+      if (store != null) {
+        // ── Camino V2 (RESP): solo tablas V2 (Etapa 5: sin doble-escritor).
+        // El uuid nace en `_ensureUuid` (reutiliza el idLocal al reabrir un
+        // borrador legacy) y el listado unificado lo encuentra por uuid.
+        final seccionesActivas = _seccionesDesdeFlags();
+        await store.guardarTodo(
+          _localidad,
+          usuarioId: token?.userId ?? 0,
+          seccionesActivas: seccionesActivas,
+          tipos: rutasGuardar,
+          // Guardado completo (AppBar/"Guardar y salir"/"Enviar"): purga las
+          // filas de grupos destildados. En guardados parciales NO (el modelo
+          // puede no tener cargadas esas secciones).
+          purgarInactivas: guardarTodasActivas,
+        );
+      } else if (_localidad.idLocal != null) {
+        // ── Camino Legacy (UGR/IA): localidades_offline + seccion_* ──
         await _db.updateLocalidad(_localidad);
         await envio.guardarSecciones(_localidad, rutasGuardar);
         await _db.marcarSeccionesModificadas(_localidad.idLocal!, rutasGuardar);
@@ -713,8 +894,17 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
         await _db.marcarSeccionesModificadas(id, rutasGuardar);
       }
       _marcarGuardada(seccionKey);
+      // El guardado exitoso redefine "sin cambios": se refresca el baseline
+      // para que volver atrás no ofrezca "Guardar y salir" sin haber tocado
+      // nada después (el modelo mutó: uuids asignados, imp derivados, etc.).
+      _snapshotInicial = _snapshotComparable(_localidad);
+      _snapshotListo = true;
+      _ultimoErrorGuardado = null;
+      return true;
     } catch (e) {
+      _ultimoErrorGuardado = '$e';
       debugPrint('EdanFormWizard._guardar error: $e');
+      return false;
     }
   }
 
@@ -738,35 +928,15 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     }
   }
 
-  /// Deriva las rutas de sección activas a partir de los flags
-  /// actuales del modelo (checkboxes de page01). Se usa para poblar
-  /// `localidad_secciones_activas` cuando `activarSecciones` se
-  /// saltó al inicio porque idLocal era null.
-  List<String> _seccionesDesdeFlags() {
-    final result = <String>{};
-    if (_localidad.impPoblacion) {
-      result.addAll(['impacto-poblacion', 'primera-respuesta']);
-    }
-    if (_localidad.impSalud) {
-      result.addAll(['salud-establecimientos', 'necesidad-salud']);
-    }
-    if (_localidad.impInfraestructura) {
-      result.addAll(['danos-viales', 'danos-infra-publica']);
-    }
-    if (_localidad.impServicios) result.add('servicios-basicos');
-    if (_localidad.impEducacion) result.add('unidades-educativas');
-    if (_localidad.impVivienda) result.add('danos-vivienda');
-    if (_localidad.impAgropecuario) {
-      result.addAll([
-        'danos-agricultura',
-        'danos-pecuarios',
-        'infra-productiva',
-      ]);
-    }
-    if (_localidad.impProteccion) result.add('proteccion');
-    if (_localidad.impNecesidades) result.add('necesidad-humanitaria');
-    return result.toList();
-  }
+  /// Deriva las rutas de sección activas a partir de [_grupos] (los
+  /// checkboxes de page01). La fuente única es
+  /// [EdanSeccionesRegistry.matrizGrupoSecciones], así que el wizard nunca
+  /// puede divergir de lo que se pintó en page01.
+  ///
+  /// Antes era una lista de `if` codificada a mano que podía desincronizarse
+  /// de la matriz; ahora es su proyección directa.
+  List<String> _seccionesDesdeFlags() =>
+      EdanSeccionesRegistry.rutasDesdeGrupos(_grupos).toList();
 
   /// Claves automáticas/de sincronización que el usuario nunca edita. No deben
   /// contar como cambios reales: pueden variar al recargar desde SQLite, al
@@ -812,8 +982,14 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (!_snapshotListo) return false;
     final inicial = _snapshotInicial;
     if (inicial == null) return false;
-    final actual = _snapshotComparable(_localidad);
-    return jsonEncode(inicial) != jsonEncode(actual);
+    try {
+      final actual = _snapshotComparable(_localidad);
+      return jsonEncode(inicial) != jsonEncode(actual);
+    } catch (_) {
+      // Si no se puede comparar (NaN GPS, objeto raro), se asume que SÍ hay
+      // cambios: dirección segura (guardar de más, nunca perder).
+      return true;
+    }
   }
 
   bool _esEdanVacio() {
@@ -829,8 +1005,12 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
   /// Guarda a SQLite SIN salir (botón de la AppBar). Si se invoca desde
   /// "Guardar y salir", se suprime su snackbar interno para no duplicar la
   /// confirmación que muestra la pantalla padre.
-  Future<void> _guardarSinSalir({bool mostrarSnackBar = true}) async {
-    if (_saving) return;
+  ///
+  /// Devuelve `true` solo si realmente guardó: el llamador ("Guardar y
+  /// salir") NO debe cerrar el wizard cuando el guardado falló o fue
+  /// rechazado por vacío (antes salía igual y el usuario creía que guardó).
+  Future<bool> _guardarSinSalir({bool mostrarSnackBar = true}) async {
+    if (_saving) return false;
     if (_esEdanVacio()) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -842,51 +1022,83 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
           ),
         );
       }
-      return;
+      return false;
     }
     setState(() => _saving = true);
-    await _guardar(_pages[_currentPage].key);
+    final ok = await _guardar(_pages[_currentPage].key, guardarTodasActivas: true);
     setState(() => _saving = false);
-    if (!mounted || !mostrarSnackBar) return;
+    if (!mounted) return false;
+    if (!ok) {
+      final causa = _ultimoErrorGuardado;
+      final texto = causa == null || causa.isEmpty
+          ? 'No se pudo guardar el formulario. Intentá de nuevo.'
+          : 'No se pudo guardar: $causa';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(texto),
+          backgroundColor: const Color(0xFFD32F2F),
+          duration: const Duration(seconds: 8),
+          action: causa == null || causa.isEmpty
+              ? null
+              : SnackBarAction(
+                  label: 'Copiar',
+                  textColor: Colors.white,
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: causa));
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Error copiado al portapapeles'),
+                          duration: Duration(seconds: 2),
+                        ),
+                      );
+                    }
+                  },
+                ),
+        ),
+      );
+      return false;
+    }
+    if (!mostrarSnackBar) return true;
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(const SnackBar(content: Text('Borrador guardado')));
+    return true;
   }
 
   /// Pregunta al usuario antes de salir del formulario (atrás/gesto del sistema).
+  ///
+  /// Si NO hay cambios sale directo sin diálogo (antes mostraba un diálogo
+  /// informativo que solo pedía un tap extra). Si los hay, ofrece salir sin
+  /// guardar o "Guardar y salir", y solo cierra si realmente se guardó (un
+  /// guardado fallido o rechazado por vacío NO cierra el wizard).
   Future<void> _confirmarSalir() async {
     final hayCambios = _huboCambios();
+    if (!hayCambios) {
+      _salirPermitido();
+      return;
+    }
     final salir = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('¿Salir del formulario?'),
-        content: Text(
-          hayCambios
-              ? 'Tiene cambios sin guardar.'
-              : 'No se realizaron ningún cambio.',
-        ),
+        content: const Text('Tiene cambios sin guardar.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, 'cancelar'),
             child: const Text('Cancelar'),
           ),
-          if (hayCambios) ...[
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, 'salir'),
-              child: const Text('Salir sin guardar'),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, 'salir'),
+            child: const Text('Salir sin guardar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, 'guardar'),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF4CAF50),
             ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, 'guardar'),
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF4CAF50),
-              ),
-              child: const Text('Guardar y salir'),
-            ),
-          ] else
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, 'salir'),
-              child: const Text('Salir'),
-            ),
+            child: const Text('Guardar y salir'),
+          ),
         ],
       ),
     );
@@ -894,8 +1106,12 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (!mounted) return;
     switch (salir) {
       case 'guardar':
-        await _guardarSinSalir(mostrarSnackBar: false);
-        _salirPermitido(guardado: true);
+        // Solo se sale si realmente se guardó: si el guardado falla o el
+        // formulario está vacío, el usuario se queda con el motivo visible
+        // (antes salía igual y creía que había guardado).
+        if (await _guardarSinSalir(mostrarSnackBar: false)) {
+          _salirPermitido(guardado: true);
+        }
         break;
       case 'salir':
         _salirPermitido();
@@ -953,46 +1169,115 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (confirmar != true || !mounted) return;
 
     setState(() => _saving = true);
-    await _guardar(_pages[_currentPage].key);
-
-    // Marcar estado Enviado UGR (destino del responsable al enviar).
-    _localidad.idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id;
-    _localidad.estadoLocalidad = UgrLocalidadEstado.enviadoUgr;
-    _localidad.editado = true;
-    if (_localidad.idLocal != null) {
-      await _db.updateLocalidad(_localidad);
+    final guardado = await _guardar(
+      _pages[_currentPage].key,
+      guardarTodasActivas: true,
+    );
+    if (!guardado) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo guardar el formulario. No se envió.'),
+            backgroundColor: Color(0xFFD32F2F),
+          ),
+        );
+      }
+      return;
     }
 
-    // Si hay conexión, envío inmediato al servidor (secciones v2 + fotos).
+    // Enviar a UGR. Camino V2 (RESP, `storeV2` inyectado): UNA llamada por
+    // `POST /formularios/completo` que —a diferencia del `sincronizar()`
+    // anterior— escribe el estado destino DIRECTAMENTE en `formularios`, la
+    // tabla de la que `prepararPayloadCompleto` arma el payload. Antes el estado
+    // se grababa en `localidades_offline` (tabla legacy) y el POST seguía
+    // enviando `id_edan_localidad_estado = 1` (borrador): el servidor guardaba
+    // borrador y al re-login el reporte volvía como borrador. Camino legacy
+    // (UGR/IA, sin storeV2): se conserva el sincronizador V2 previo.
+    final uuid = _localidad.uuidEdanLocalidad;
+    final esV2 = _storeV2 != null && uuid != null && uuid.isNotEmpty;
     final conectado = await ConnectivityService().checkNow();
-    if (conectado) {
-      final docSync = EdanDocumentoSyncService();
-      // PRIORIDAD: procesar cola de deletes offline PRIMERO
-      await docSync.procesarColaDeletes();
-      // Eliminar filas marcadas con marcado_borrar=1
-      await docSync.eliminarFilasAntesDelPush(_localidad);
-      // Enviar documento completo (fotos + POST/PUT)
-      final ok = await docSync.enviarLocalidadDocumento(_localidad);
-      if (ok && _localidad.idLocal != null) {
-        _localidad
-          ..editado = false
-          ..sincronizado = true;
-        await _db.updateLocalidad(_localidad);
-        // Limpiar las marcas de modificada (ya se enviaron todas).
-        await _db.marcarTodasSeccionesSincronizadas(_localidad.idLocal!);
-        EdanSyncRespoService.instance.recargarPendientes();
+
+    // La intención de envío se registra SIEMPRE (con o sin red): si el push
+    // inmediato falla o no hay conexión, el próximo `sincronizar()` aplica el
+    // estado destino. Sin esto, un "Enviar" offline se sincronizaba como
+    // borrador y la intención se perdía.
+    if (esV2 && uuid.isNotEmpty) {
+      try {
+        await _storeV2!.marcarEnvioPendiente(
+          uuid,
+          UgrLocalidadEstado.enviadoUgr.id,
+        );
+      } catch (e) {
+        debugPrint('EdanFormWizard: no se pudo registrar envío pendiente: $e');
       }
+    }
+
+    var enviado = false;
+    if (conectado) {
+      if (esV2) {
+        enviado = await EdanEnvioV2.enviar(
+          _localidad,
+          idEdanLocalidadEstado: UgrLocalidadEstado.enviadoUgr.id,
+        );
+      } else {
+        Directory? dirFotos;
+        try {
+          final appDir = await getApplicationDocumentsDirectory();
+          dirFotos = Directory('${appDir.path}/edan_fotos');
+        } catch (_) {
+          dirFotos = null;
+        }
+        final resumen = await EdanSyncEngineV2(
+          api: EdanApiV2(),
+          dirFotos: dirFotos,
+        ).sincronizar();
+        enviado = resumen.exito;
+      }
+    }
+
+    if (enviado) {
+      _localidad
+        ..idEdanLocalidadEstado = UgrLocalidadEstado.enviadoUgr.id
+        ..estadoLocalidad = UgrLocalidadEstado.enviadoUgr
+        ..editado = false
+        ..sincronizado = true;
+      // El motor ya subió formulario + secciones + fotos: marcar
+      // `formularios.estado_local = 'enviado'`. No se purga la cola a mano:
+      // el motor limpia `cola_fotos` y `cola_sincronizacion` al confirmar
+      // cada ítem, así no se pierden fotos aún no subidas.
+      if (esV2 && uuid.isNotEmpty) {
+        await _storeV2!.marcarEnviado(uuid);
+      }
+      // Diseño limpio: el contador de pendientes es el del store V2.
+      await _storeV2?.refrescarPendientes();
+    } else {
+      // Sin confirmación del servidor: se mantiene BORRADOR (no se miente) y
+      // `pendiente_push = 1`, para que el próximo `sincronizar()` lo reintente.
+      _localidad.editado = true;
+    }
+    // El espejo legacy solo existe en el camino sin store (UGR/IA). En V2 el
+    // estado ya quedó en `formularios` vía el motor.
+    if (!esV2 && _localidad.idLocal != null) {
+      await _db.updateLocalidad(_localidad);
     }
 
     setState(() => _saving = false);
     if (!mounted) return;
+    // TEMP DIAG (borrar): mostrar el motivo real del fallo mientras se depura
+    // el bug de `danos_agricultura` (status HTTP + detail del servidor).
+    final diag = enviado ? null : EdanEnvioV2.ultimoErrorDiagnostico;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
-          !conectado
-              ? 'Formulario enviado a UGR (sin conexión; se sincronizará después)'
-              : 'Formulario enviado a UGR',
+          enviado
+              ? 'Formulario enviado a UGR'
+              : !conectado
+                  ? 'Sin conexión: guardado como pendiente, se enviará al sincronizar'
+                  : 'No se pudo enviar; quedó pendiente para reintentar'
+                      '${diag != null ? ' · $diag' : ''}',
         ),
+        backgroundColor: enviado ? null : const Color(0xFFF59E0B),
       ),
     );
     setState(() => _allowPop = true);
@@ -1001,6 +1286,12 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
 
   void _irA(int index) {
     if (index < 0 || index >= _pages.length) return;
+    // Al entrar al resumen, los `imp_*` reflejan los datos del momento
+    // (grup manda para visibilidad; imp = tiene-datos-ahora). Sin esto el
+    // resumen mostraba vacío en registros nuevos (imp siempre false).
+    if (_pages[index].key == 'resumen') {
+      _localidad.recalcularImpDesdeListas();
+    }
     setState(() => _currentPage = index);
     _pageController.animateToPage(
       index,
@@ -1020,6 +1311,19 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     final page = _pages[_currentPage];
     final isLast = _currentPage == _pages.length - 1;
     final esResumen = page.key == 'resumen';
+    // Siguiente obligatorio por página: en cabecera 01/02, todos los campos
+    // asteriscados (y ≥1 casilla en page01); en secciones, por grupo marcado:
+    // 1:1 completa y ≥1 hija válida en alguna 1:N. Con bloqueos el botón se
+    // apaga con tooltip de lo que falta. La barra superior sigue con salto
+    // libre (no se toca).
+    final bloqueos = esResumen
+        ? const <String>[]
+        : [
+            ...EdanSeccionesRegistry.bloqueosCamposPagina(
+                _localidad, page.key),
+            ...EdanSeccionesRegistry.bloqueosSiguiente(
+                _localidad, EdanSeccionesRegistry.rutasDePagina(page.key)),
+          ];
 
     return PopScope(
       canPop: _allowPop,
@@ -1059,7 +1363,12 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
                 Expanded(
                   child: PageView.builder(
                     controller: _pageController,
-                    physics: const PageScrollPhysics(),
+                    // Con bloqueos el swipe queda cerrado (solo el botón
+                    // Siguiente decide avanzar); la barra superior sigue
+                    // libre. Sin bloqueos se desliza normal.
+                    physics: bloqueos.isEmpty
+                        ? const PageScrollPhysics()
+                        : const NeverScrollableScrollPhysics(),
                     itemCount: _pages.length,
                     onPageChanged: (i) {
                       setState(() => _currentPage = i);
@@ -1097,7 +1406,12 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
                   isPreview: esResumen,
                   saving: _saving,
                   onBack: () => _irA(_currentPage - 1),
-                  onNext: _next,
+                  onNext: bloqueos.isEmpty ? _next : null,
+                  nextTooltip: bloqueos.isEmpty
+                      ? null
+                      : bloqueos.length == 1
+                          ? bloqueos.first
+                          : 'Faltan datos por completar en esta página',
                   onEnviar:
                       ((_localidad.estadoLocalidad ==
                                   UgrLocalidadEstado.borrador ||

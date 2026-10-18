@@ -75,15 +75,15 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
     final seccionesVisibles = <String>{
       '01',
       '13',
-      if (edan.localidades.any((l) => l.impPoblacion)) '03',
-      if (edan.localidades.any((l) => l.impSalud)) '04',
-      if (edan.localidades.any((l) => l.impInfraestructura)) '05',
-      if (edan.localidades.any((l) => l.impServicios)) '06',
-      if (edan.localidades.any((l) => l.impEducacion)) '07',
-      if (edan.localidades.any((l) => l.impVivienda)) '08',
-      if (edan.localidades.any((l) => l.impAgropecuario)) '09',
-      if (edan.localidades.any((l) => l.impProteccion)) '10',
-      if (edan.localidades.any((l) => l.impNecesidades)) '11',
+      if (edan.localidades.any((l) => l.grupPoblacion)) '03',
+      if (edan.localidades.any((l) => l.grupSalud)) '04',
+      if (edan.localidades.any((l) => l.grupInfraestructura)) '05',
+      if (edan.localidades.any((l) => l.grupServicios)) '06',
+      if (edan.localidades.any((l) => l.grupEducacion)) '07',
+      if (edan.localidades.any((l) => l.grupVivienda)) '08',
+      if (edan.localidades.any((l) => l.grupAgropecuario)) '09',
+      if (edan.localidades.any((l) => l.grupProteccion)) '10',
+      if (edan.localidades.any((l) => l.grupNecesidades)) '11',
     };
     final incompletosVisibles = incompletos.keys
         .where((k) => seccionesVisibles.contains(k))
@@ -707,15 +707,15 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
 
   List<String> _impactosLocalidad(EdanLocalidad l) {
     return [
-      if (l.impPoblacion) 'Población',
-      if (l.impSalud) 'Salud',
-      if (l.impInfraestructura) 'Infraestructura',
-      if (l.impServicios) 'Servicios básicos',
-      if (l.impEducacion) 'Educación',
-      if (l.impVivienda) 'Vivienda',
-      if (l.impAgropecuario) 'Agropecuario',
-      if (l.impProteccion) 'Protección',
-      if (l.impNecesidades) 'Necesidades humanitarias',
+      if (l.grupPoblacion) 'Población',
+      if (l.grupSalud) 'Salud',
+      if (l.grupInfraestructura) 'Infraestructura',
+      if (l.grupServicios) 'Servicios básicos',
+      if (l.grupEducacion) 'Educación',
+      if (l.grupVivienda) 'Vivienda',
+      if (l.grupAgropecuario) 'Agropecuario',
+      if (l.grupProteccion) 'Protección',
+      if (l.grupNecesidades) 'Necesidades humanitarias',
     ];
   }
 
@@ -1045,7 +1045,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion03() {
-    final locs = edan.localidades.where((l) => l.impPoblacion).toList();
+    final locs = edan.localidades.where((l) => l.grupPoblacion).toList();
     return _DocSeccion(
       numero: '03',
       titulo: 'Impacto en la población',
@@ -1129,7 +1129,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion04() {
-    final locs = edan.localidades.where((l) => l.impSalud).toList();
+    final locs = edan.localidades.where((l) => l.grupSalud).toList();
     return _DocSeccion(
       numero: '04',
       titulo: 'Impacto en la salud',
@@ -1312,7 +1312,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion07() {
-    final locs = edan.localidades.where((l) => l.impEducacion).toList();
+    final locs = edan.localidades.where((l) => l.grupEducacion).toList();
     return _DocSeccion(
       numero: '07',
       titulo: 'Impacto en educación',
@@ -1372,7 +1372,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion08() {
-    final locs = edan.localidades.where((l) => l.impVivienda).toList();
+    final locs = edan.localidades.where((l) => l.grupVivienda).toList();
     return _DocSeccion(
       numero: '08',
       titulo: 'Impacto en viviendas',
@@ -1422,7 +1422,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion09() {
-    final locs = edan.localidades.where((l) => l.impAgropecuario).toList();
+    final locs = edan.localidades.where((l) => l.grupAgropecuario).toList();
     return _DocSeccion(
       numero: '09',
       titulo: 'Impacto agropecuario',
@@ -1535,7 +1535,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion10() {
-    final locs = edan.localidades.where((l) => l.impProteccion).toList();
+    final locs = edan.localidades.where((l) => l.grupProteccion).toList();
     return _DocSeccion(
       numero: '10',
       titulo: 'Impacto en protección',
@@ -1577,7 +1577,7 @@ class _UgrEdanPreviewV2ScreenState extends State<UgrEdanPreviewV2Screen> {
   }
 
   Widget _seccion11() {
-    final locs = edan.localidades.where((l) => l.impNecesidades).toList();
+    final locs = edan.localidades.where((l) => l.grupNecesidades).toList();
     return _DocSeccion(
       numero: '11',
       titulo: 'Necesidades humanitarias',

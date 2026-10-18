@@ -33,20 +33,20 @@ class EdanResumenPage extends StatefulWidget {
       '02': l.totalPoblacionAfectada > 0 ||
           l.totalFamiliasAfectadas > 0 ||
           l.totalFamiliasDamnificadas > 0,
-      if (l.impPoblacion)
+      if (l.grupPoblacion)
         '03': _seccionTieneDatos03(l) && l.sumaGruposEtarios <= l.totalPoblacionAfectada,
-      if (l.impSalud)
+      if (l.grupSalud)
         '04': _seccionTieneDatos04(l) &&
             (l.sumaSaludPersonal + (l.necesidadSalud?.numeroPersonas ?? 0)) <= l.totalPoblacionAfectada,
-      if (l.impInfraestructura) '05': _seccionTieneDatos05(l),
-      if (l.impServicios) '06': _seccionTieneDatos06(l),
-      if (l.impEducacion)
+      if (l.grupInfraestructura) '05': _seccionTieneDatos05(l),
+      if (l.grupServicios) '06': _seccionTieneDatos06(l),
+      if (l.grupEducacion)
         '07': _seccionTieneDatos07(l) && l.sumaUnidadesEducativas <= l.totalPoblacionAfectada,
-      if (l.impVivienda) '08': _seccionTieneDatos08(l),
-      if (l.impAgropecuario) '09': _seccionTieneDatos09(l),
-      if (l.impProteccion)
+      if (l.grupVivienda) '08': _seccionTieneDatos08(l),
+      if (l.grupAgropecuario) '09': _seccionTieneDatos09(l),
+      if (l.grupProteccion)
         '10': _seccionTieneDatos10(l) && l.sumaProteccion <= l.totalPoblacionAfectada,
-      if (l.impNecesidades) '11': _seccionTieneDatos11(l),
+      if (l.grupNecesidades) '11': _seccionTieneDatos11(l),
       '13': (l.responsable?.nombre.trim().isNotEmpty ?? false) &&
           (l.responsable?.cargo.trim().isNotEmpty ?? false),
     };
@@ -119,31 +119,31 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
           _datosGenerales(l)),
       _Seccion('02', 'Población damnificada y afectada', Icons.people_outline, _completa('02'),
           _totales(l)),
-      if (l.impPoblacion)
+      if (l.grupPoblacion)
         _Seccion('03', 'Impacto en la población', Icons.groups_outlined,
             _completa('03'), _impactoPoblacion(l)),
-      if (l.impSalud)
+      if (l.grupSalud)
         _Seccion('04', 'Impacto en la salud', Icons.local_hospital_outlined,
             _completa('04'), _salud(l)),
-      if (l.impInfraestructura)
+      if (l.grupInfraestructura)
         _Seccion('05', 'Impacto en infraestructuras', Icons.construction,
             _completa('05'), _infra(l)),
-      if (l.impServicios)
+      if (l.grupServicios)
         _Seccion('06', 'Impacto en servicios básicos',
             Icons.home_work_outlined, _completa('06'), _servicios(l)),
-      if (l.impEducacion)
+      if (l.grupEducacion)
         _Seccion('07', 'Impacto en educación', Icons.school_outlined,
             _completa('07'), _educacion(l)),
-      if (l.impVivienda)
+      if (l.grupVivienda)
         _Seccion('08', 'Impacto en viviendas', Icons.home_outlined,
             _completa('08'), _vivienda(l)),
-      if (l.impAgropecuario)
+      if (l.grupAgropecuario)
         _Seccion('09', 'Impacto agropecuario', Icons.agriculture_outlined,
             _completa('09'), _agro(l)),
-      if (l.impProteccion)
+      if (l.grupProteccion)
         _Seccion('10', 'Impacto en protección', Icons.shield_outlined,
             _completa('10'), _proteccion(l)),
-      if (l.impNecesidades)
+      if (l.grupNecesidades)
         _Seccion('11', 'Necesidades humanitarias',
             Icons.volunteer_activism_outlined, _completa('11'), _necesidades(l)),
       _Seccion('13', 'Responsable', Icons.badge_outlined, _completa('13'),
@@ -678,12 +678,21 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
 
   List<_Linea> _vivienda(EdanLocalidad l) {
     final lineas = <_Linea>[];
+    // Contadores por fila: con detalle 1:N se derivan de las viviendas
+    // (TOTAL/PARCIAL); sin detalle se conservan los manuales `dano_*`.
+    int parcialDe(EdanDanoVivienda v) =>
+        v.viviendas.isNotEmpty ? v.viviendasParcial : v.danoParcial;
+    int totalDe(EdanDanoVivienda v) =>
+        v.viviendas.isNotEmpty ? v.viviendasTotal : v.danoTotal;
+
     for (final v in l.danosVivienda) {
+      final parcial = parcialDe(v);
+      final total = totalDe(v);
       lineas.add(_Linea.subcard([
         _Linea.par('Localidad',
             v.comunidad.isEmpty ? 'No especificada' : v.comunidad),
-        if (v.danoParcial > 0) _Linea.par('Daño parcial', '${v.danoParcial}'),
-        if (v.danoTotal > 0) _Linea.par('Daño total', '${v.danoTotal}'),
+        if (parcial > 0) _Linea.par('Daño parcial', '$parcial'),
+        if (total > 0) _Linea.par('Daño total', '$total'),
         if (v.necesidadesInmediatas.trim().isNotEmpty)
           _Linea.par('Necesidades', v.necesidadesInmediatas),
         if (v.observaciones.trim().isNotEmpty)
@@ -696,8 +705,8 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
       var tParcial = 0;
       var tTotal = 0;
       for (final v in l.danosVivienda) {
-        tParcial += v.danoParcial;
-        tTotal += v.danoTotal;
+        tParcial += parcialDe(v);
+        tTotal += totalDe(v);
       }
       final tAfectadas = tParcial + tTotal;
       if (tAfectadas > 0) {
@@ -873,8 +882,20 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
 
   List<_Linea> _responsable(EdanLocalidad l) {
     final r = l.responsable;
-    if (r == null) return [];
+    final lineas = <_Linea>[
+      // Autor REAL del servidor (nodo `usuario` disgregado). Distinto del
+      // responsable declarante (page13): quién registró el formulario.
+      if (l.usuario != null && l.usuario!.nombre.trim().isNotEmpty)
+        _Linea.par('Registrado por', l.usuario!.nombre),
+      if (l.usuario != null && l.usuario!.usuario.trim().isNotEmpty)
+        _Linea.par('Cuenta', l.usuario!.usuario),
+      if (l.usuario?.rol != null &&
+          l.usuario!.rol!.nombre.trim().isNotEmpty)
+        _Linea.par('Rol', l.usuario!.rol!.nombre),
+    ];
+    if (r == null) return lineas;
     return [
+      ...lineas,
       if (r.nombre.trim().isNotEmpty) _Linea.par('Nombre', r.nombre),
       if (r.cargo.trim().isNotEmpty) _Linea.par('Cargo', r.cargo),
       if (r.fono.trim().isNotEmpty) _Linea.par('Teléfono', r.fono),

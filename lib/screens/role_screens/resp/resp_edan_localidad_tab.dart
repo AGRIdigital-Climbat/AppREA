@@ -5,9 +5,9 @@ import '../../../models/edan.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
-import '../../../services/edan/edan_documento_sync_service.dart';
+import '../../../services/edan/edan_envio_v2.dart';
 import '../../../services/edan/edan_localidades_envio_v2_service.dart';
-import '../../../services/edan/edan_sync_respo_service.dart';
+import '../../../services/edan/edan_store_v2.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
@@ -27,7 +27,11 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
   bool _cargando = true;
   UgrLocalidadEstado? _filtro;
   String _query = '';
-  bool _wasSyncingMunicipio = false;
+  bool _wasSyncing = false;
+
+  /// Motivo del fallo de la carga base (lectura local); `null` = sin error.
+  /// Se muestra en el estado vacío para que una lista vacía NUNCA sea muda.
+  String? _errorCarga;
 
   void refresh() {
     _cargarLocalidades();
@@ -44,11 +48,17 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _wasSyncingMunicipio =
-        EdanSyncRespoService.instance.sincronizandoMunicipio.value;
-    EdanSyncRespoService.instance.sincronizandoMunicipio.addListener(
-      _onSyncMunicipioChanged,
-    );
+    // V2: escuchar el notificador REAL del motor (el viejo
+    // `EdanSyncRespoService.sincronizandoMunicipio` ya nadie lo dispara →
+    // la pestaña nunca se refrescaba al terminar la descarga en el login).
+    _wasSyncing = EdanStoreV2.instance.sincronizandoNotifier.value;
+    EdanStoreV2.instance.sincronizandoNotifier.addListener(_onSyncChanged);
+    EdanStoreV2.instance.primeraDescarga.addListener(_onPrimeraDescarga);
+    EdanStoreV2.instance.catalogosVersion.addListener(_onCatalogos);
+    // Datos mutados (guardar/borrar/pull/push): recarga directa sin esperar
+    // al sync ni al retorno del wizard. Sin esto, un formulario recién
+    // guardado no aparecía hasta refresh manual.
+    EdanStoreV2.instance.datosVersion.addListener(_onDatos);
     _cargarLocalidades();
   }
 
@@ -61,19 +71,39 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
 
   @override
   void dispose() {
-    EdanSyncRespoService.instance.sincronizandoMunicipio.removeListener(
-      _onSyncMunicipioChanged,
-    );
+    EdanStoreV2.instance.sincronizandoNotifier.removeListener(_onSyncChanged);
+    EdanStoreV2.instance.primeraDescarga.removeListener(_onPrimeraDescarga);
+    EdanStoreV2.instance.catalogosVersion.removeListener(_onCatalogos);
+    EdanStoreV2.instance.datosVersion.removeListener(_onDatos);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  void _onSyncMunicipioChanged() {
-    final syncing = EdanSyncRespoService.instance.sincronizandoMunicipio.value;
-    if (_wasSyncingMunicipio && !syncing) {
+  void _onSyncChanged() {
+    final syncing = EdanStoreV2.instance.sincronizandoNotifier.value;
+    if (_wasSyncing && !syncing) {
       _cargarLocalidades();
     }
-    _wasSyncingMunicipio = syncing;
+    _wasSyncing = syncing;
+  }
+
+  /// La primera descarga (y cada re-corrida) termina con un incremento del
+  /// contador: recargar la lista aunque el evento llegue sin transición
+  /// previa visible (pantalla montada tarde).
+  void _onPrimeraDescarga() {
+    _cargarLocalidades();
+  }
+
+  /// Los catálogos de red terminaron (llegaron tarde): recargar para
+  /// resolver nombres geográficos/tipo sin esperar otro sync.
+  void _onCatalogos() {
+    _cargarLocalidades();
+  }
+
+  /// Los datos mutaron (guardado/borrado/pull/push confirmado): recargar
+  /// aunque el wizard siga abierto o el retorno haya sido `pop(false)`.
+  void _onDatos() {
+    _cargarLocalidades();
   }
 
   Future<void> _cargarLocalidades() async {
@@ -82,23 +112,47 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
       if (mounted) setState(() => _cargando = false);
       return;
     }
+    // Sin el try/catch monolítico de antes: un `catch (_)` sobre TODO el
+    // bloque vaciaba la lista en silencio ante la menor excepción (flags,
+    // grupos, catálogo). Ahora cada paso de enriquecimiento es por-ítem y el
+    // error de la carga base se muestra en el estado vacío.
+    String? errorCarga;
+    var visibles = <EdanLocalidad>[];
     try {
-      final db = DatabaseHelper.instance;
-      final localidades = await db.getLocalidades(userId);
-      final visibles = localidades
+      // Etapa 5: fuente única (`formularios` + legacy sin contraparte V2,
+      // deduplicado por uuid). Los flags se hidratan vía V2 cuando hay fila.
+      final store = EdanStoreV2.instance;
+      final localidades = await store.listarReportes(usuarioId: userId);
+      visibles = localidades
           .where((l) => !l.pendienteEliminacion)
           .toList();
-      // Resincronizar flags imp_* desde localidad_secciones_activas (fuente
-      // autoritativa) para que los badges del item reflejen lo realmente
-      // marcado, igual que el JSON del long press y la vista previa.
-      final sincV2 = EdanLocalidadesEnvioV2Service();
-      for (final loc in visibles) {
+    } catch (e) {
+      errorCarga = 'No se pudo leer la lista local: $e';
+      debugPrint('[RespTab] listarReportes falló: $e');
+    }
+
+    // Resincronizar flags imp_* desde localidad_secciones_activas (fuente
+    // autoritativa) para que los badges del item reflejen lo realmente
+    // marcado, igual que el JSON del long press y la vista previa.
+    final sincV2 = EdanLocalidadesEnvioV2Service();
+    final storeV2 = EdanStoreV2.instance;
+    for (final loc in visibles) {
+      try {
         await sincV2.aplicarFlagsDesdeSeccionesActivas(loc);
+        // El nodo `grupos` del servidor manda sobre el snapshot: si el GET
+        // trae un grupo en true, el badge lo muestra aunque las filas aún no
+        // estén en el dispositivo (caso Urubo).
+        await storeV2.aplicarGruposServidorAlModelo(loc);
+      } catch (e) {
+        // Un ítem malo no tumba la lista entera: se queda con sus flags base.
+        debugPrint('[RespTab] flags/grupos de ${loc.nombre} omitidos: $e');
       }
-      // Resolver nombres geográficos desde catálogo si faltan
-      if (mounted) {
-        final rp = context.read<ReporteProvider>();
-        for (final loc in visibles) {
+    }
+    // Resolver nombres geográficos desde catálogo si faltan (por ítem)
+    if (mounted) {
+      final rp = context.read<ReporteProvider>();
+      for (final loc in visibles) {
+        try {
           if ((loc.departamentoNombre == null ||
                   loc.departamentoNombre!.isEmpty) &&
               loc.idDepartamento != null) {
@@ -124,28 +178,40 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
             );
             if (match.isNotEmpty) loc.tipoLocalidad = match.first.nombre;
           }
+          // Resolver tipo de evento desde catálogo (misma regla que geo: sin
+          // esto la tarjeta dice "Sin evento" aunque el servidor lo envíe).
+          if ((loc.tipoEventoNombre == null ||
+                  loc.tipoEventoNombre!.isEmpty) &&
+              loc.idTipoEvento != null) {
+            final nombre = rp.getTipoEventoNombre(loc.idTipoEvento!);
+            if (nombre != 'Desconocido') loc.tipoEventoNombre = nombre;
+          }
+        } catch (e) {
+          debugPrint('[RespTab] catálogo de ${loc.nombre} omitido: $e');
         }
       }
-      visibles.sort((a, b) {
-        final fa = a.fechaModificacion ?? '';
-        final fb = b.fechaModificacion ?? '';
-        return fb.compareTo(fa);
+    }
+    visibles.sort((a, b) {
+      final fa = a.fechaModificacion ?? '';
+      final fb = b.fechaModificacion ?? '';
+      return fb.compareTo(fa);
+    });
+    if (mounted) {
+      setState(() {
+        _localidades = visibles;
+        _errorCarga = errorCarga;
+        _cargando = false;
       });
-      if (mounted) {
-        setState(() {
-          _localidades = visibles;
-          _cargando = false;
-        });
-      }
-    } catch (_) {
-      if (mounted) setState(() => _cargando = false);
     }
   }
 
   Future<void> _editarLocalidad(EdanLocalidad localidad) async {
     final result = await Navigator.of(context).push<bool>(
       ugrRoute(
-        EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)),
+        EdanFormWizard(
+          edanAEditar: Edan.desdeLocalidad(localidad),
+          storeV2: EdanStoreV2.instance,
+        ),
         palette: Palettes.rea,
       ),
     );
@@ -157,13 +223,19 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
   Future<void> _eliminarLocalidad(EdanLocalidad localidad) async {
     final idLocal = localidad.idLocal;
     if (idLocal == null) return;
+    // Fuente de verdad: ¿existe en el servidor? Decide el texto y el camino.
+    // (`sincronizado` del snapshot puede estar desactualizado.)
+    final uuidV2 = localidad.uuidEdanLocalidad;
+    final esV2 = uuidV2 != null && uuidV2.isNotEmpty;
+    final fueSincronizada =
+        localidad.idServer != null || localidad.sincronizado;
 
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar Localidad'),
         content: Text(
-          localidad.sincronizado
+          fueSincronizada
               ? 'Esta localidad ya fue sincronizada con el servidor.\n\n'
                     'Se marcará como "pendiente de eliminación" y se eliminará '
                     'de forma definitiva al sincronizar.'
@@ -187,27 +259,27 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
     if (confirm != true || !mounted) return;
 
     try {
-      if (localidad.sincronizado) {
+      if (esV2) {
+        // Camino V2: borrado total local (+ `D` al servidor solo si estaba
+        // sincronizada; si nunca se sincronizó no hay nada que informar).
+        await EdanStoreV2.instance.eliminarLocalidad(uuidV2);
+      } else if (fueSincronizada) {
         await DatabaseHelper.instance.markLocalidadAsPendingDeletion(idLocal);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Localidad marcada para eliminación. Se borrará al sincronizar.',
-            ),
-            backgroundColor: AppColors.pending,
-          ),
-        );
       } else {
         await DatabaseHelper.instance.deleteLocalidad(idLocal);
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Localidad eliminada'),
-            backgroundColor: AppColors.aprobado,
-          ),
-        );
       }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            fueSincronizada
+                ? 'Localidad marcada para eliminación. Se borrará al sincronizar.'
+                : 'Localidad eliminada',
+          ),
+          backgroundColor:
+              fueSincronizada ? AppColors.pending : AppColors.aprobado,
+        ),
+      );
       await _cargarLocalidades();
     } catch (e) {
       if (!mounted) return;
@@ -224,8 +296,11 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
     EdanLocalidad localidad, {
     UgrLocalidadEstado estadoDestino = UgrLocalidadEstado.enviadoUgr,
   }) async {
-    localidad.estadoLocalidad = estadoDestino;
-    localidad.idEdanLocalidadEstado = estadoDestino.id;
+    // Etapa 5 (§6): la intención se registra, el estado NO se anticipa. El
+    // badge `enviado` solo aparece con el 200 del servidor; si falla, la
+    // tarjeta sigue en borrador + pendiente de sincronización.
+    final estadoPrevio = localidad.estadoLocalidad;
+    final idEstadoPrevio = localidad.idEdanLocalidadEstado;
     localidad.pendienteActualizacion = true;
     localidad.sincronizado = false;
     await DatabaseHelper.instance.updateLocalidad(localidad);
@@ -246,8 +321,9 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
       }
       localidad.idEdanLocalidadEstado = estadoDestino.id;
 
-      sincronizada = await EdanDocumentoSyncService().enviarLocalidadDocumento(
+      sincronizada = await EdanEnvioV2.enviar(
         localidad,
+        idEdanLocalidadEstado: estadoDestino.id,
       );
 
       if (sincronizada) {
@@ -256,6 +332,12 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
         localidad.sincronizado = true;
         localidad.pendienteActualizacion = false;
         localidad.editado = false;
+        await DatabaseHelper.instance.updateLocalidad(localidad);
+      } else {
+        // Sin confirmación no hay enviado: se restaura el estado previo en
+        // el espejo legacy (el motor ya dejó pendiente_push=1 + intención).
+        localidad.estadoLocalidad = estadoPrevio;
+        localidad.idEdanLocalidadEstado = idEstadoPrevio;
         await DatabaseHelper.instance.updateLocalidad(localidad);
       }
     } catch (e) {
@@ -307,7 +389,7 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
     return Column(
       children: [
         ValueListenableBuilder<bool>(
-          valueListenable: EdanSyncRespoService.instance.sincronizandoMunicipio,
+          valueListenable: EdanStoreV2.instance.sincronizandoNotifier,
           builder: (context, sincronizando, _) => sincronizando
               ? _buildSyncMunicipioBanner(primary)
               : const SizedBox.shrink(),
@@ -438,13 +520,40 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
                 color: AppColors.textSecondary,
               ),
             ),
+            if (_errorCarga != null) ...[
+              const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  _errorCarga!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.rechazado,
+                  ),
+                ),
+              ),
+            ],
+            if (_errorCarga != null) ...[
+              const SizedBox(height: 12),
+              TextButton.icon(
+                onPressed: () {
+                  setState(() => _cargando = true);
+                  _cargarLocalidades();
+                },
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Reintentar'),
+              ),
+            ],
           ],
         ),
       );
     }
 
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
+    return RefreshIndicator(
+      onRefresh: _cargarLocalidades,
+      child: ListView.separated(
+        padding: const EdgeInsets.all(12),
       itemCount: list.length,
       separatorBuilder: (_, _) => const SizedBox(height: 8),
       itemBuilder: (context, index) {
@@ -478,6 +587,7 @@ class RespEdanLocalidadTabState extends State<RespEdanLocalidadTab>
               : null,
         );
       },
+      ),
     );
   }
 }
@@ -503,10 +613,14 @@ class _RespLocalidadCard extends StatelessWidget {
     final estado = localidad.estadoLocalidad ?? UgrLocalidadEstado.borrador;
     final esPendienteEnvio =
         estado == UgrLocalidadEstado.borrador && !localidad.sincronizado;
-    final reporterName =
-        AuthService.instance.userName ??
-        AuthService.instance.currentToken?.nombre ??
-        '';
+    // Autor REAL del servidor (nodo `usuario` disgregado); fallback al
+    // logueado solo si aún no se conoce autor (borrador local nuevo).
+    final autor = localidad.usuario?.nombre;
+    final reporterName = (autor != null && autor.isNotEmpty)
+        ? autor
+        : (AuthService.instance.userName ??
+            AuthService.instance.currentToken?.nombre ??
+            '');
     return Card(
       margin: EdgeInsets.zero,
       shape: esPendienteEnvio
@@ -605,6 +719,40 @@ class _RespLocalidadCard extends StatelessWidget {
               const SizedBox(height: 10),
               EdanSeccionBadges(localidad: localidad),
               const SizedBox(height: 10),
+              if (localidad.envioPendiente)
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.completed.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: AppColors.completed.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(
+                        Icons.send_outlined,
+                        size: 16,
+                        color: AppColors.completed,
+                      ),
+                      SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Envío pendiente: se enviará al UGR al sincronizar.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: AppColors.completed,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               if (esPendienteEnvio)
                 Container(
                   padding: const EdgeInsets.symmetric(

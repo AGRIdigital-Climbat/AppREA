@@ -695,21 +695,22 @@ _Mejor? _masParecido(String objetivo, List<String> candidatos) {
 
 // --- Flags imp_* ------------------------------------------------------------
 
-/// Pone los 22 flags `imp_*` según las secciones con datos. La tabla de flags la
+/// Pone los 23 flags (9 `grup_*` + 14 `imp_*`) según las secciones con datos. La tabla de flags la
 /// tiene el registry (es la misma que usa el wizard), no este archivo.
 void _aplicarFlags(EdanLocalidad l, List<String> activas) {
   final f = EdanSeccionesRegistry.construirFlagsDesdeActivas(activas);
   bool g(String flag) => f[flag] ?? false;
 
-  l.impPoblacion = g('imp_poblacion');
-  l.impSalud = g('imp_salud');
-  l.impInfraestructura = g('imp_infraestructura');
-  l.impServicios = g('imp_servicios');
-  l.impEducacion = g('imp_educacion');
-  l.impVivienda = g('imp_vivienda');
-  l.impAgropecuario = g('imp_agropecuario');
+  l.grupPoblacion = g('grup_poblacion');
+  l.grupSalud = g('grup_salud');
+  l.grupInfraestructura = g('grup_infraestructura');
+  l.grupServicios = g('grup_servicios');
+  l.grupEducacion = g('grup_educacion');
+  l.grupVivienda = g('grup_vivienda');
+  l.grupAgropecuario = g('grup_agropecuario');
   l.impProteccion = g('imp_proteccion');
-  l.impNecesidades = g('imp_necesidades');
+  l.grupProteccion = g('grup_proteccion');
+  l.grupNecesidades = g('grup_necesidades');
 
   l.impImpactoPoblacion = g('imp_impacto_poblacion');
   l.impSaludEstablecimientos = g('imp_salud_establecimientos');

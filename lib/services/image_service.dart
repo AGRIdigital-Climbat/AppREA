@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -19,12 +20,37 @@ class ImageService {
     if (Platform.isWindows) {
       return _pickFileWindows();
     }
-    return await _picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 80,
-      maxWidth: 1920,
-      maxHeight: 1080,
-    );
+    try {
+      final foto = await _picker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 80,
+        maxWidth: 1920,
+        maxHeight: 1080,
+      );
+      if (foto != null) return foto;
+      // Sin foto y sin excepción: el SO pudo matar la activity con la cámara
+      // abierta (típico en Xiaomi/Huawei con poca RAM). Intentar rescate.
+      return await recuperarFotoPerdida();
+    } on PlatformException {
+      // Cámara desconectada / app matada a mitad del intent.
+      return await recuperarFotoPerdida();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Recupera la foto si Android mató el proceso mientras la cámara estaba
+  /// abierta (`getLostData`). `null` si no hay nada que recuperar. Solo
+  /// Android/iOS; en Windows siempre `null`.
+  Future<XFile?> recuperarFotoPerdida() async {
+    if (Platform.isWindows) return null;
+    try {
+      final perdidos = await _picker.retrieveLostData();
+      if (!perdidos.isEmpty && perdidos.file != null) {
+        return perdidos.file;
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<XFile?> pickFromGallery() async {
@@ -88,6 +114,20 @@ class ImageService {
     final fileName =
         '${DateTime.now().millisecondsSinceEpoch}_${path.basename(image.path)}';
     final savedImage = await File(image.path).copy('${appDir.path}/$fileName');
+    return savedImage.path;
+  }
+
+  /// Guarda la foto en la carpeta persistente `report_photos` con el nombre
+  /// `<photoUuid>.<ext>` (Etapa 4: localizable por uuid, sin colisiones por
+  /// timestamp). Crea la carpeta si falta.
+  Future<String> savePhotoLocally(XFile image, String photoUuid) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    final dir = Directory('${appDir.path}/report_photos');
+    await dir.create(recursive: true);
+    var ext = path.extension(image.path).toLowerCase();
+    if (ext.isEmpty) ext = '.jpg';
+    final savedImage =
+        await File(image.path).copy('${dir.path}/$photoUuid$ext');
     return savedImage.path;
   }
 

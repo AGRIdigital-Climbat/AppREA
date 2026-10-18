@@ -1,12 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../../config/theme.dart';
 import '../../../models/edan.dart';
 import '../../../providers/auth_provider.dart';
 import '../../../services/api_service.dart';
+import '../../../services/api/edan_api_v2.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
-import '../../../services/edan_sync_service.dart';
+import '../../../services/edan/edan_store_v2.dart';
+import '../../../services/sync/edan_sync_engine_v2.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_route.dart';
 
@@ -61,9 +66,13 @@ class UgrDashboardTabState extends State<UgrDashboardTab>
   Future<void> _sincronizarEnSegundoPlano() async {
     await Future.delayed(const Duration(seconds: 2));
     if (!mounted) return;
-    final result = await EdanSyncService.instance.sincronizar();
+    final result = await _sincronizarV2();
     if (!mounted) return;
-    if (result.exito && (result.creados > 0 || result.actualizados > 0 || result.enviados > 0)) {
+    if (result != null &&
+        result.exito &&
+        (result.enviados > 0 ||
+            result.fotosSubidas > 0 ||
+            result.fotosDescargadas > 0)) {
       _cargarEdanesServidor();
       _cargarLocalidadesServidor();
     }
@@ -145,7 +154,35 @@ class UgrDashboardTabState extends State<UgrDashboardTab>
   }
 
   Future<void> _sincronizarManual() async {
-    await EdanSyncService.instance.sincronizar();
+    await _sincronizarV2();
+  }
+
+  /// Corre el motor de sync V2 (envío de reportes propios + descarga de sus
+  /// fotos). Devuelve `null` si ya hay una corrida en curso o si no hay red.
+  Future<EdanSyncResumen?> _sincronizarV2() async {
+    final store = EdanStoreV2.instance;
+    if (store.sincronizandoNotifier.value) return null;
+    if (!await ConnectivityService().checkNow()) return null;
+    store.sincronizandoNotifier.value = true;
+    try {
+      Directory? dirFotos;
+      try {
+        final appDir = await getApplicationDocumentsDirectory();
+        dirFotos = Directory('${appDir.path}/edan_fotos');
+      } catch (_) {
+        dirFotos = null;
+      }
+      final resumen = await EdanSyncEngineV2(
+        api: EdanApiV2(),
+        dirFotos: dirFotos,
+      ).sincronizar();
+      return resumen;
+    } catch (_) {
+      return null;
+    } finally {
+      store.sincronizandoNotifier.value = false;
+      await store.refrescarPendientes();
+    }
   }
 
   Widget _buildWelcomeHeader() {

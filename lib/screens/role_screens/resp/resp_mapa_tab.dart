@@ -11,6 +11,8 @@ import '../../../models/edan.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/edan/edan_store_v2.dart';
+import 'edan/edan_boton_sacar_foto.dart';
 
 class RespMapaTab extends StatefulWidget {
   final Future<List<EdanLocalidad>> Function()? cargarLocalidades;
@@ -86,6 +88,21 @@ class RespMapaTabState extends State<RespMapaTab>
         localidades = await db.getLocalidades(userId);
       }
       final visibles = localidades.where((l) => !l.pendienteEliminacion).toList();
+      // Diseño limpio: hidratar secciones + fotos desde tablas V2 (igual que
+      // el preview). Cubre fotos de otra sesión o bajadas por el pull, que no
+      // vienen en el snapshot en memoria.
+      final store = EdanStoreV2.instance;
+      for (final l in visibles) {
+        final uuid = l.uuidEdanLocalidad;
+        if (uuid == null || uuid.isEmpty) continue;
+        try {
+          await store.cargarSecciones(l);
+          await EdanBotonSacarFoto.hidratarFotosDeItems(
+            store,
+            _itemsConFoto(l),
+          );
+        } catch (_) {}
+      }
       final puntos = <_PuntoMapa>[];
       final vistos = <String>{};
       for (final l in visibles) {
@@ -207,6 +224,35 @@ class RespMapaTabState extends State<RespMapaTab>
             vistos,
             datos: datos,
           );
+          // Hijas 1:N: cada casa con GPS pinta su propio punto (el padre va
+          // con coords null cuando hay hijas, §20.4). Fotos por dueña.
+          for (final v in s.viviendas) {
+            List<EdanFoto> fotosCasa = const [];
+            final uuidCasa = v.uuidRegistro;
+            if (uuidCasa != null && uuidCasa.isNotEmpty) {
+              try {
+                fotosCasa = await EdanStoreV2.instance
+                    .cargarFotosDeEntidad('vivienda', uuidCasa);
+              } catch (_) {}
+            }
+            _agregarSeccion(
+              puntos,
+              l,
+              fotosCasa,
+              v.coordenadaLat,
+              v.coordenadaLon,
+              null,
+              'Viviendas',
+              Icons.home,
+              AppColors.rechazado,
+              fechaKey,
+              vistos,
+              datos: {
+                if (s.comunidad.isNotEmpty) 'Comunidad': s.comunidad,
+                'Daño': v.tipoDano.name.toUpperCase(),
+              },
+            );
+          }
         }
         for (final s in l.danosAgricultura) {
           final datos = <String, String>{
@@ -304,6 +350,20 @@ class RespMapaTabState extends State<RespMapaTab>
 
   String _fmtFecha(DateTime d) =>
       '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+
+  /// Todos los ítems con foto de una localidad (para hidratar miniaturas de
+  /// otra sesión o bajadas por el pull). Cubre las 8 secciones que grafica el
+  /// mapa; las casas van aparte (sus fotos se resuelven por dueña).
+  static Iterable<EdanFotoHolder> _itemsConFoto(EdanLocalidad l) sync* {
+    yield* l.establecimientosSalud;
+    yield* l.danosViales;
+    yield* l.danosInfraPublica;
+    yield* l.unidadesEducativas;
+    yield* l.danosVivienda;
+    yield* l.danosAgricultura;
+    yield* l.danosPecuarios;
+    yield* l.infraProductiva;
+  }
 
   void _agregarSeccion(
     List<_PuntoMapa> puntos,

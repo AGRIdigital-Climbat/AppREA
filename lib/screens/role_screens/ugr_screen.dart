@@ -1,10 +1,15 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
 import '../../providers/connectivity_provider.dart';
 import '../../providers/reporte_provider.dart';
-import '../../services/edan_sync_service.dart';
-import '../../services/api_service.dart';
+import '../../services/api/edan_api_v2.dart';
+import '../../services/edan/edan_store_v2.dart';
+import '../../services/sync/edan_sync_engine_v2.dart';
 import '../../services/auth_service.dart';
 import '../../services/connectivity_service.dart';
 import '../../models/edan.dart';
@@ -13,7 +18,8 @@ import '../../widgets/perfil_tab.dart';
 import 'ugr/ugr_edan_tab.dart';
 import 'ugr/ugr_guia_tab.dart';
 import 'ugr/ugr_localidades_tab.dart';
-import 'resp/edan/edan_ia_elegir_creacion.dart';
+import 'ugr/ugr_route.dart';
+import 'resp/edan/edan_form_wizard.dart';
 import 'resp/resp_mapa_tab.dart';
 
 class UgrScreen extends StatefulWidget {
@@ -28,6 +34,9 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   bool _isProfileEditing = false;
   bool _wasOnline = true;
   ConnectivityProvider? _connectivity;
+  /// Evita apilar auto-syncs si la red parpadea
+  /// (offline→online→offline→online seguidos).
+  bool _sincronizandoAuto = false;
   final _edanTabKey = GlobalKey<UgrEdanTabState>();
   final _perfilTabKey = GlobalKey<PerfilTabState>();
   final _localidadesTabKey = GlobalKey<UgrLocalidadesTabState>();
@@ -45,7 +54,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
       // dispare la sincronizacion, en vez de poder perderse.
       _wasOnline = connectivity.chequeoCompletado && connectivity.isConnected;
       connectivity.addListener(_onConnectivityChanged);
-      EdanSyncService.instance.recargarPendientes();
+      EdanStoreV2.instance.refrescarPendientes();
       context.read<ReporteProvider>().initializeUgr();
     });
   }
@@ -60,17 +69,38 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      EdanSyncService.instance.recargarPendientes();
+      EdanStoreV2.instance.refrescarPendientes();
     }
   }
 
   void _onConnectivityChanged() {
     final online = _connectivity?.isConnected ?? true;
-    if (online && !_wasOnline) {
-      _sincronizar(auto: true);
-    }
+    final volvio = online && !_wasOnline;
     _wasOnline = online;
-    EdanSyncService.instance.recargarPendientes();
+    EdanStoreV2.instance.refrescarPendientes();
+    if (volvio) {
+      // Al volver internet se auto-sincroniza sin diálogo (igual que RESP):
+      // solo si hay pendientes y sin sync en curso.
+      unawaited(_sincronizarSiHayPendientes());
+    }
+  }
+
+  /// Auto-sync al reconectar: corre `_sincronizar(auto: true)` solo con
+  /// trabajo pendiente y sin corrida en curso. Nunca apila llamadas (mismo
+  /// guard `_sincronizandoAuto` que RESP).
+  Future<void> _sincronizarSiHayPendientes() async {
+    if (!mounted) return;
+    if (_sincronizandoAuto) return;
+    await EdanStoreV2.instance.refrescarPendientes();
+    if (!mounted) return;
+    if (EdanStoreV2.instance.sincronizandoNotifier.value) return;
+    if (EdanStoreV2.instance.pendientesNotifier.value <= 0) return;
+    _sincronizandoAuto = true;
+    try {
+      await _sincronizar(auto: true);
+    } finally {
+      _sincronizandoAuto = false;
+    }
   }
 
   @override
@@ -211,14 +241,17 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
                 UgrEdanTab(key: _edanTabKey),
                 RespMapaTab(
                   key: _mapaTabKey,
+                  // Offline-first como RESP: el mapa lee SQLite (`formularios`),
+                  // no la red. El sync pull ya puebla el municipio (escribe
+                  // `id_municipio`), así que sin conexión el mapa se pinta igual
+                  // con lo local.
                   cargarLocalidades: () async {
                     final token = AuthService.instance.currentToken;
-                    if (token?.idMunicipio == null) return <EdanLocalidad>[];
-                    final data = await ApiService.instance
-                        .getLocalidadesMunicipio(token!.idMunicipio!);
-                    return data
-                        .map((j) => EdanLocalidad.fromJson(j))
-                        .toList();
+                    final municipio = token?.idMunicipio;
+                    if (municipio == null) return <EdanLocalidad>[];
+                    return EdanStoreV2.instance.listarFormularios(
+                      idMunicipio: municipio,
+                    );
                   },
                 ),
                 const UgrGuiaTab(),
@@ -245,7 +278,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
                   case 2:
                     _mapaTabKey.currentState?.refresh();
                 }
-                EdanSyncService.instance.recargarPendientes();
+                EdanStoreV2.instance.refrescarPendientes();
               },
               selectedItemColor: palette.primary,
               unselectedItemColor: AppColors.textSecondary,
@@ -285,28 +318,31 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   Widget _buildSyncButton() {
     return ListenableBuilder(
       listenable: Listenable.merge([
-        EdanSyncService.instance.pendientes,
-        EdanSyncService.instance.sincronizando,
+        EdanStoreV2.instance.pendientesNotifier,
+        EdanStoreV2.instance.sincronizandoNotifier,
         ?_connectivity,
       ]),
       builder: (context, _) {
-        final pendientes = EdanSyncService.instance.pendientes.value;
-        final sincronizando = EdanSyncService.instance.sincronizando.value;
+        final pendientes = EdanStoreV2.instance.pendientesNotifier.value;
+        final sincronizando = EdanStoreV2.instance.sincronizandoNotifier.value;
         // Sin conexion verificada el boton se apaga en vez de dejar que el
         // usuario lo presione y se le muestre un error. Sin esta distincion
         // habia dos ventanas (13 s al arrancar, 45 s de histeresis) en las que
         // la app creia tener red y cada request fallaba.
         final online = _connectivity?.isConnected ?? false;
         final chequeado = _connectivity?.chequeoCompletado ?? false;
+        final verificando = !chequeado;
         final puedeIntentar = online && chequeado && !sincronizando;
         return IconButton(
           tooltip: sincronizando
               ? 'Sincronizando...'
-              : !puedeIntentar
-                  ? 'Sin conexión. Se sincronizará automáticamente al recuperar la red.'
-                  : pendientes > 0
-                      ? 'Sincronizar ($pendientes pendientes)'
-                      : 'Sincronizar',
+              : verificando
+                  ? 'Verificando conexión...'
+                  : !puedeIntentar
+                      ? 'Sin conexión. Se sincronizará automáticamente al recuperar la red.'
+                      : pendientes > 0
+                          ? 'Sincronizar ($pendientes pendientes)'
+                          : 'Sincronizar',
           onPressed: puedeIntentar ? () => _sincronizar(auto: false) : null,
           icon: Badge(
             isLabelVisible: pendientes > 0 && !sincronizando,
@@ -318,9 +354,11 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : Icon(
-                    puedeIntentar
-                        ? Icons.cloud_upload_outlined
-                        : Icons.cloud_off_outlined,
+                    verificando
+                        ? Icons.cloud_queue_outlined
+                        : puedeIntentar
+                            ? Icons.cloud_upload_outlined
+                            : Icons.cloud_off_outlined,
                   ),
           ),
         );
@@ -329,7 +367,8 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _sincronizar({bool auto = false}) async {
-    if (EdanSyncService.instance.isSyncing) return;
+    final store = EdanStoreV2.instance;
+    if (store.sincronizandoNotifier.value) return;
 
     // Chequeo real antes de cualquier trabajo de red. El estado cacheado puede
     // tener hasta 45 s de retraso por la histeresis: sin esto, un estado viejo
@@ -343,31 +382,78 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
       return;
     }
 
-    final result = await EdanSyncService.instance.sincronizar();
+    store.sincronizandoNotifier.value = true;
+    EdanSyncResumen result;
+    try {
+      // Carpeta de fotos: la usamos para la recuperación en un dispositivo
+      // nuevo (el motor descarga a `ruta_local` las fotos que el pull trajo
+      // solo con metadatos). Única carpeta: `report_photos/` (igual que RESP).
+      Directory? dirFotos;
+      try {
+        final appDir = await getApplicationDocumentsDirectory();
+        dirFotos = Directory('${appDir.path}/report_photos');
+        await dirFotos.create(recursive: true);
+      } catch (_) {
+        dirFotos = null;
+      }
+      result = await EdanSyncEngineV2(
+        api: EdanApiV2(),
+        dirFotos: dirFotos,
+        usuarioId: AuthService.instance.userId,
+      ).sincronizar();
+    } catch (e) {
+      // El motor captura casi todo, pero un fallo inesperado (bug local) no
+      // debe dejar la UI colgada sin mensaje ni refresco (igual que RESP).
+      result = EdanSyncResumen(
+        exito: false,
+        ultimoError: 'Error inesperado: $e',
+      );
+    } finally {
+      store.sincronizandoNotifier.value = false;
+    }
     if (!mounted) return;
 
     _localidadesTabKey.currentState?.refresh();
     _edanTabKey.currentState?.refresh();
-    EdanSyncService.instance.recargarPendientes();
+    store.refrescarPendientes();
 
     if (auto &&
-        (result.enviados == 0 &&
-            result.fallidos == 0 &&
-            result.eliminados == 0)) {
+        result.enviados == 0 &&
+        result.errores == 0 &&
+        result.fotosSubidas == 0 &&
+        result.fotosDescargadas == 0) {
       return;
     }
 
-    // Rojo solo cuando hubo red verificada y el servidor rechazo el dato, o
-    // cuando el fallo no se puede atribuir a la red. Un fallo de transporte
-    // aqui significa que se cayo la red durante la corrida: no hay nada que el
-    // usuario pueda hacer, asi que no se molesta con un error.
-    if (result.sinConexion) return;
+    // El motor marca `ultimoError` con prefijo 'Sin conexión' cuando hubo un
+    // SocketException (cayó la red durante la corrida). No se pinta rojo.
+    if (result.ultimoError != null &&
+        result.ultimoError!.startsWith('Sin conexión')) {
+      return;
+    }
+
+    final partes = <String>[
+      if (result.enviados > 0) '${result.enviados} enviados',
+      if (result.errores > 0) '${result.errores} errores',
+      if (result.fotosSubidas > 0) '${result.fotosSubidas} fotos subidas',
+      if (result.fotosDescargadas > 0)
+        '${result.fotosDescargadas} fotos descargadas',
+      if (result.fotosPendientes > 0)
+        '${result.fotosPendientes} fotos pendientes',
+    ];
+    final mensaje = partes.isEmpty
+        ? (result.exito ? 'Sin cambios por enviar.' : 'La sincronización falló.')
+        : partes.join(' · ');
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.resumen),
+        content: Text(
+          result.exito
+              ? mensaje
+              : '$mensaje${result.ultimoError != null ? ' — ${result.ultimoError}' : ''}',
+        ),
         backgroundColor: result.exito ? AppColors.aprobado : AppColors.rechazado,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 5),
       ),
     );
   }
@@ -410,15 +496,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
               const SizedBox(height: 12),
             ],
             FloatingActionButton(
-              onPressed: () async {
-                // El `+` deja elegir entre el wizard y el asistente con IA.
-                final modo = await pedirModoCreacionEdan(context);
-                if (modo == null || !mounted) return;
-                final creado = await abrirCreacionEdan(context, modo);
-                if (creado && mounted) {
-                  _localidadesTabKey.currentState?.refresh();
-                }
-              },
+              onPressed: _abrirWizardDirecto,
               tooltip: 'Crear EDAN localidad',
               backgroundColor: primary,
               foregroundColor: Colors.white,
@@ -434,6 +512,21 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
       default:
         return null;
     }
+  }
+
+  /// Abre el wizard EDAN directo, igual que el FAB de RESP (sin diálogo de
+  /// modo). La ficha nueva queda como **borrador en SQLite** (`EdanStoreV2`),
+  /// pendiente de sincronizar; consolidar/enviar a UGR es un paso aparte.
+  Future<void> _abrirWizardDirecto() async {
+    final creado = await Navigator.of(context).push<bool>(
+      ugrRoute(
+        EdanFormWizard(storeV2: EdanStoreV2.instance),
+        palette: Palettes.rea,
+      ),
+    );
+    if (creado != true || !mounted) return;
+    _localidadesTabKey.currentState?.refresh();
+    _edanTabKey.currentState?.refresh();
   }
 
   String _getTabTitle() {

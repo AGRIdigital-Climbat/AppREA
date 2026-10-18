@@ -836,23 +836,23 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     for (final l in edan.localidades) {
       switch (numSeccion) {
         case 3:
-          if (l.impPoblacion) return true;
+          if (l.grupPoblacion) return true;
         case 4:
-          if (l.impSalud) return true;
+          if (l.grupSalud) return true;
         case 5:
-          if (l.impInfraestructura) return true;
+          if (l.grupInfraestructura) return true;
         case 6:
-          if (l.impServicios) return true;
+          if (l.grupServicios) return true;
         case 7:
-          if (l.impEducacion) return true;
+          if (l.grupEducacion) return true;
         case 8:
-          if (l.impVivienda) return true;
+          if (l.grupVivienda) return true;
         case 9:
-          if (l.impAgropecuario) return true;
+          if (l.grupAgropecuario) return true;
         case 10:
-          if (l.impProteccion) return true;
+          if (l.grupProteccion) return true;
         case 11:
-          if (l.impNecesidades) return true;
+          if (l.grupNecesidades) return true;
       }
     }
     return false;
@@ -1297,7 +1297,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion07() {
-    final locs = edan.localidades.where((l) => l.impEducacion).toList();
+    final locs = edan.localidades.where((l) => l.grupEducacion).toList();
     /// Totales a nivel de EDAN
     final totalUnidades = locs.fold<int>(0, (s, l) => s + l.unidadesEducativas.length);
     final totalEstudiantes = locs.fold<int>(0, (s, l) {
@@ -1368,7 +1368,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion08() {
-    final locs = edan.localidades.where((l) => l.impVivienda).toList();
+    final locs = edan.localidades.where((l) => l.grupVivienda).toList();
     /// Totales a nivel de EDAN
     final totalViviendas = locs.fold<int>(0, (s, l) => s + l.danosVivienda.length);
     final totalDanoParcial = locs.fold<int>(0, (s, l) {
@@ -1427,7 +1427,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion09() {
-    final locs = edan.localidades.where((l) => l.impAgropecuario).toList();
+    final locs = edan.localidades.where((l) => l.grupAgropecuario).toList();
     /// Totales a nivel de EDAN
     final totalCultivos = locs.fold<int>(0, (s, l) => s + l.danosAgricultura.length);
     final totalAnimalesAfectados = locs.fold<int>(0, (s, l) {
@@ -1524,7 +1524,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   }
 
   Widget _seccion10() {
-    final locs = edan.localidades.where((l) => l.impProteccion).toList();
+    final locs = edan.localidades.where((l) => l.grupProteccion).toList();
     return _DocSeccion(
       numero: '10',
       titulo: 'Impacto en protección',

@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../config/theme.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/api_service.dart';
@@ -33,26 +34,57 @@ class UgrRecursoTabState extends State<UgrRecursoTab> {
 
   void refresh() => _cargarDatos();
 
+  static const String _kDocsCache = 'recurso_documentos_cache_v1';
+
   Future<void> _cargarDatos() async {
+    if (!mounted) return;
+    setState(() => _cargando = true);
+    // Los tipos viven en SQLite (caché del provider) → disponibles offline.
+    final rp = context.read<ReporteProvider>();
+    _tiposDocumento = rp.tiposRepositorio;
     if (!ConnectivityService().isConnected) {
+      _documentos = await _leerCache();
       if (mounted) setState(() => _cargando = false);
       return;
     }
-    if (mounted) setState(() => _cargando = true);
     try {
-      final rp = context.read<ReporteProvider>();
-      final tiposFromProvider = rp.tiposRepositorio;
       final documentos = await ApiService.instance.filtrarDocumentos();
+      await _escribirCache(documentos);
       if (mounted) {
         setState(() {
           _documentos = documentos;
-          _tiposDocumento = tiposFromProvider;
           _cargando = false;
         });
       }
     } catch (_) {
+      // Sin respuesta del server se pinta la última lista en caché (offline-first
+      // como el resto de UGR), en vez de dejar la pestaña vacía.
+      _documentos = await _leerCache();
       if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  Future<List<Map<String, dynamic>>> _leerCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kDocsCache);
+      if (raw == null || raw.isEmpty) return const <Map<String, dynamic>>[];
+      final dec = jsonDecode(raw);
+      if (dec is List) {
+        return dec
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+    } catch (_) {}
+    return const <Map<String, dynamic>>[];
+  }
+
+  Future<void> _escribirCache(List<Map<String, dynamic>> docs) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kDocsCache, jsonEncode(docs));
+    } catch (_) {}
   }
 
   List<Map<String, dynamic>> get _documentosFiltrados {

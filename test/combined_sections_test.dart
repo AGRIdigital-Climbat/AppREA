@@ -4,6 +4,15 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rea/models/edan.dart';
 import 'package:rea/models/id_seccion_helper.dart';
 
+/// Uniformiza una sección del payload en lista de filas: las 1:N ya vienen
+/// como `List`; las **1:1** (`danos_vivienda` en el contrato de la Fase C)
+/// vienen como **objeto único** con sus `viviendas[]` anidadas.
+List<Map<String, dynamic>> _filasDe(Object? v) => v is List
+    ? v.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList()
+    : v is Map
+        ? [Map<String, dynamic>.from(v)]
+        : const [];
+
 void main() {
   group('Secciones combinadas: Población + Protección + Random', () {
     final rng = Random(42);
@@ -199,15 +208,15 @@ void main() {
         totalPoblacionAfectada: 100,
         totalFamiliasAfectadas: 25,
         totalFamiliasDamnificadas: 8,
-        impPoblacion: imp['poblacion']!,
-        impSalud: imp['salud']!,
-        impInfraestructura: imp['infraestructura']!,
-        impServicios: imp['servicios']!,
-        impEducacion: imp['educacion']!,
-        impVivienda: imp['vivienda']!,
-        impAgropecuario: imp['agropecuario']!,
-        impProteccion: imp['proteccion']!,
-        impNecesidades: imp['necesidades']!,
+        grupPoblacion: imp['poblacion']!,
+        grupSalud: imp['salud']!,
+        grupInfraestructura: imp['infraestructura']!,
+        grupServicios: imp['servicios']!,
+        grupEducacion: imp['educacion']!,
+        grupVivienda: imp['vivienda']!,
+        grupAgropecuario: imp['agropecuario']!,
+        grupProteccion: imp['proteccion']!,
+        grupNecesidades: imp['necesidades']!,
         impactoPoblacion: imp['poblacion']!
             ? [
                 _makePoblacion(rango: 'Niño (a) 0-5 años', fallecidos: 1, heridos: 3),
@@ -270,19 +279,20 @@ void main() {
         'necesidades': false,
       };
       final loc = _buildLocalidad(imp);
+      loc.recalcularFlagsImpacto();  // como hace el guardado real
       final json = loc.toApiJson();
 
       print('\n=== ESCENARIO 1: Solo Población + Protección ===');
 
-      expect(json['imp_poblacion'], true);
+      expect(json['grup_poblacion'], true);
       expect(json['imp_proteccion'], true);
-      expect(json['imp_salud'], false);
-      expect(json['imp_infraestructura'], false);
-      expect(json['imp_servicios'], false);
-      expect(json['imp_educacion'], false);
-      expect(json['imp_vivienda'], false);
-      expect(json['imp_agropecuario'], false);
-      expect(json['imp_necesidades'], false);
+      expect(json['grup_salud'], false);
+      expect(json['grup_infraestructura'], false);
+      expect(json['grup_servicios'], false);
+      expect(json['grup_educacion'], false);
+      expect(json['grup_vivienda'], false);
+      expect(json['grup_agropecuario'], false);
+      expect(json['grup_necesidades'], false);
 
       final impacto = json['impacto_poblacion'] as List;
       print('impacto_poblacion: ${impacto.length} items');
@@ -306,7 +316,8 @@ void main() {
       expect(json['danos_infra_publica'], isEmpty);
       expect(json['servicios_basicos'], isEmpty);
       expect(json['unidades_educativas'], isEmpty);
-      expect(json['danos_vivienda'], isEmpty);
+        expect(_filasDe(json['danos_vivienda']), isEmpty,
+            reason: 'sección 1:1 sin datos => null/objeto vacío, nunca lista');
       expect(json['danos_agricultura'], isEmpty);
       expect(json['danos_pecuarios'], isEmpty);
       expect(json['infra_productiva'], isEmpty);
@@ -339,10 +350,10 @@ void main() {
       final l1 = localidades[0] as Map<String, dynamic>;
       final l2 = localidades[1] as Map<String, dynamic>;
 
-      expect(l1['imp_salud'], true);
-      expect(l1['imp_infraestructura'], true);
-      expect(l2['imp_salud'], true);
-      expect(l2['imp_infraestructura'], false);
+      expect(l1['grup_salud'], true);
+      expect(l1['grup_infraestructura'], true);
+      expect(l2['grup_salud'], true);
+      expect(l2['grup_infraestructura'], false);
 
       final est1 = l1['establecimientos_salud'] as List;
       print('loc1 establecimientos: ${est1.length}');
@@ -412,7 +423,7 @@ void main() {
         final id = item['id_seccion'];
         if (id != null) allIds.add('edu:$id');
       }
-      for (final item in json['danos_vivienda'] as List) {
+      for (final item in _filasDe(json['danos_vivienda'])) {
         final id = item['id_seccion'];
         if (id != null) allIds.add('vivienda:$id');
       }
@@ -555,7 +566,7 @@ void main() {
       print('✅ Solo secciones activas evaluadas, protección completa');
     });
 
-    test('Protección vacía (impProteccion=true pero sin datos): incompleta', () {
+    test('Protección vacía (grupProteccion=true pero sin datos): incompleta', () {
       final loc = _buildLocalidad({
         'poblacion': true, 'salud': false, 'infraestructura': false,
         'servicios': false, 'educacion': false, 'vivienda': false,
@@ -666,6 +677,7 @@ void main() {
         'agropecuario': true, 'proteccion': true, 'necesidades': true,
       };
       final loc = _buildLocalidad(imp);
+      loc.recalcularFlagsImpacto();  // como hace el guardado real
       final json = loc.toApiJson();
       json['id_usuario'] = 43;
 
@@ -678,21 +690,21 @@ void main() {
       print('danos_infra_publica: ${(json['danos_infra_publica'] as List).length}');
       print('servicios_basicos: ${(json['servicios_basicos'] as List).length}');
       print('unidades_educativas: ${(json['unidades_educativas'] as List).length}');
-      print('danos_vivienda: ${(json['danos_vivienda'] as List).length}');
+      print('danos_vivienda: ${_filasDe(json['danos_vivienda']).length} (1:1 = objeto)');
       print('danos_agricultura: ${(json['danos_agricultura'] as List).length}');
       print('danos_pecuarios: ${(json['danos_pecuarios'] as List).length}');
       print('infra_productiva: ${(json['infra_productiva'] as List).length}');
       print('proteccion (dedicado): ${loc.proteccionParaEndpointDedicado().length}');
 
-      expect(json['imp_poblacion'], true);
-      expect(json['imp_salud'], true);
-      expect(json['imp_infraestructura'], true);
-      expect(json['imp_servicios'], true);
-      expect(json['imp_educacion'], true);
-      expect(json['imp_vivienda'], true);
-      expect(json['imp_agropecuario'], true);
+      expect(json['grup_poblacion'], true);
+      expect(json['grup_salud'], true);
+      expect(json['grup_infraestructura'], true);
+      expect(json['grup_servicios'], true);
+      expect(json['grup_educacion'], true);
+      expect(json['grup_vivienda'], true);
+      expect(json['grup_agropecuario'], true);
       expect(json['imp_proteccion'], true);
-      expect(json['imp_necesidades'], true);
+      expect(json['grup_necesidades'], true);
 
       expect((json['impacto_poblacion'] as List).length, 4);
       expect((json['establecimientos_salud'] as List).length, 2);
@@ -700,7 +712,12 @@ void main() {
       expect((json['danos_infra_publica'] as List).length, 2);
       expect((json['servicios_basicos'] as List).length, 5);
       expect((json['unidades_educativas'] as List).length, 2);
-      expect((json['danos_vivienda'] as List).length, 2);
+      // `danos_vivienda` es 1:1 en el contrato: el payload colapsa la lista del
+      // modelo a UN objeto (la primera fila). El modelo conserva sus 2 filas.
+      expect(loc.danosVivienda.length, 2);
+      expect(_filasDe(json['danos_vivienda']), hasLength(1),
+          reason: '1:1 => objeto único en el payload');
+      expect(json['danos_vivienda'], isA<Map>());
       expect((json['danos_agricultura'] as List).length, 2);
       expect((json['danos_pecuarios'] as List).length, 2);
       expect((json['infra_productiva'] as List).length, 2);
@@ -732,7 +749,7 @@ void main() {
         final diip = json['danos_infra_publica'] as List;
         final sb = json['servicios_basicos'] as List;
         final ue = json['unidades_educativas'] as List;
-        final vv = json['danos_vivienda'] as List;
+        final vv = _filasDe(json['danos_vivienda']);
         final da = json['danos_agricultura'] as List;
         final dp = json['danos_pecuarios'] as List;
         final ip = json['infra_productiva'] as List;
@@ -751,7 +768,8 @@ void main() {
         expect(diip.length, imp['infraestructura']! ? 2 : 0);
         expect(sb.length, imp['servicios']! ? 5 : 0);
         expect(ue.length, imp['educacion']! ? 2 : 0);
-        expect(vv.length, imp['vivienda']! ? 2 : 0);
+        // 1:1: el payload colapsa la lista del modelo a un solo objeto.
+        expect(vv.length, imp['vivienda']! ? 1 : 0);
         expect(da.length, imp['agropecuario']! ? 2 : 0);
         expect(dp.length, imp['agropecuario']! ? 2 : 0);
         expect(ip.length, imp['agropecuario']! ? 2 : 0);

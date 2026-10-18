@@ -10,6 +10,8 @@ import '../../../../services/api_service.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
+import '../../../../services/edan/edan_store.dart';
+import '../../../../services/edan/edan_uuid_helper.dart';
 import '../../../../services/edan_secciones_registry.dart';
 import '../../../../services/image_service.dart';
 import '../../../../services/location_service.dart';
@@ -18,9 +20,9 @@ import 'edan_dialog_helper.dart';
 
 /// Utilidades de captura de foto + coordenadas GPS para el wizard EDAN.
 ///
-/// Extraído de `_BotonSacarFoto` en `resp_edan_form_screen.dart`. El flujo de
-/// respaldo por ítem se dispara desde la propia página (nunca dentro de un
-/// diálogo): primero se captura el GPS con precisión < 30m y luego la cámara.
+/// El flujo de respaldo por ítem se dispara desde la propia página (nunca
+/// dentro de un diálogo): primero se captura el GPS con precisión < 30m y
+/// luego la cámara.
 class EdanBotonSacarFoto {
   /// Captura las coordenadas con precisión < 30m. Devuelve la [Position]
   /// o null si no se logró. Pensado para usarse desde la página (no un
@@ -68,6 +70,10 @@ class EdanBotonSacarFoto {
     required double latActual,
     required double lonActual,
     required void Function(double lat, double lon) onCoordenadasCapturadas,
+    EdanStore? store,
+    String? uuidRegistro,
+    String? tipoEntidad,
+    String? rutaSeccion,
   }) async {
     double lat = latActual;
     double lon = lonActual;
@@ -89,6 +95,10 @@ class EdanBotonSacarFoto {
       latitud: lat,
       longitud: lon,
       precision: prec,
+      store: store,
+      uuidRegistro: uuidRegistro,
+      tipoEntidad: tipoEntidad,
+      rutaSeccion: rutaSeccion,
     );
   }
 
@@ -101,6 +111,10 @@ class EdanBotonSacarFoto {
     BuildContext context, {
     required List<EdanFoto> fotos,
     required void Function(double lat, double lon) onCoordenadasCapturadas,
+    EdanStore? store,
+    String? uuidRegistro,
+    String? tipoEntidad,
+    String? rutaSeccion,
   }) async {
     final pos = await capturarCoordenadas(context);
     if (pos == null) return false;
@@ -110,6 +124,10 @@ class EdanBotonSacarFoto {
       latitud: pos.latitude,
       longitud: pos.longitude,
       precision: pos.accuracy,
+      store: store,
+      uuidRegistro: uuidRegistro,
+      tipoEntidad: tipoEntidad,
+      rutaSeccion: rutaSeccion,
     );
   }
 
@@ -138,6 +156,10 @@ class EdanBotonSacarFoto {
     int? idEdanLocalidad,
     required void Function(double lat, double lon) onCoordenadasCapturadas,
     void Function(String savedPath)? onFotoGuardada,
+    EdanStore? store,
+    String? uuidRegistro,
+    String? tipoEntidad,
+    String? rutaSeccion,
   }) async {
     final saved = await showModalBottomSheet<bool>(
       context: context,
@@ -155,6 +177,10 @@ class EdanBotonSacarFoto {
         idSeccion: idSeccion,
         onCoordenadasCapturadas: onCoordenadasCapturadas,
         onFotoGuardada: onFotoGuardada,
+        store: store,
+        uuidRegistro: uuidRegistro,
+        tipoEntidad: tipoEntidad,
+        rutaSeccion: rutaSeccion,
       ),
     );
     return saved ?? false;
@@ -163,6 +189,16 @@ class EdanBotonSacarFoto {
   /// Captura una foto con la cámara y la guarda en [fotos] con sus
   /// coordenadas. Utilizable también fuera del widget cuando la captura
   /// se hace con el diálogo ya cerrado.
+  ///
+  /// Con [store] (flujo V2) la foto recibe su `uuid_fotografia` propio y se
+  /// registra en `fotografias`/`cola_fotos` aunque la fila dueña aún no esté
+  /// guardada en la DB (corrige el hueco de exigir `idLocal`). Cambiar la foto
+  /// persiste el borrado de la anterior. Sin [store] se conserva el flujo
+  /// legacy (`foto_pendiente_v2` + subida en segundo plano) para UGR/IA.
+  ///
+  /// [rutaSeccion] (p. ej. `danos-agricultura`) resuelve el `tipo_entidad`
+  /// canónico del CHECK (nombre de TABLA, no `llaveJson`); tiene prioridad
+  /// sobre [tipoEntidad] y corrige el marcador local `'filas_seccion'`.
   static Future<bool> capturarFoto({
     required List<EdanFoto> fotos,
     required double latitud,
@@ -171,6 +207,10 @@ class EdanBotonSacarFoto {
     String? idLocal,
     String? idSeccion,
     int? idEdanLocalidad,
+    EdanStore? store,
+    String? uuidRegistro,
+    String? tipoEntidad,
+    String? rutaSeccion,
   }) async {
     final hasPermission = await PermissionService.requestCameraPermission();
     if (!hasPermission) {
@@ -178,17 +218,67 @@ class EdanBotonSacarFoto {
     }
     final imagen = await ImageService().takePhoto();
     if (imagen == null) return false;
-    final savedPath = await ImageService().saveImageLocally(imagen);
+    // Etapa 4: el uuid nace ANTES de copiar (el archivo se nombra con él).
+    final photoUuid = EdanUuidHelper.generarUuidFotografia();
+    String savedPath;
+    try {
+      savedPath = await ImageService().savePhotoLocally(imagen, photoUuid);
+    } catch (_) {
+      // Disco lleno o ruta inválida: no hay foto que registrar.
+      return false;
+    }
+
+    // V2: si había una foto previa con uuid, persiste su borrado (cambiar la
+    // foto reemplaza el registro, no duplica).
+    if (store != null && fotos.isNotEmpty && fotos.first.uuidFotografia != null) {
+      try {
+        await store.borrarFoto(fotos.first.uuidFotografia!);
+      } catch (e) {
+        debugPrint('[Foto] Error al borrar foto previa: $e');
+      }
+    }
+
     fotos.clear();
-    fotos.add(EdanFoto(
+    final foto = EdanFoto(
       ruta: savedPath,
       latitud: latitud,
       longitud: longitud,
       precision: precision,
-    ));
+      uuidFotografia: photoUuid,
+    );
+    fotos.add(foto);
 
-    // Registrar en foto_pendiente_v2 para tracking de sync. Rápido, sin subir:
-    // así el bottom sheet cierra al instante y la subida ocurre en segundo plano.
+    final target = (uuidRegistro ?? idSeccion) ?? '';
+    if (store != null) {
+      // V2: registra con uuid propio y encola para subir cuando la dueña
+      // esté confirmada. No exige que la fila ya exista en la DB.
+      if (target.isNotEmpty) {
+        // El `tipo_entidad` válido sale de la ruta de sección; el marcador
+        // local `'filas_seccion'` nunca viaja (el server lo rechaza con 400).
+        final tipo = (rutaSeccion != null && rutaSeccion.isNotEmpty)
+            ? EdanSeccionesRegistry.tipoEntidadDeRuta(rutaSeccion)
+            : null;
+        final tipoFinal = tipo ??
+            (EdanSeccionesRegistry.esTipoEntidadValido(tipoEntidad)
+                ? tipoEntidad
+                : null);
+        if (tipoFinal == null || tipoFinal.isEmpty) {
+          debugPrint(
+              '[Foto] tipo_entidad irresoluble (ruta=$rutaSeccion, tipo=$tipoEntidad): '
+              'foto en memoria, pendiente de re-captura');
+          return true;
+        }
+        try {
+          await store.registrarFoto(foto, tipoFinal, target);
+          await store.encolarFoto(foto);
+        } catch (e) {
+          debugPrint('[Foto] Error al registrar/enColar foto: $e');
+        }
+      }
+      return true;
+    }
+
+    // Legacy (UGR/IA): registrar en foto_pendiente_v2 y subir en segundo plano.
     String? idFoto;
     if (idLocal != null && idSeccion != null) {
       try {
@@ -205,9 +295,6 @@ class EdanBotonSacarFoto {
       }
     }
 
-    // Lanzar la subida en segundo plano (no bloqueante). El bottom sheet ya
-    // puede cerrarse; al completar se marca la foto como subida (para que el
-    // sync no la reprocese) y se actualiza la columna fotografia.
     if (idLocal != null && idSeccion != null &&
         ConnectivityService().isConnected) {
       _subirFotoEnSegundoPlano(
@@ -220,6 +307,76 @@ class EdanBotonSacarFoto {
     }
 
     return true;
+  }
+
+  /// Garantiza que [item] tenga `id_seccion` (= `uuid_registro` de la fila V2)
+  /// antes de asociarle una foto. Devuelve el uuid vigente; si el ítem aún no
+  /// se ha guardado se le asigna uno nuevo, que `guardarFilas` reutilizará.
+  static String asegurarUuidRegistro(EdanFotoHolder item) {
+    final actual = item.idSeccion;
+    // Solo un uuid canónico es identidad estable: un `id_seccion` legacy con
+    // prefijo (`sb_…`, `po_…`) NO vale, porque `registrarFila` lo descarta y
+    // regenera al persistir la fila, y la foto quedaría colgada de un id que
+    // ninguna fila tendrá.
+    if (actual != null &&
+        actual.isNotEmpty &&
+        EdanUuidHelper.esUuidValido(actual)) {
+      return actual;
+    }
+    final nuevo = EdanUuidHelper.generarUuidRegistro();
+    item.idSeccion = nuevo;
+    return nuevo;
+  }
+
+  /// Rehidrata [fotos]/[fotografia] de cada ítem desde la tabla `fotografias`
+  /// (V2). Útil al abrir una página: las fotos tomadas en otra sesión o
+  /// bajadas por el pull vuelven a mostrarse como miniatura. Devuelve true si
+  /// cambió algo (para repintar).
+  static Future<bool> hidratarFotosDeItems(
+    EdanStore? store,
+    Iterable<EdanFotoHolder> items,
+  ) async {
+    if (store == null) return false;
+    var cambio = false;
+    for (final item in items) {
+      final uuid = item.idSeccion;
+      if (uuid == null || uuid.isEmpty) continue;
+      try {
+        final fotos = await store.cargarFotosDeEntidad('filas_seccion', uuid);
+        if (fotos.isEmpty) continue;
+        item.fotos
+          ..clear()
+          ..addAll(fotos);
+        if ((item.fotografia ?? '').isEmpty) {
+          item.fotografia = fotos.first.ruta;
+        }
+        cambio = true;
+      } catch (e) {
+        debugPrint('[Foto] Error al hidratar fotos de $uuid: $e');
+      }
+    }
+    return cambio;
+  }
+
+  /// Purga las fotos V2 asociadas a una fila de sección al eliminar el ítem
+  /// (registros en `fotografias`, cola de subida y archivos locales).
+  static Future<void> purgarFotosDeItem(
+    EdanStore? store,
+    String? idSeccion,
+  ) async {
+    if (store == null || idSeccion == null || idSeccion.isEmpty) return;
+    try {
+      final fotos =
+          await store.cargarFotosDeEntidad('filas_seccion', idSeccion);
+      for (final f in fotos) {
+        final uuid = f.uuidFotografia;
+        if (uuid != null && uuid.isNotEmpty) {
+          await store.borrarFoto(uuid);
+        }
+      }
+    } catch (e) {
+      debugPrint('[Foto] Error al purgar fotos de $idSeccion: $e');
+    }
   }
 
   /// Sube una foto de respaldo en segundo plano (fire-and-forget, sin bloquear
@@ -275,7 +432,8 @@ class EdanBotonSacarFoto {
 
   /// Visor a pantalla completa de la foto con zoom (InteractiveViewer),
   /// coordenadas y botón de borrado. Reutilizable fuera del widget; al borrar
-  /// limpia [fotos] y notifica [onEliminada] para refrescar la UI.
+  /// limpia [fotos] y notifica [onEliminada] para refrescar la UI. Con [store]
+  /// el borrado se persiste (borrado lógico + purga de cola + archivo).
   static void verFotoCompleta(
     BuildContext context, {
     required List<EdanFoto> fotos,
@@ -285,6 +443,7 @@ class EdanBotonSacarFoto {
     String? seccion,
     VoidCallback? onEliminada,
     bool soloLectura = false,
+    EdanStore? store,
   }) {
     final EdanFoto? foto = fotos.isNotEmpty ? fotos.first : null;
     final lat = foto != null && foto.latitud != 0 ? foto.latitud : coordenadaLat;
@@ -402,6 +561,18 @@ class EdanBotonSacarFoto {
                                     );
                                     if (!ok) return;
                                     Navigator.of(dialogCtx).pop();
+                                    // V2: persiste el borrado (lógico + purga
+                                    // de cola + archivo local).
+                                    if (store != null &&
+                                        foto.uuidFotografia != null) {
+                                      try {
+                                        await store
+                                            .borrarFoto(foto.uuidFotografia!);
+                                      } catch (e) {
+                                        debugPrint(
+                                            '[Foto] Error al borrar: $e');
+                                      }
+                                    }
                                     fotos.clear();
                                     onEliminada?.call();
                                   },
@@ -442,6 +613,13 @@ class EdanBotonSacarFoto {
         );
       }
     }
+    if (EdanBotonSacarFoto._esArchivoLocal(fotografia)) {
+      return Image.file(
+        File(fotografia!),
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) => const _FotoRemotaNoDisponible(),
+      );
+    }
     if (fotografia != null && fotografia.isNotEmpty) {
       return Image.network(
         _fotoUrl(server, fotografia),
@@ -461,6 +639,24 @@ class EdanBotonSacarFoto {
 
   static String _fotoUrl(String server, String path) =>
       '$server/upload/descargar/${Uri.encodeComponent(path)}';
+
+  /// True si [ruta] apunta a un archivo **local existente**.
+  ///
+  /// Algunos modelos guardan la foto indistintamente como ruta local
+  /// (p. ej. `EdanVivienda.fotografia` = "path local o URL servidor") o como
+  /// path/URL del servidor. Se valida la existencia real del archivo —y no sólo
+  /// el formato— porque en iOS el contenedor de la app cambia entre versiones
+  /// de la app/SO y una ruta absoluta almacenada puede quedar obsoleta; en ese
+  /// caso se cae al fallback remoto en vez de mostrar un error de carga.
+  static bool _esArchivoLocal(String? ruta) {
+    if (ruta == null || ruta.isEmpty) return false;
+    if (ruta.contains('://')) return false;
+    try {
+      return File(ruta).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
 
   static Map<String, String> _fotoHeaders() {
     final token = AuthService.instance.currentToken?.accessToken;
@@ -507,6 +703,11 @@ class EdanFotoMiniatura extends StatelessWidget {
   final double? height;
   final VoidCallback? onTap;
 
+  /// Acción de retomar la foto (reemplaza la actual). Cuando se define se
+  /// muestra un botón de refresh superpuesto en la esquina inferior derecha;
+  /// tocar la miniatura sigue abriendo el visor.
+  final VoidCallback? onRetomar;
+
   const EdanFotoMiniatura({
     super.key,
     this.foto,
@@ -514,6 +715,7 @@ class EdanFotoMiniatura extends StatelessWidget {
     this.width,
     this.height,
     this.onTap,
+    this.onRetomar,
   });
 
   @override
@@ -523,6 +725,16 @@ class EdanFotoMiniatura extends StatelessWidget {
     if (ruta.trim().isNotEmpty && File(ruta).existsSync()) {
       contenido = Image.file(
         File(ruta),
+        width: width,
+        height: height,
+        cacheWidth: 480,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => _placeholder(),
+      );
+    } else if (EdanBotonSacarFoto._esArchivoLocal(fotografia)) {
+      // Ruta local guardada directamente en `fotografia` (sin `EdanFoto`).
+      contenido = Image.file(
+        File(fotografia!),
         width: width,
         height: height,
         cacheWidth: 480,
@@ -550,7 +762,34 @@ class EdanFotoMiniatura extends StatelessWidget {
       child: SizedBox(
         width: width,
         height: height,
-        child: contenido,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            contenido,
+            if (onRetomar != null)
+              Positioned(
+                right: 2,
+                bottom: 2,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: onRetomar,
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 1),
+                    ),
+                    child: const Icon(
+                      Icons.refresh,
+                      size: 14,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
 
@@ -591,6 +830,10 @@ class _SheetFoto extends StatefulWidget {
   final String? idSeccion;
   final void Function(double lat, double lon) onCoordenadasCapturadas;
   final void Function(String savedPath)? onFotoGuardada;
+  final EdanStore? store;
+  final String? uuidRegistro;
+  final String? tipoEntidad;
+  final String? rutaSeccion;
 
   const _SheetFoto({
     required this.fotos,
@@ -602,6 +845,10 @@ class _SheetFoto extends StatefulWidget {
     this.idSeccion,
     required this.onCoordenadasCapturadas,
     this.onFotoGuardada,
+    this.store,
+    this.uuidRegistro,
+    this.tipoEntidad,
+    this.rutaSeccion,
   });
 
   @override
@@ -695,6 +942,10 @@ class _SheetFotoState extends State<_SheetFoto> {
         precision: _prec,
         idLocal: widget.idLocal,
         idSeccion: widget.idSeccion,
+        store: widget.store,
+        uuidRegistro: widget.uuidRegistro,
+        tipoEntidad: widget.tipoEntidad,
+        rutaSeccion: widget.rutaSeccion,
       );
       if (!mounted) return false;
       setState(() => _sacando = false);
@@ -734,6 +985,9 @@ class _SheetFotoState extends State<_SheetFoto> {
     if (lat == null || lon == null) return false;
 
     setState(() => _sacando = true);
+    // Etapa 4 (P8): la rama móvil propaga store/uuidRegistro/tipoEntidad
+    // igual que Windows; sin esto la foto quedaba solo en memoria y nunca
+    // se registraba ni encolaba en Android/iOS.
     final ok = await EdanBotonSacarFoto.capturarFoto(
       fotos: widget.fotos,
       latitud: lat,
@@ -741,6 +995,10 @@ class _SheetFotoState extends State<_SheetFoto> {
       precision: _prec,
       idLocal: widget.idLocal,
       idSeccion: widget.idSeccion,
+      store: widget.store,
+      uuidRegistro: widget.uuidRegistro,
+      tipoEntidad: widget.tipoEntidad,
+      rutaSeccion: widget.rutaSeccion,
     );
     if (!mounted) return false;
     setState(() => _sacando = false);

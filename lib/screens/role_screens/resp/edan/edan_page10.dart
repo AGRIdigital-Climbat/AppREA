@@ -13,7 +13,11 @@ import '../../../../providers/reporte_provider.dart';
 class EdanPage10 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage10({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+
+  const EdanPage10({super.key, required this.localidad, this.onCambio});
 
   @override
   State<EdanPage10> createState() => _EdanPage10State();
@@ -27,6 +31,13 @@ class _GrupoControllers {
 }
 
 class _EdanPage10State extends State<EdanPage10> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   final Map<String, _GrupoControllers> _controllers = {};
   final Set<String> _expandidas = {};
 
@@ -41,16 +52,29 @@ class _EdanPage10State extends State<EdanPage10> {
       final catalogo = rp.gruposVulnerables;
       if (catalogo.isNotEmpty) {
         final l = widget.localidad;
-        for (var i = 0; i < l.proteccion.length && i < catalogo.length; i++) {
-          if (l.proteccion[i].idGrupoVulnerableCatalogo == null) {
-            l.proteccion[i].idGrupoVulnerableCatalogo =
-                catalogo[i].idGrupoVulnerable;
-          }
+        // Emparejar por NOMBRE, nunca por índice: el orden del catálogo puede
+        // cambiar entre dispositivos o tras una actualización, y el emparejado
+        // por posición asignaba un `id_grupo_vulnerable` equivocado a cada
+        // grupo.
+        final idPorNombre = <String, int>{
+          for (final c in catalogo) _normNombre(c.nombre): c.idGrupoVulnerable,
+        };
+        for (final g in l.proteccion) {
+          if (g.idGrupoVulnerableCatalogo != null) continue;
+          final nombre = g.nombreGrupo;
+          if (nombre == null || nombre.isEmpty) continue;
+          final id = idPorNombre[_normNombre(nombre)];
+          if (id != null) g.idGrupoVulnerableCatalogo = id;
         }
       }
       if (mounted) setState(() {});
     });
   }
+
+  /// Normaliza un nombre de grupo para comparar sin depender de mayúsculas ni
+  /// espacios dobles.
+  static String _normNombre(String s) =>
+      s.toLowerCase().trim().replaceAll(RegExp(r'\s+'), ' ');
 
   @override
   void dispose() {

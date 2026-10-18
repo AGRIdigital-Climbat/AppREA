@@ -29,7 +29,6 @@ import 'package:flutter/services.dart';
 import '../config/api_config.dart';
 import '../models/edan_borrador_ia.dart';
 import '../services/ai/asistente_voz_service.dart';
-import '../services/database_helper.dart';
 import '../services/edan_ia/edan_extractor.dart';
 import '../services/edan_ia/edan_fusion.dart';
 import '../services/edan_ia/edan_groq_prompt.dart';
@@ -40,6 +39,7 @@ import '../services/edan_ia/edan_salida.dart';
 import '../services/edan_ia/edan_traduccion.dart';
 import '../services/edan_ia/puente_models.dart';
 import '../services/edan_ia/puente_service.dart';
+import '../services/edan/edan_store_v2.dart';
 
 /// Los sonidos del micrófono.
 ///
@@ -227,7 +227,6 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   EdanIaBorradorProvider({
     PuenteService? puente,
     EdanIaVoz? voz,
-    this._db,
   })  : _puente = puente ??
             PuenteService(
               baseUrl: ApiConfig.puenteBaseUrl,
@@ -237,7 +236,6 @@ class EdanIaBorradorProvider extends ChangeNotifier {
 
   final PuenteService _puente;
   final EdanIaVoz _voz;
-  final DatabaseHelper? _db;
 
   EdanBorradorIa _borrador = EdanBorradorIa();
   final List<EdanIaMensaje> _mensajes = [];
@@ -932,12 +930,8 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   /// mostrar y aceptar antes de escribir, y las pruebas no necesitan una base.
   EdanTraduccionResultado prepararGuardado() => traducirBorrador(_borrador);
 
-  /// Traduce y persiste la localidad con sus secciones activas.
-  ///
-  /// El id sale del return de `insertLocalidad`, no del objeto: el helper genera
-  /// el id en la fila y no lo escribe atrás en [EdanLocalidad]. Leerlo del
-  /// objeto después de insertar devolvía `''` y dejaba la UI sin saber qué se
-  /// guardó.
+  /// Traduce y persiste la localidad con sus secciones activas (diseño limpio:
+  /// solo tablas V2 vía `guardarTodo` + registro de fotos en memoria).
   ///
   /// Lanza [EdanPoblacionIncoherente] si un desajuste de población impide
   /// enviar, igual que el wizard no deja mandar una ficha con las sumas
@@ -948,6 +942,8 @@ class EdanIaBorradorProvider extends ChangeNotifier {
   /// paso de fotos: se le pasa esa misma localidad y no se vuelve a traducir.
   /// Sin eso, las fotos y coordenadas se perdían, porque [prepararGuardado] arma
   /// una localidad nueva cada vez y el provider terminaba guardando otra.
+  ///
+  /// Devuelve el `uuid_edan_localidad` persistido.
   Future<String> guardar({
     required int usuarioId,
     EdanTraduccionResultado? preparado,
@@ -959,19 +955,21 @@ class EdanIaBorradorProvider extends ChangeNotifier {
       throw EdanPoblacionIncoherente(bloqueantes);
     }
 
-    final db = _db ?? DatabaseHelper.instance;
     final r = preparado ?? prepararGuardado();
-    final previo = r.localidad.idLocal;
-    final String guardado;
-    if (previo == null || previo.isEmpty) {
-      guardado = await db.insertLocalidad(r.localidad, usuarioId: usuarioId);
-    } else {
-      await db.updateLocalidad(r.localidad);
-      guardado = previo;
-    }
 
-    await db.activarSecciones(guardado, r.seccionesActivas);
-    return guardado;
+    // Diseño limpio (solo RESP/V2): la única persistencia es `guardarTodo`
+    // (cabecera + filas en 1 txn) + registro de fotos en memoria. Sin
+    // escrituras legacy: el listado unificado lee `formularios`.
+    final store = EdanStoreV2.instance;
+    r.localidad.idUsuario = usuarioId;
+    await store.guardarTodo(
+      r.localidad,
+      usuarioId: usuarioId,
+      seccionesActivas: r.seccionesActivas,
+      tipos: r.seccionesActivas,
+    );
+    await store.registrarFotosEnMemoria(r.localidad);
+    return r.localidad.uuidEdanLocalidad ?? r.localidad.idLocal ?? '';
   }
 
   // ---------------------------------------------------------------------------

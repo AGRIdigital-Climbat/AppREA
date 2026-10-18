@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/edan/edan_store.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -25,13 +26,25 @@ const _tipoOtros = 'Otros';
 class EdanPage05 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage05({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+  final EdanStore? store;
+
+  const EdanPage05({super.key, required this.localidad, this.store, this.onCambio});
 
   @override
   State<EdanPage05> createState() => _EdanPage05State();
 }
 
 class _EdanPage05State extends State<EdanPage05> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   final _tramo = TextEditingController();
   final _km = TextEditingController();
   final _nec = TextEditingController();
@@ -55,6 +68,21 @@ class _EdanPage05State extends State<EdanPage05> {
     _obs.dispose();
     super.dispose();
   }
+
+  @override
+  void initState() {
+    super.initState();
+    _hidratarFotos();
+  }
+
+  Future<void> _hidratarFotos() async {
+    final cambio = await EdanBotonSacarFoto.hidratarFotosDeItems(
+      widget.store,
+      [...widget.localidad.danosViales, ...widget.localidad.danosInfraPublica],
+    );
+    if (cambio && mounted) setState(() {});
+  }
+
   void _agregarVial() {
     final v = EdanDanoVial();
     _editarVial(v, esNuevo: true);
@@ -313,9 +341,12 @@ _campoTitulo('Observaciones'),
       tablaSqlite: 'seccion_danos_viales',
       titulo: '¿Eliminar vía o puente?',
       mensaje: 'Se eliminará el registro "${v.viaPuente}".',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = v.idSeccion;
     setState(() => widget.localidad.danosViales.remove(v));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
   }
 
   Future<void> _eliminarInfra(EdanDanoInfraPublica i) async {
@@ -327,12 +358,16 @@ _campoTitulo('Observaciones'),
       tablaSqlite: 'seccion_danos_infra_publica',
       titulo: '¿Eliminar infraestructura?',
       mensaje: 'Se eliminará el registro de daño a infraestructura pública.',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = i.idSeccion;
     setState(() => widget.localidad.danosInfraPublica.remove(i));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
   }
 
   Future<void> _fotoVial(EdanDanoVial v) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(v);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: v.fotos,
@@ -340,19 +375,23 @@ _campoTitulo('Observaciones'),
       lonActual: v.coordenadaLon,
       seccion: 'Vías y puentes',
       idLocal: widget.localidad.idLocal,
-      idSeccion: v.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         v.coordenadaLat = lat;
         v.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => v.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'danos-viales',
     );
     if (!ok || !mounted) return;
     setState(() {});
   }
 
   Future<void> _fotoInfra(EdanDanoInfraPublica i) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(i);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: i.fotos,
@@ -360,13 +399,16 @@ _campoTitulo('Observaciones'),
       lonActual: i.coordenadaLon,
       seccion: 'Infraestructura pública',
       idLocal: widget.localidad.idLocal,
-      idSeccion: i.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => i.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'danos-infra-publica',
     );
     if (!ok || !mounted) return;
     setState(() {});

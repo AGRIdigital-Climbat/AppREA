@@ -1,9 +1,14 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/api/edan_api_v2.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
 import '../../../../services/edan/edan_documento_sync_service.dart';
+import '../../../../services/edan/edan_store.dart';
+import '../../../../services/sync/edan_sync_engine_v2.dart';
 import '../../../../widgets/custom_text_field.dart';
 
 /// Muestra un diálogo de confirmación antes de eliminar un ítem.
@@ -41,6 +46,10 @@ Future<bool> confirmarEliminacion(
 /// Si hay internet, llama a la API DELETE directamente.
 /// Si no hay internet, guarda en `pendientes_eliminar` para el próximo sync.
 /// Muestra SnackBar con el resultado.
+///
+/// Con [store] inyectado (RESP) el borrado va a `filas_seccion` + la cola V2
+/// (`cola_sincronizacion`, acción `D`); sin store se usa el camino legacy
+/// (`seccion_<tabla>` + `pendientes_eliminar`).
 Future<bool> eliminarItemSeccion(
   BuildContext context, {
   required EdanLocalidad localidad,
@@ -49,16 +58,35 @@ Future<bool> eliminarItemSeccion(
   required String tablaSqlite,
   required String titulo,
   required String mensaje,
+  EdanStore? store,
 }) async {
-  if (idSeccion == null || idSeccion.isEmpty) return false;
+  // Ítem NUEVO (aún no guardado): no tiene `idSeccion`, así que no hay nada
+  // que borrar en SQLite ni en el servidor. Antes se devolvía `false` y el
+  // botón de eliminar no servía para nada; ahora se confirma y el llamador
+  // lo quita de la lista en memoria.
+  if (idSeccion == null || idSeccion.isEmpty) {
+    return confirmarEliminacion(context, titulo: titulo, mensaje: mensaje);
+  }
+
   final ok = await confirmarEliminacion(context, titulo: titulo, mensaje: mensaje);
   if (!ok) return false;
 
   final db = DatabaseHelper.instance;
   final idLocal = localidad.idLocal;
+  final uuid = localidad.uuidEdanLocalidad ??
+      (idLocal != null && idLocal.isNotEmpty ? idLocal : null);
+  final esV2 = store != null && uuid != null && uuid.isNotEmpty;
 
   // 1. SQLite DELETE — siempre (el item desaparece de la UI de inmediato)
-  if (idLocal != null) {
+  if (store != null && esV2) {
+    // ── Camino V2 (RESP): filas_seccion + cola_sincronizacion ──
+    try {
+      await store.eliminarFila(rutaV2, idSeccion);
+    } catch (e) {
+      debugPrint('[Eliminar] Error filas_seccion DELETE $idSeccion: $e');
+    }
+  } else if (idLocal != null) {
+    // ── Camino Legacy (UGR/IA): seccion_<tabla> ──
     try {
       await db.eliminarFilaSeccion(tablaSqlite, idSeccion);
     } catch (e) {
@@ -66,10 +94,27 @@ Future<bool> eliminarItemSeccion(
     }
   }
 
-  // 2. Mover el borrado a la cola offline de seguridad y, si hay conexión,
-  //    ejecutarlo en el momento. La cola (procesarColaDeletes) ya distingue
-  //    un 404 (item inexistente en el servidor) y lo descarta como resuelto.
+  // 1b. Purga la foto del ítem (registro de subida pendiente + archivo local)
+  //     para no dejar huérfanos ni subir la foto de un registro ya eliminado.
   if (idLocal != null) {
+    try {
+      final rutas = await db.eliminarFotosDeSeccionV2(idLocal, idSeccion);
+      for (final ruta in rutas) {
+        try {
+          final archivo = File(ruta);
+          if (await archivo.exists()) await archivo.delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('[Eliminar] Error purgando fotos de $idSeccion: $e');
+    }
+  }
+
+  // 2. Cola legacy de seguridad y, si hay conexión, ejecutarlo en el momento.
+  //    Solo para el camino legacy: en V2 el borrado ya quedó encolado como `D`
+  //    dentro de `store.eliminarFila`. La cola (procesarColaDeletes) ya distingue
+  //    un 404 (item inexistente en el servidor) y lo descarta como resuelto.
+  if (!esV2 && idLocal != null) {
     try {
       await db.agregarPendienteEliminar(
         idLocal: idLocal,
@@ -84,11 +129,21 @@ Future<bool> eliminarItemSeccion(
     }
   }
 
-  // 3. Si hay internet, procesar en el momento los deletes en cola
+  // 3. Si hay internet, ejecutar en el momento los deletes en cola
   //    (incluido este). Un 404 se descarta como ya resuelto.
   final conectado = await ConnectivityService().checkNow();
-  if (conectado && idLocal != null) {
-    await EdanDocumentoSyncService().procesarColaDeletes();
+  if (conectado) {
+    if (esV2) {
+      // V2: la fila quedó encolada como `D` en `cola_sincronizacion`; se
+      // propaga al instante por las APIs nuevas (`DELETE /formularios/{uuid}`,
+      // `…/secciones/{tipo}/{uuid_fila}`, `…/viviendas/{uuid}`) sin arrastrar
+      // un `pull` completo.
+      await EdanSyncEngineV2(api: EdanApiV2()).procesarBorrados();
+    } else if (idLocal != null) {
+      // Legacy (UGR/IA): su cola propia `pendientes_eliminar` contra
+      // `DELETE /localidades/{id}/documento`.
+      await EdanDocumentoSyncService().procesarColaDeletes();
+    }
   }
 
   // 4. SnackBar de feedback

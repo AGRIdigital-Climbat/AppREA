@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,8 @@ import 'package:flutter/services.dart';
 
 import '../services/sync_debug_collector.dart';
 import '../services/sync_debug_config.dart';
+import '../services/sync_diagnostico.dart';
+import '../services/api/edan_api_v2.dart';
 
 /// Pantalla de depuración visual de sincronización.
 ///
@@ -21,10 +24,17 @@ class _SyncDebugScreenState extends State<SyncDebugScreen> {
   final ScrollController _scrollController = ScrollController();
   final collector = SyncDebugCollector.instance;
 
+  List<DiagnosticoPendiente>? _diag;
+  bool _diagCargando = false;
+  String? _pruebaApi;
+
   @override
   void initState() {
     super.initState();
     collector.entries.addListener(_onEntriesChanged);
+    // Diagnóstico de pendientes al abrir: dice QUÉ está atascado y POR QUÉ
+    // sin necesidad de haber corrido un sync antes.
+    _diagnosticar();
   }
 
   @override
@@ -50,6 +60,55 @@ class _SyncDebugScreenState extends State<SyncDebugScreen> {
 
   void _clear() {
     collector.clear();
+  }
+
+  /// Lee SQLite y explica cada trabajo pendiente (formularios, cola, fotos
+  /// con su dueña/archivo/backoff, borrados, watermark). Responde "dónde
+  /// está el error" sin adivinar.
+  Future<void> _diagnosticar() async {
+    if (!mounted || _diagCargando) return;
+    setState(() => _diagCargando = true);
+    try {
+      final r = await diagnosticarPendientes();
+      if (mounted) setState(() => _diag = r);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _diag = [
+              DiagnosticoPendiente(
+                  titulo: 'Diagnóstico', motivo: 'Falló: $e', nivel: 'error')
+            ]);
+      }
+    } finally {
+      if (mounted) setState(() => _diagCargando = false);
+    }
+  }
+
+  /// Prueba la API con una llamada ligera: distingue token muerto (401),
+  /// sin red y servidor OK. Es la primera pregunta ante un sync que falla.
+  Future<void> _probarApi() async {
+    if (!mounted) return;
+    setState(() => _pruebaApi = 'Probando...');
+    try {
+      final res = await EdanApiV2()
+          .obtenerEstadosFormularios(limit: 1, todos: false)
+          .timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() {
+        _pruebaApi = res.ok
+            ? 'API OK (${res.statusCode}): token válido, ${res.total ?? '?'} formulario(s) en alcance'
+            : 'API respondió ${res.statusCode}';
+      });
+    } on EdanApiError catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _pruebaApi = e.statusCode == 401
+            ? 'Sesión expirada (401): vuelva a iniciar sesión'
+            : 'API error ${e.statusCode ?? '?'}: ${e.detail}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _pruebaApi = 'Sin conexión o timeout: $e');
+    }
   }
 
   void _exportClipboard() {
@@ -86,51 +145,149 @@ class _SyncDebugScreenState extends State<SyncDebugScreen> {
           ),
         ],
       ),
-      body: entries.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.bug_report, size: 64, color: palette.outline),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Sin datos de depuración',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: palette.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Presiona el botón de sincronizar\npara capturar las llamadas API',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      color: palette.outline,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          : Column(
+      body: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: Row(
               children: [
-                _buildStatsHeader(stats, palette),
                 Expanded(
-                  child: ListView.builder(
-                    controller: _scrollController,
-                    padding: const EdgeInsets.all(8),
-                    itemCount: entries.length,
-                    itemBuilder: (context, index) {
-                      final entry = entries[index];
-                      // Separador de fase
-                      if (entry.metodo.isEmpty) {
-                        return _buildPhaseSeparator(entry, palette);
-                      }
-                      return _ApiEntryCard(entry: entry);
-                    },
+                  child: OutlinedButton.icon(
+                    onPressed: _diagCargando ? null : _diagnosticar,
+                    icon: const Icon(Icons.playlist_add_check_outlined,
+                        size: 18),
+                    label: const Text('Diagnosticar pendientes',
+                        style: TextStyle(fontSize: 12)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _probarApi,
+                    icon: const Icon(Icons.wifi_find_outlined, size: 18),
+                    label: const Text('Probar API',
+                        style: TextStyle(fontSize: 12)),
                   ),
                 ),
               ],
             ),
+          ),
+          if (_pruebaApi != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: palette.surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(_pruebaApi!,
+                    style: const TextStyle(fontSize: 12)),
+              ),
+            ),
+          if (_diagCargando)
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: LinearProgressIndicator(minHeight: 3),
+            ),
+          if (_diag != null && _diag!.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 4, 8, 0),
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: palette.outlineVariant),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: ExpansionTile(
+                  dense: true,
+                  title: Text(
+                    'Diagnóstico de pendientes (${_diag!.length})',
+                    style: const TextStyle(
+                        fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  subtitle: Text(
+                    _diag!.any((d) => d.nivel == 'error')
+                        ? 'Hay errores: revise los rojos'
+                        : 'Sin errores bloqueantes',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  children: [
+                    for (final d in _diag!)
+                      ListTile(
+                        dense: true,
+                        leading: Icon(
+                          d.nivel == 'error'
+                              ? Icons.error_outline
+                              : d.nivel == 'ok'
+                                  ? Icons.check_circle_outline
+                                  : Icons.warning_amber_outlined,
+                          size: 20,
+                          color: d.nivel == 'error'
+                              ? Colors.red
+                              : d.nivel == 'ok'
+                                  ? Colors.green
+                                  : Colors.orange,
+                        ),
+                        title: Text(d.titulo,
+                            style: const TextStyle(fontSize: 12)),
+                        subtitle: Text(d.motivo,
+                            style: const TextStyle(fontSize: 11)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          Expanded(
+            child: entries.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.bug_report,
+                            size: 64, color: palette.outline),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Sin datos de depuración',
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: palette.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Presiona el botón de sincronizar\npara capturar las llamadas API',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: palette.outline,
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                : Column(
+                    children: [
+                      _buildStatsHeader(stats, palette),
+                      Expanded(
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          padding: const EdgeInsets.all(8),
+                          itemCount: entries.length,
+                          itemBuilder: (context, index) {
+                            final entry = entries[index];
+                            // Separador de fase
+                            if (entry.metodo.isEmpty) {
+                              return _buildPhaseSeparator(entry, palette);
+                            }
+                            return _ApiEntryCard(entry: entry);
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
     );
   }
 

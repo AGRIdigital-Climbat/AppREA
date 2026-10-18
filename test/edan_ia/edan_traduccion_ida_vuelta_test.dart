@@ -227,12 +227,12 @@ void main() {
       expect(a.impDanosAgricultura, isTrue);
       expect(a.impProteccion, isTrue);
       expect(a.impNecesidadHumanitaria, isTrue);
-      expect(a.impSalud, isTrue);
-      expect(a.impServicios, isTrue);
-      expect(a.impEducacion, isTrue);
-      expect(a.impVivienda, isTrue);
-      expect(a.impInfraestructura, isTrue);
-      expect(a.impAgropecuario, isTrue);
+      expect(a.grupSalud, isTrue);
+      expect(a.grupServicios, isTrue);
+      expect(a.grupEducacion, isTrue);
+      expect(a.grupVivienda, isTrue);
+      expect(a.grupInfraestructura, isTrue);
+      expect(a.grupAgropecuario, isTrue);
     });
 
     test('no se inventa un id_seccion al deserializar', () {

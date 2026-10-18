@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/edan/edan_store.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -12,13 +13,25 @@ import 'edan_aviso.dart';
 class EdanPage07 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage07({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+  final EdanStore? store;
+
+  const EdanPage07({super.key, required this.localidad, this.store, this.onCambio});
 
   @override
   State<EdanPage07> createState() => _EdanPage07State();
 }
 
 class _EdanPage07State extends State<EdanPage07> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   final _nombre = TextEditingController();
   final _comunidad = TextEditingController();
   final _estudiantes = TextEditingController();
@@ -27,6 +40,20 @@ class _EdanPage07State extends State<EdanPage07> {
   bool _parcial = false;
   bool _total = false;
   bool _suspension = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _hidratarFotos();
+  }
+
+  Future<void> _hidratarFotos() async {
+    final cambio = await EdanBotonSacarFoto.hidratarFotosDeItems(
+      widget.store,
+      widget.localidad.unidadesEducativas,
+    );
+    if (cambio && mounted) setState(() {});
+  }
 
   @override
   void dispose() {
@@ -168,6 +195,7 @@ class _EdanPage07State extends State<EdanPage07> {
   }
 
   Future<void> _foto(EdanDanoUnidadEducativa u) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(u);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: u.fotos,
@@ -175,13 +203,16 @@ class _EdanPage07State extends State<EdanPage07> {
       lonActual: u.coordenadaLon,
       seccion: 'Educación',
       idLocal: widget.localidad.idLocal,
-      idSeccion: u.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         u.coordenadaLat = lat;
         u.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => u.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'unidades-educativas',
     );
     if (!ok || !mounted) return;
     setState(() {});
@@ -196,9 +227,12 @@ class _EdanPage07State extends State<EdanPage07> {
       tablaSqlite: 'seccion_unidades_educativas',
       titulo: '¿Eliminar unidad educativa?',
       mensaje: 'Se eliminará el registro "${u.nombreEstablecimiento}".',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = u.idSeccion;
     setState(() => widget.localidad.unidadesEducativas.remove(u));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
   }
 
   @override

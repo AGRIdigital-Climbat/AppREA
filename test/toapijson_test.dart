@@ -172,7 +172,7 @@ void main() {
   });
 
   group('flags imp_* 1:1 por sección', () {
-    test('toJson emite los 13 flags nuevos', () {
+    test('toJson emite los 14 flags de seccion', () {
       final localidad = EdanLocalidad(
         impImpactoPoblacion: true,
         impSaludEstablecimientos: true,
@@ -206,7 +206,7 @@ void main() {
       expect(json['imp_necesidad_humanitaria'], isTrue);
     });
 
-    test('round-trip fromJson preserva los 13 flags', () {
+    test('round-trip fromJson preserva los 14 flags de seccion', () {
       final json = {
         'id_local': 'test-flags-001',
         'localidad': 'Comunidad Ejemplo',
@@ -271,6 +271,63 @@ void main() {
       expect(localidad.impServiciosBasicos, isFalse);
       expect(localidad.impDanosVivienda, isFalse);
       expect(localidad.impUnidadesEducativas, isFalse);
+    });
+  });
+
+  group('baseline estable (diálogo salir solo con cambios reales)', () {
+    /// Normaliza un JSON quitando recursivamente las claves volátiles
+    /// (fechas automáticas), igual que `_clavesVolatiles` del wizard.
+    dynamic _sinFechas(dynamic valor) {
+      if (valor is Map) {
+        final salida = <String, dynamic>{};
+        valor.forEach((k, v) {
+          if (k == 'fecha_modificacion') return;
+          salida[k.toString()] = _sinFechas(v);
+        });
+        return salida;
+      }
+      if (valor is List) return valor.map(_sinFechas).toList();
+      return valor;
+    }
+
+    EdanLocalidad _nuevaConAgro() => EdanLocalidad(
+          nombre: 'Urubo',
+          idTipoEvento: 5,
+        )
+          ..grupAgropecuario = true
+          ..danosAgricultura = [
+            EdanDanoAgricultura(
+                tipoCultivo: 'Algodón', hectareasAfectadas: 2)
+          ];
+
+    test('recalcularImpDesdeListas es idempotente (sin drift de snapshot)',
+        () {
+      final loc = _nuevaConAgro();
+      loc.recalcularImpDesdeListas();
+      final a = _sinFechas(loc.toApiJson());
+      expect(loc.impDanosAgricultura, isTrue);
+      expect(loc.grupAgropecuario, isTrue,
+          reason: 'imp no gobierna grupos');
+      // Segunda derivación (la que haría un segundo Guardar): idéntico.
+      // (Sin normalizar fechas: `toApiJson` incrusta `now()` en objetos
+      // sin fecha y dos llamadas nunca son byte-iguales; el wizard las
+      // excluye vía `_clavesVolatiles`.)
+      loc.recalcularImpDesdeListas();
+      expect(_sinFechas(loc.toApiJson()), a,
+          reason: 'derivar dos veces no genera falsos "cambios"');
+    });
+
+    test('vaciarSecciones apaga su imp sin tocar otros grupos', () {
+      final loc = _nuevaConAgro()..grupVivienda = true;
+      loc.recalcularImpDesdeListas();
+      expect(loc.impDanosAgricultura, isTrue);
+      loc.vaciarSecciones(['danos-agricultura']);
+      expect(loc.danosAgricultura, isEmpty);
+      loc.recalcularImpDesdeListas();
+      expect(loc.impDanosAgricultura, isFalse);
+      expect(loc.grupAgropecuario, isTrue,
+          reason: 'vaciar datos no destilda el grupo');
+      expect(loc.grupVivienda, isTrue);
     });
   });
 }

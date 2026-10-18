@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/edan/edan_store.dart';
 import 'edan_boton_sacar_foto.dart';
 
 /// Página 06: Impacto en servicios básicos.
@@ -11,7 +12,12 @@ import 'edan_boton_sacar_foto.dart';
 class EdanPage06 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage06({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+  final EdanStore? store;
+
+  const EdanPage06({super.key, required this.localidad, this.store, this.onCambio});
 
   @override
   State<EdanPage06> createState() => _EdanPage06State();
@@ -23,20 +29,61 @@ class _ServicioControllers {
 }
 
 class _EdanPage06State extends State<EdanPage06> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   final Map<String, _ServicioControllers> _controllers = {};
+
+  static const List<String> _catalogoServicios = [
+    'energia_electrica',
+    'agua_potable',
+    'alcantarillado',
+    'gas_domiciliario',
+    'telecomunicaciones',
+  ];
 
   @override
   void initState() {
     super.initState();
-    if (widget.localidad.serviciosBasicos.isEmpty) {
-      widget.localidad.serviciosBasicos.addAll([
-        EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
-        EdanServicioBasicoDetalle(tipo: 'agua_potable'),
-        EdanServicioBasicoDetalle(tipo: 'alcantarillado'),
-        EdanServicioBasicoDetalle(tipo: 'gas_domiciliario'),
-        EdanServicioBasicoDetalle(tipo: 'telecomunicaciones'),
-      ]);
+    final l = widget.localidad;
+    if (l.serviciosBasicos.isEmpty) {
+      l.serviciosBasicos.addAll(
+        _catalogoServicios.map(
+          (t) => EdanServicioBasicoDetalle(tipo: t),
+        ),
+      );
+    } else {
+      // Contrato "solo lo llenado": las filas vacías no se persisten, así que
+      // al reabrir un borrador hidratado `cargarSecciones` trae solo las filas
+      // con datos. Se re-siembran las del catálogo que falten, sin tocar las
+      // existentes (mantienen su uuid y su foto), y se devuelve el orden
+      // canónico del catálogo (la identidad es el uuid/tipo, no la posición).
+      final presentes = l.serviciosBasicos.map((s) => s.tipo).toSet();
+      for (final t in _catalogoServicios) {
+        if (!presentes.contains(t)) {
+          l.serviciosBasicos.add(EdanServicioBasicoDetalle(tipo: t));
+        }
+      }
+      int orden(String t) {
+        final i = _catalogoServicios.indexOf(t);
+        return i < 0 ? _catalogoServicios.length : i;
+      }
+
+      l.serviciosBasicos.sort((a, b) => orden(a.tipo).compareTo(orden(b.tipo)));
     }
+    _hidratarFotos();
+  }
+
+  Future<void> _hidratarFotos() async {
+    final cambio = await EdanBotonSacarFoto.hidratarFotosDeItems(
+      widget.store,
+      widget.localidad.serviciosBasicos,
+    );
+    if (cambio && mounted) setState(() {});
   }
 
   @override
@@ -227,6 +274,7 @@ class _EdanPage06State extends State<EdanPage06> {
                   seccion: 'Servicios básicos',
                   onEliminada: () => setState(() {}),
                 ),
+                onRetomar: () => _foto(s),
               )
             else
               GestureDetector(
@@ -343,6 +391,7 @@ class _EdanPage06State extends State<EdanPage06> {
   }
 
   Future<void> _foto(EdanServicioBasicoDetalle s) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(s);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: s.fotos,
@@ -350,13 +399,16 @@ class _EdanPage06State extends State<EdanPage06> {
       lonActual: s.coordenadaLon,
       seccion: 'Servicios básicos',
       idLocal: widget.localidad.idLocal,
-      idSeccion: s.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         s.coordenadaLat = lat;
         s.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => s.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'servicios-basicos',
     );
     if (!ok || !mounted) return;
     setState(() {});

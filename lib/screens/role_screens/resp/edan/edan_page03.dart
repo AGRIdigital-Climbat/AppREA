@@ -11,7 +11,11 @@ import '../../../../providers/reporte_provider.dart';
 class EdanPage03 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage03({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+
+  const EdanPage03({super.key, required this.localidad, this.onCambio});
 
   @override
   State<EdanPage03> createState() => _EdanPage03State();
@@ -27,6 +31,14 @@ class _GrupoControllers {
 class _EdanPage03State extends State<EdanPage03> {
   final Map<String, _GrupoControllers> _controllers = {};
   final _obsPrimeraRespuesta = TextEditingController();
+
+  /// Toda mutación de datos pasa por `setState` en esta página, así que el
+  /// override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
 
   @override
   void initState() {
@@ -116,7 +128,11 @@ class _EdanPage03State extends State<EdanPage03> {
   @override
   Widget build(BuildContext context) {
     final l = widget.localidad;
-    final necesidad = l.necesidadPrimeraRespuesta!;
+    // `fromJson` deja el objeto en `null` si `necesidad_primera_respuesta` no
+    // era un Map (p.j. un borrador importado con la clave ausente). Antes el
+    // `!` rompía la pantalla al instante; ahora se siembra perezosamente.
+    final necesidad =
+        l.necesidadPrimeraRespuesta ??= EdanNecesidadPrimeraRespuesta();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/edan/edan_store.dart';
 import '../../../../services/edan_ia/edan_slots_foto.dart';
 import 'edan_boton_sacar_foto.dart';
 
@@ -28,10 +29,15 @@ class EdanIaPasoFotosScreen extends StatefulWidget {
   /// Se llama cuando la persona terminó. Recibe la misma localidad.
   final void Function(EdanLocalidad localidad) onListo;
 
+  /// Store V2 para registrar/encolar cada foto al capturarla (Etapa 5). Sin
+  /// esto la foto quedaba solo en memoria y nunca subía.
+  final EdanStore? store;
+
   const EdanIaPasoFotosScreen({
     super.key,
     required this.localidad,
     required this.onListo,
+    this.store,
   });
 
   @override
@@ -91,6 +97,9 @@ class _EdanIaPasoFotosScreenState extends State<EdanIaPasoFotosScreen> {
 
   Future<void> _capturar(EdanSlotFoto slot) async {
     final item = slot.item;
+    // Etapa 5: el uuid nace aquí para que la foto quede registrada con su
+    // dueña definitiva (el guardado posterior la reutiliza, no duplica).
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(item);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: item.fotos,
@@ -106,6 +115,9 @@ class _EdanIaPasoFotosScreenState extends State<EdanIaPasoFotosScreen> {
         item.coordenadaLon = lon;
       },
       onFotoGuardada: (ruta) => item.fotografia = ruta,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: slot.seccion,
     );
     if (ok && mounted) _refrescar();
   }

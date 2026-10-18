@@ -3,18 +3,23 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../config/theme.dart';
 import '../services/auth_service.dart';
+import 'edan_registro_v2.dart';
 import 'id_seccion_helper.dart';
+import '../services/edan/edan_uuid_helper.dart';
 import 'usuario.dart';
 
-/// Resuelve el `id_seccion` de un ítem al deserializar, RESPETANDO el valor
-/// que ya trae (servidor o un guardado previo). Si el ítem no trae id, devuelve
-/// `null`; NUNCA genera uno aquí.
-///
-/// Regla: `id_seccion` se genera ÚNICAMENTE al persistir en `guardarSecciones`
-/// (para ítems nuevos con datos), nunca al parsear/deserializar ni en la capa
-/// visual. Así se evita inventar ids que rompan el UPSERT contra el servidor.
-String? requireIdSeccion(String? id, String prefijo) {
-  if (id != null && id.isNotEmpty) return id;
+/// Identidad de fila al parsear un JSON del servidor o local: prefiere
+/// `uuid_registro` (identidad permanente del contrato v2) y acepta
+/// `id_seccion` SOLO si ya es un uuid válido. Un `id_seccion` legacy con
+/// prefijo (`po_…`, `1k2m…`) se descarta (al persistir nace un uuid fresco;
+/// mandarlo como `uuid_registro` daría 422).
+String? uuidFilaDe(Map<String, dynamic> json) {
+  final u = json['uuid_registro']?.toString();
+  if (u != null && u.isNotEmpty && EdanUuidHelper.esUuidValido(u)) return u;
+  final id = json['id_seccion']?.toString();
+  if (id != null && id.isNotEmpty && EdanUuidHelper.esUuidValido(id)) {
+    return id;
+  }
   return null;
 }
 
@@ -186,7 +191,7 @@ class EdanGrupoEtario {
     final desaparecidos = _toInt(json['desaparecidos']);
     final marcadoJson = json['marcado'];
     return EdanGrupoEtario(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'im'),
+      idSeccion: uuidFilaDe(json),
       rango: _str(json['rango'] ?? json['grupo']),
       fallecidos: fallecidos,
       heridos: heridos,
@@ -274,7 +279,7 @@ class EdanImpactoPoblacion {
   factory EdanImpactoPoblacion.fromJson(Map<String, dynamic> json) {
     final grupos = json['grupos_etarios'] ?? json['gruposEtarios'];
     return EdanImpactoPoblacion(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'im'),
+      idSeccion: uuidFilaDe(json),
       grupoEtario: _str(json['grupo_etario'] ?? json['grupoEtario']),
       fallecidos: _toInt(json['fallecidos']),
       heridos: _toInt(json['heridos']),
@@ -318,6 +323,23 @@ class EdanImpactoPoblacion {
         'grupos_etarios': gruposEtarios.map((g) => g.toJson()).toList(),
       };
 
+  /// JSON para la API: igual que [toJson] pero con `id_grupo_etario`
+  /// resuelto (el servidor exige el set 1-4) y sin la lista anidada
+  /// `grupos_etarios` (cada fila ES un grupo etario).
+  Map<String, dynamic> toApiJson() {
+    final id = EdanGrupoEtario.resolverIdGrupoEtario(grupoEtario);
+    return {
+      'id_seccion': idSeccion,
+      'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
+      if (id != null) 'id_grupo_etario': id,
+      'grupo_etario': grupoEtario,
+      'fallecidos': fallecidos,
+      'heridos': heridos,
+      'desaparecidos': desaparecidos,
+      'observaciones': observaciones,
+    };
+  }
+
   bool get tieneDatosGlobales =>
       fallecidos > 0 || heridos > 0 || desaparecidos > 0;
 }
@@ -345,9 +367,7 @@ class EdanNecesidadPrimeraRespuesta {
       salvamento: _toBool(json['salvamento']),
       evacuacion: _toBool(json['evacuacion']),
       observaciones: _str(json['observaciones']),
-      idSeccion: _str(json['id_seccion']).isEmpty
-          ? null
-          : json['id_seccion'].toString(),
+      idSeccion: uuidFilaDe(json),
       fechaModificacion: _str(json['fecha_modificacion']).isEmpty
           ? (json['fecha_modificacion_local']?.toString())
           : json['fecha_modificacion']?.toString(),
@@ -361,6 +381,16 @@ class EdanNecesidadPrimeraRespuesta {
         'observaciones': observaciones,
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
+      };
+
+  /// JSON para la API (1:1 objeto único).
+  Map<String, dynamic> toApiJson() => {
+        'id_seccion': idSeccion,
+        'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
+        'busqueda': busqueda,
+        'salvamento': salvamento,
+        'evacuacion': evacuacion,
+        'observaciones': observaciones,
       };
 
   bool get algunaSeleccionada => busqueda || salvamento || evacuacion;
@@ -393,12 +423,24 @@ class EdanFoto {
   double precision;
   DateTime fecha;
 
+  // Identidad V2 (fotografias)
+  String? uuidFotografia;
+  String? tipoEntidad;
+  String? uuidRegistro;
+  String? sha256;
+  bool borradoLogico;
+
   EdanFoto({
     this.ruta = '',
     this.latitud = 0,
     this.longitud = 0,
     this.precision = 0,
     DateTime? fecha,
+    this.uuidFotografia,
+    this.tipoEntidad,
+    this.uuidRegistro,
+    this.sha256,
+    this.borradoLogico = false,
   }) : fecha = fecha ?? DateTime.now();
 
   factory EdanFoto.fromJson(Map<String, dynamic> json) {
@@ -408,6 +450,11 @@ class EdanFoto {
       longitud: (json['longitud'] ?? 0).toDouble(),
       precision: (json['precision'] ?? 0).toDouble(),
       fecha: json['fecha'] != null ? DateTime.tryParse(json['fecha']) : null,
+      uuidFotografia: json['uuid_fotografia'] as String?,
+      tipoEntidad: json['tipo_entidad'] as String?,
+      uuidRegistro: json['uuid_registro'] as String?,
+      sha256: json['sha256'] as String?,
+      borradoLogico: json['borrado_logico'] == 1 || json['borrado_logico'] == true,
     );
   }
 
@@ -417,10 +464,16 @@ class EdanFoto {
         'longitud': longitud,
         'precision': precision,
         'fecha': fecha.toIso8601String(),
+        if (uuidFotografia != null) 'uuid_fotografia': uuidFotografia,
+        if (tipoEntidad != null) 'tipo_entidad': tipoEntidad,
+        if (uuidRegistro != null) 'uuid_registro': uuidRegistro,
+        if (sha256 != null) 'sha256': sha256,
+        'borrado_logico': borradoLogico ? 1 : 0,
       };
 }
 
 class EdanEstablecimientoSalud with EdanFotoHolder {
+  @override
   String? idSeccion;
   String nombreEstablecimiento;
   String comunidad;
@@ -459,7 +512,7 @@ class EdanEstablecimientoSalud with EdanFotoHolder {
   factory EdanEstablecimientoSalud.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
     return EdanEstablecimientoSalud(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'es'),
+      idSeccion: uuidFilaDe(json),
       nombreEstablecimiento: _str(json['nombre_establecimiento'] ??
           json['nombreEstablecimiento']),
       comunidad: _str(json['comunidad']),
@@ -499,10 +552,13 @@ class EdanEstablecimientoSalud with EdanFotoHolder {
 
   /// Serialización alineada al schema EstablecimientoSalud de la API.
   ///
-  /// `toApiJson()` es el payload de `/documento` (la vía real de subida, la usa
-  /// el botón Sincronizar), por eso SÍ lleva `fotografia`. Si el valor es un
-  /// path local, `construirDocumento` lo sube y lo reemplaza por `/uploads/...`;
-  /// si ya es un path del servidor, lo conserva y no lo vuelve a subir.
+  /// `toApiJson()` es la forma que acepta el servidor: por eso SÍ lleva
+  /// `fotografia` (path) y `uuid_registro`/`id_seccion`. Es el JSON que guarda
+  /// `filas_seccion.datos_json` y el que viaja en
+  /// `POST /api/v2/edan/formularios/completo`. Si el valor es un path local, la
+  /// foto se sube aparte con `POST /api/v2/edan/fotografias` (el binario nunca
+  /// va en el documento); `EdanSeccionesFuente` omite del payload cualquier
+  /// path local para no mandar una ruta inválida.
   Map<String, dynamic> toApiJson() => {
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
@@ -552,9 +608,7 @@ class EdanNecesidadSalud {
           json['atencionInmediata']),
       otrasNecesidades: _str(json['otras_necesidades'] ?? json['otrasNecesidades']),
       observaciones: _str(json['observaciones']),
-      idSeccion: _str(json['id_seccion']).isEmpty
-          ? null
-          : json['id_seccion'].toString(),
+      idSeccion: uuidFilaDe(json),
       fechaModificacion: _str(json['fecha_modificacion']).isEmpty
           ? (json['fecha_modificacion_local']?.toString())
           : json['fecha_modificacion']?.toString(),
@@ -605,6 +659,7 @@ class EdanNecesidadSalud {
 }
 
 class EdanDanoVial with EdanFotoHolder {
+  @override
   String? idSeccion;
   String viaPuente;
   String tramo;
@@ -655,7 +710,7 @@ class EdanDanoVial with EdanFotoHolder {
       viaPuente = '';
     }    final fotosRaw = json['fotos'];
     return EdanDanoVial(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'dv'),
+      idSeccion: uuidFilaDe(json),
       viaPuente: viaPuente,
       tramo: _str(json['tramo']),
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
@@ -722,6 +777,7 @@ class EdanDanoVial with EdanFotoHolder {
 }
 
 class EdanDanoInfraPublica with EdanFotoHolder {
+  @override
   String? idSeccion;
   String comunidad;
   String tipoEstructura;
@@ -754,7 +810,7 @@ class EdanDanoInfraPublica with EdanFotoHolder {
   factory EdanDanoInfraPublica.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
     return EdanDanoInfraPublica(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'di'),
+      idSeccion: uuidFilaDe(json),
       comunidad: _str(json['comunidad']),
       tipoEstructura: _str(json['tipo_estructura'] ?? json['tipoEstructura']),
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
@@ -806,6 +862,7 @@ class EdanDanoInfraPublica with EdanFotoHolder {
 }
 
 class EdanServicioBasicoDetalle with EdanFotoHolder {
+  @override
   String? idSeccion;
   String tipo;
   bool afectado;
@@ -840,7 +897,7 @@ class EdanServicioBasicoDetalle with EdanFotoHolder {
   factory EdanServicioBasicoDetalle.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
     return EdanServicioBasicoDetalle(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'sb'),
+      idSeccion: uuidFilaDe(json),
       tipo: _str(json['tipo']),
       afectado: _toBool(json['afectado'] ?? json['impactado']),
       danoParcial: _toBool(json['dano_parcial'] ?? json['danoParcial']),
@@ -989,6 +1046,7 @@ class EdanDanoServicioBasico {
 }
 
 class EdanDanoUnidadEducativa with EdanFotoHolder {
+  @override
   String? idSeccion;
   String nombreEstablecimiento;
   String comunidad;
@@ -1033,7 +1091,7 @@ class EdanDanoUnidadEducativa with EdanFotoHolder {
   factory EdanDanoUnidadEducativa.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
     return EdanDanoUnidadEducativa(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'ue'),
+      idSeccion: uuidFilaDe(json),
       nombreEstablecimiento: _str(json['nombre_establecimiento'] ??
           json['nombreEstablecimiento']),
       comunidad: _str(json['comunidad']),
@@ -1115,6 +1173,7 @@ class EdanDanoUnidadEducativa with EdanFotoHolder {
 }
 
 class EdanDanoVivienda with EdanFotoHolder {
+  @override
   String? idSeccion;
   String comunidad;
   int danoParcial;
@@ -1122,6 +1181,9 @@ class EdanDanoVivienda with EdanFotoHolder {
   String necesidadesInmediatas;
   String observaciones;
   List<EdanFoto> fotos;
+  /// Detalle 1:N por vivienda (Fase 6). Cuando no está vacío, los contadores
+  /// `dano_total`/`dano_parcial` se derivan de [viviendasTotal]/[viviendasParcial].
+  List<EdanVivienda> viviendas;
   @override
   String? fotografia;
   @override
@@ -1129,6 +1191,12 @@ class EdanDanoVivienda with EdanFotoHolder {
   @override
   double coordenadaLon;
   String? fechaModificacion;
+
+  /// Transitorio (no se serializa): `true` cuando [viviendas] se cargó desde
+  /// SQLite vía `cargarSecciones`. Sirve de guarda en `_sincronizarViviendasDeFila`
+  /// para no derivar BORRADOS del servidor cuando el modelo simplemente no
+  /// trae el 1:N porque el borrador es anterior a la tabla `viviendas`.
+  bool viviendasCargadas = false;
 
   EdanDanoVivienda({
     this.idSeccion,
@@ -1138,16 +1206,27 @@ class EdanDanoVivienda with EdanFotoHolder {
     this.necesidadesInmediatas = '',
     this.observaciones = '',
     List<EdanFoto>? fotos,
+    List<EdanVivienda>? viviendas,
     this.fotografia,
     this.coordenadaLat = 0,
     this.coordenadaLon = 0,
     this.fechaModificacion,
-  }) : fotos = fotos ?? [];
+  })  : fotos = fotos ?? [],
+        viviendas = viviendas ?? [];
+
+  /// Conteo derivado de viviendas con daño TOTAL.
+  int get viviendasTotal =>
+      viviendas.where((v) => v.tipoDano == EdanViviendaTipo.total).length;
+
+  /// Conteo derivado de viviendas con daño PARCIAL.
+  int get viviendasParcial =>
+      viviendas.where((v) => v.tipoDano == EdanViviendaTipo.parcial).length;
 
   factory EdanDanoVivienda.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
+    final viviendasRaw = json['viviendas'];
     return EdanDanoVivienda(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'dv'),
+      idSeccion: uuidFilaDe(json),
       comunidad: _str(json['comunidad']),
       danoParcial: _toInt(json['dano_parcial'] ?? json['danoParcial']),
       danoTotal: _toInt(json['dano_total'] ?? json['danoTotal']),
@@ -1156,6 +1235,12 @@ class EdanDanoVivienda with EdanFotoHolder {
       observaciones: _str(json['observaciones']),
       fotos: fotosRaw is List
           ? fotosRaw.map((f) => EdanFoto.fromJson(f is Map ? Map<String, dynamic>.from(f) : {})).toList()
+          : [],
+      viviendas: viviendasRaw is List
+          ? viviendasRaw
+              .map((v) => EdanVivienda.fromJson(
+                  v is Map ? Map<String, dynamic>.from(v) : {}))
+              .toList()
           : [],
       fotografia: json['fotografia'],
       coordenadaLat: _toDouble(json['coordenada_lat'] ?? json['coordenadaLat']),
@@ -1174,6 +1259,7 @@ class EdanDanoVivienda with EdanFotoHolder {
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
         'fotos': fotos.map((f) => f.toJson()).toList(),
+        'viviendas': viviendas.map((v) => v.toJson()).toList(),
         'fotografia': fotografia,
         'coordenada_lat': coordenadaLat,
         'coordenada_lon': coordenadaLon,
@@ -1183,8 +1269,10 @@ class EdanDanoVivienda with EdanFotoHolder {
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
         'comunidad': comunidad,
-        'dano_parcial': danoParcial,
-        'dano_total': danoTotal,
+        // Con detalle 1:N los contadores se derivan de las viviendas (§6);
+        // sin él se conservan los valores manuales.
+        'dano_parcial': viviendas.isNotEmpty ? viviendasParcial : danoParcial,
+        'dano_total': viviendas.isNotEmpty ? viviendasTotal : danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
         'observaciones': observaciones,
         'fotografia': fotografia,
@@ -1200,6 +1288,7 @@ class EdanDanoVivienda with EdanFotoHolder {
 }
 
 class EdanDanoAgricultura with EdanFotoHolder {
+  @override
   String? idSeccion;
   int? idCultivo;
   String tipoCultivo;
@@ -1234,7 +1323,7 @@ class EdanDanoAgricultura with EdanFotoHolder {
   factory EdanDanoAgricultura.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
     return EdanDanoAgricultura(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'da'),
+      idSeccion: uuidFilaDe(json),
       idCultivo: _jsonIntFk(json['id_cultivo']),
       tipoCultivo: _str(json['tipo_cultivo'] ?? json['tipoCultivo'] ??
           (json['cultivo'] is Map ? json['cultivo']['nombre'] : null)),
@@ -1291,6 +1380,7 @@ class EdanDanoAgricultura with EdanFotoHolder {
 }
 
 class EdanDanoPecuario with EdanFotoHolder {
+  @override
   String? idSeccion;
   int? idEspecie;
   String especie;
@@ -1327,7 +1417,7 @@ class EdanDanoPecuario with EdanFotoHolder {
   factory EdanDanoPecuario.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
     return EdanDanoPecuario(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'dp'),
+      idSeccion: uuidFilaDe(json),
       idEspecie: _jsonIntFk(json['id_especie']),
       especie: json['especie'] is Map
           ? _str(json['especie']['nombre'])
@@ -1389,6 +1479,7 @@ class EdanDanoPecuario with EdanFotoHolder {
 }
 
 class EdanInfraProductiva with EdanFotoHolder {
+  @override
   String? idSeccion;
   String tipo;
   int danoParcial;
@@ -1418,7 +1509,7 @@ class EdanInfraProductiva with EdanFotoHolder {
     int count(dynamic v) => v is bool ? (v ? 1 : 0) : _toInt(v);
     final fotosRaw = json['fotos'];
     return EdanInfraProductiva(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'ip'),
+      idSeccion: uuidFilaDe(json),
       tipo: _str(json['tipo']),
       danoParcial: count(json['dano_parcial'] ?? json['danoParcial']),
       danoTotal: count(json['dano_total'] ?? json['danoTotal']),
@@ -1488,6 +1579,29 @@ class EdanGrupoVulnerable {
 
   int get total => mujeres + hombres;
 
+  /// id del catálogo v2 (`edan.grupo_vulnerable`): el explícito del catálogo/
+  /// servidor o, para los defaults offline de `_proteccionPorDefecto` (que
+  /// solo traen nombre), resuelto por el nombre canónico — espejo de
+  /// `EdanGrupoEtario.idGrupoEtario`. Sin id la fila es invisible para el set
+  /// exacto de 8 y el motor la descarta (§20.10.E).
+  int? get idGrupoVulnerable =>
+      idGrupoVulnerableCatalogo ?? resolverIdGrupoVulnerable(nombreGrupo);
+
+  static int? resolverIdGrupoVulnerable(String? nombre) {
+    if (nombre == null || nombre.isEmpty) return null;
+    final n = nombre.toLowerCase();
+    if (n.contains('0-5')) return 1;
+    if (n.contains('6-12')) return 2;
+    if (n.contains('adolescente')) return 3;
+    if (n.contains('lactante')) return 4;
+    if (n.contains('embarazada')) return 5;
+    if (n.contains('mayores')) return 6;
+    if (n.contains('discapacidad')) return 7;
+    if (n.contains('crónica') || n.contains('cronica') ||
+        n.contains('enfermedad')) return 8;
+    return null;
+  }
+
   bool get tieneDatos =>
       mujeres > 0 ||
       hombres > 0 ||
@@ -1503,7 +1617,7 @@ class EdanGrupoVulnerable {
     }
     nombreGrupo ??= json['nombre_grupo']?.toString();
     return EdanGrupoVulnerable(
-      idSeccion: requireIdSeccion(json['id_seccion']?.toString(), 'po'),
+      idSeccion: uuidFilaDe(json),
       idGrupoVulnerableCatalogo: _jsonIntFk(json['id_grupo_vulnerable_catalogo']) ??
           (grupoRaw is Map ? _jsonIntFk(grupoRaw['id']) : null),
       nombreGrupo: nombreGrupo,
@@ -1527,7 +1641,7 @@ class EdanGrupoVulnerable {
   Map<String, dynamic> toJson() => {
         'id_seccion': idSeccion,
         if (nombreGrupo != null) 'nombre_grupo': nombreGrupo,
-        'id_grupo_vulnerable_catalogo': idGrupoVulnerableCatalogo,
+        'id_grupo_vulnerable_catalogo': idGrupoVulnerable,
         'mujeres': mujeres,
         'hombres': hombres,
         'apoyo_psicologico': apoyoPsicologico,
@@ -1537,12 +1651,12 @@ class EdanGrupoVulnerable {
 
   /// Serialización alineada al schema GrupoVulnerable de la API: envía
   /// id_grupo_vulnerable (FK local) + id_grupo_vulnerable_catalogo (FK catálogo).
-  Map<String, dynamic> toApiJson(Map<String, dynamic>? grupoCatalogo) => {
+  Map<String, dynamic> toApiJson([Map<String, dynamic>? grupoCatalogo]) => {
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
-        'id_grupo_vulnerable': idGrupoVulnerableCatalogo,
-        if (idGrupoVulnerableCatalogo != null)
-          'id_grupo_vulnerable_catalogo': idGrupoVulnerableCatalogo,
+        'id_grupo_vulnerable': idGrupoVulnerable,
+        if (idGrupoVulnerable != null)
+          'id_grupo_vulnerable_catalogo': idGrupoVulnerable,
         if (grupoCatalogo != null) 'grupo': grupoCatalogo,
         'mujeres': mujeres,
         'hombres': hombres,
@@ -1710,9 +1824,7 @@ class EdanNecesidadHumanitaria {
       obsHerramientas: _str(json['obs_herramientas']),
       obsAlmacenamientoAgua: _str(json['obs_almacenamiento_agua'] ?? json['obsAlmacenamientoAgua']),
       obsBanos: _str(json['obs_banos']),
-      idSeccion: _str(json['id_seccion']).isEmpty
-          ? null
-          : json['id_seccion'].toString(),
+      idSeccion: uuidFilaDe(json),
       fechaModificacion: _str(json['fecha_modificacion']).isEmpty
           ? (json['fecha_modificacion_local']?.toString())
           : json['fecha_modificacion']?.toString(),
@@ -1763,6 +1875,9 @@ class EdanNecesidadHumanitaria {
         EdanLocalidad.toBoliviaIso(fechaModificacion);
     return json;
   }
+
+  /// JSON para la API (1:1 objeto único): misma forma que [toJson].
+  Map<String, dynamic> toApiJson() => toJson();
 
   bool get algunaSeleccionada =>
       alimentos ||
@@ -1860,7 +1975,15 @@ class EdanLocalidad {
   bool pendienteEliminacion;
   bool pendienteActualizacion;
   bool editado;
+
+  /// "Enviar" pulsado sin confirmación del servidor (`pending_submit=1` en
+  /// SQLite): la fila se sincronizará con `estado_destino`. Solo informativo
+  /// local; NUNCA viaja al servidor (el payload se arma desde la fila DB).
+  bool envioPendiente;
   String? fechaModificacion;
+
+  // Identidad V2 (UUID permanente de vida del formulario/localidad)
+  String? uuidEdanLocalidad;
 
   // Campos básicos
   String tipoLocalidad;
@@ -1887,18 +2010,26 @@ class EdanLocalidad {
   EdanResponsable? responsable;
   Usuario? usuario;
 
-  // Flags de impacto
-  bool impPoblacion;
-  bool impSalud;
-  bool impInfraestructura;
-  bool impServicios;
-  bool impEducacion;
-  bool impVivienda;
-  bool impAgropecuario;
-  bool impProteccion;
-  bool impNecesidades;
+  // Flags de GRUPO (los 9 `grup_*` del contrato, §20.2): son los checkboxes de
+  // page01. NUNCA viajan en `POST /completo` (el servidor los deriva) y en el
+  // `GET /completo` llegan anidados en el nodo `grupos`.
+  bool grupPoblacion;
+  bool grupSalud;
+  bool grupInfraestructura;
+  bool grupServicios;
+  bool grupEducacion;
+  bool grupVivienda;
+  bool grupAgropecuario;
+  bool grupProteccion;
+  bool grupNecesidades;
+
+  // Flags de SECCIÓN (las 14 `imp_*`, §20.1): una por sección, son las
+  // obligatorias del payload `/completo`. `impProteccion` era antes la misma
+  // variable que el grupo Protección; ahora están separados.
   bool impImpactoPoblacion;
+  bool impPrimeraRespuesta;
   bool impSaludEstablecimientos;
+  bool impNecesidadSalud;
   bool impDanosViales;
   bool impDanosInfraPublica;
   bool impServiciosBasicos;
@@ -1907,8 +2038,7 @@ class EdanLocalidad {
   bool impDanosAgricultura;
   bool impDanosPecuarios;
   bool impInfraProductiva;
-  bool impPrimeraRespuesta;
-  bool impNecesidadSalud;
+  bool impProteccion;
   bool impNecesidadHumanitaria;
 
   // Secciones como LISTAS (schema API v1.3.0)
@@ -1979,7 +2109,9 @@ class EdanLocalidad {
     this.pendienteEliminacion = false,
     this.pendienteActualizacion = false,
     this.editado = false,
+    this.envioPendiente = false,
     this.fechaModificacion,
+    this.uuidEdanLocalidad,
     this.tipoLocalidad = '',
     this.nombre = '',
     this.idTipoLocalidad,
@@ -2001,17 +2133,19 @@ class EdanLocalidad {
     this.tipoEventoNombre,
     EdanResponsable? responsable,
     this.usuario,
-    this.impPoblacion = false,
-    this.impSalud = false,
-    this.impInfraestructura = false,
-    this.impServicios = false,
-    this.impEducacion = false,
-    this.impVivienda = false,
-    this.impAgropecuario = false,
-    this.impProteccion = false,
-    this.impNecesidades = false,
+    this.grupPoblacion = false,
+    this.grupSalud = false,
+    this.grupInfraestructura = false,
+    this.grupServicios = false,
+    this.grupEducacion = false,
+    this.grupVivienda = false,
+    this.grupAgropecuario = false,
+    this.grupProteccion = false,
+    this.grupNecesidades = false,
     this.impImpactoPoblacion = false,
+    this.impPrimeraRespuesta = false,
     this.impSaludEstablecimientos = false,
+    this.impNecesidadSalud = false,
     this.impDanosViales = false,
     this.impDanosInfraPublica = false,
     this.impServiciosBasicos = false,
@@ -2020,8 +2154,7 @@ class EdanLocalidad {
     this.impDanosAgricultura = false,
     this.impDanosPecuarios = false,
     this.impInfraProductiva = false,
-    this.impPrimeraRespuesta = false,
-    this.impNecesidadSalud = false,
+    this.impProteccion = false,
     this.impNecesidadHumanitaria = false,
     List<EdanImpactoPoblacion>? impactoPoblacion,
     EdanNecesidadPrimeraRespuesta? necesidadPrimeraRespuesta,
@@ -2068,6 +2201,24 @@ class EdanLocalidad {
       return <T>[];
     }
 
+    /// `danos_vivienda` es **1:1 en el servidor** (objeto único con
+    /// `viviendas[]` anidadas) pero **1:N en la app** (lista de daños). Esta
+    /// lectura tolera ambas formas: el objeto de `GET /formularios/{uuid}/
+    /// completo` y la lista que produce `toJson()` propio. Sin esto, un
+    /// documento bajado del servidor perdía sus viviendas al reabrirlo.
+    List<T> parseObjetoOLista<T>(
+        dynamic value, T Function(Map<String, dynamic>) parser) {
+      if (value is Map) return [parser(Map<String, dynamic>.from(value))];
+      return parseList<T>(value, parser);
+    }
+
+    // Nodo `grupos` del `GET /completo` (los 9 `grup_*` anidados) frente al
+    // `toJson` propio (los escribe planos en la raíz). `grup()` lee de ambos.
+    final gruposAnidados = json['grupos'] is Map
+        ? Map<String, dynamic>.from(json['grupos'] as Map)
+        : const <String, dynamic>{};
+    bool grup(String clave) => _toBool(gruposAnidados[clave] ?? json[clave]);
+
     // Parse impacto_poblacion como LISTA (API v1.3.0)
     List<EdanImpactoPoblacion> impactoPoblacion;
     if (json['impacto_poblacion'] is List) {
@@ -2079,18 +2230,26 @@ class EdanLocalidad {
       impactoPoblacion = [];
     }
 
-    // Parse servicios_basicos como LISTA (API v1.3.0)
+    // Parse servicios_basicos como LISTA (API v1.3.0), tolerando objeto único
+    // (el modo comprimido devuelve una sola fila como Map).
     List<EdanServicioBasicoDetalle> serviciosBasicos;
     if (json['servicios_basicos'] is List) {
       serviciosBasicos = parseList(json['servicios_basicos'], EdanServicioBasicoDetalle.fromJson);
+    } else if (json['servicios_basicos'] is Map) {
+      serviciosBasicos = [EdanServicioBasicoDetalle.fromJson(
+          Map<String, dynamic>.from(json['servicios_basicos'] as Map))];
     } else {
       serviciosBasicos = [];
     }
 
-    // Parse proteccion como LISTA de EdanGrupoVulnerable (API v1.3.0)
+    // Parse proteccion como LISTA de EdanGrupoVulnerable (API v1.3.0),
+    // tolerando objeto único igual que las demás 1:N.
     List<EdanGrupoVulnerable> proteccion;
     if (json['proteccion'] is List) {
       proteccion = parseList(json['proteccion'], EdanGrupoVulnerable.fromJson);
+    } else if (json['proteccion'] is Map) {
+      proteccion = [EdanGrupoVulnerable.fromJson(
+          Map<String, dynamic>.from(json['proteccion'] as Map))];
     } else {
       proteccion = [];
     }
@@ -2133,7 +2292,10 @@ class EdanLocalidad {
       sincronizado: _toBool(json['sincronizado']),
       pendienteEliminacion: _toBool(json['pendiente_eliminacion']),
       pendienteActualizacion: _toBool(json['pendiente_actualizacion']),
+      envioPendiente: _toBool(json['envio_pendiente']),
       fechaModificacion: json['fecha_modificacion'],
+      uuidEdanLocalidad: json['uuid_edan_localidad'] as String? ??
+          json['uuidEdanLocalidad'] as String?,
       tipoLocalidad: _str(_parseTipoLocalidad(json['tipo_localidad']) ??
           json['tipoLocalidad']),
       idTipoLocalidad: _jsonIntFk(json['id_tipo_localidad']),
@@ -2173,17 +2335,24 @@ class EdanLocalidad {
                 )
               : null),
       usuario: _parseUsuario(json['usuario']),
-      impPoblacion: _toBool(json['imp_poblacion']),
-      impSalud: _toBool(json['imp_salud']),
-      impInfraestructura: _toBool(json['imp_infraestructura']),
-      impServicios: _toBool(json['imp_servicios']),
-      impEducacion: _toBool(json['imp_educacion']),
-      impVivienda: _toBool(json['imp_vivienda']),
-      impAgropecuario: _toBool(json['imp_agropecuario']),
-      impProteccion: _toBool(json['imp_proteccion']),
-      impNecesidades: _toBool(json['imp_necesidades']),
+      // GRUPOS (9 `grup_*`): el `GET /formularios/{uuid}/completo` los trae
+      // ANIDADOS en el nodo `grupos`; el `toJson` propio los escribe planos. Se
+      // aceptan ambas formas para que el mismo parser sirva para la respuesta
+      // del servidor y para `datos_json`.
+      grupPoblacion: grup('grup_poblacion'),
+      grupSalud: grup('grup_salud'),
+      grupInfraestructura: grup('grup_infraestructura'),
+      grupServicios: grup('grup_servicios'),
+      grupEducacion: grup('grup_educacion'),
+      grupVivienda: grup('grup_vivienda'),
+      grupAgropecuario: grup('grup_agropecuario'),
+      grupProteccion: grup('grup_proteccion'),
+      grupNecesidades: grup('grup_necesidades'),
+      // SECCIONES (14 `imp_*`): siempre planas, en el documento y en `/completo`.
       impImpactoPoblacion: _toBool(json['imp_impacto_poblacion']),
+      impPrimeraRespuesta: _toBool(json['imp_primera_respuesta']),
       impSaludEstablecimientos: _toBool(json['imp_salud_establecimientos']),
+      impNecesidadSalud: _toBool(json['imp_necesidad_salud']),
       impDanosViales: _toBool(json['imp_danos_viales']),
       impDanosInfraPublica: _toBool(json['imp_danos_infra_publica']),
       impServiciosBasicos: _toBool(json['imp_servicios_basicos']),
@@ -2192,32 +2361,34 @@ class EdanLocalidad {
       impDanosAgricultura: _toBool(json['imp_danos_agricultura']),
       impDanosPecuarios: _toBool(json['imp_danos_pecuarios']),
       impInfraProductiva: _toBool(json['imp_infra_productiva']),
-      impPrimeraRespuesta: _toBool(json['imp_primera_respuesta']),
-      impNecesidadSalud: _toBool(json['imp_necesidad_salud']),
+      impProteccion: _toBool(json['imp_proteccion']),
       impNecesidadHumanitaria: _toBool(json['imp_necesidad_humanitaria']),
       impactoPoblacion: impactoPoblacion,
       necesidadPrimeraRespuesta: json['necesidad_primera_respuesta'] is Map
           ? EdanNecesidadPrimeraRespuesta.fromJson(
               Map<String, dynamic>.from(json['necesidad_primera_respuesta'] as Map))
           : null,
-      establecimientosSalud: parseList(
+      establecimientosSalud: parseObjetoOLista(
           json['establecimientos_salud'], EdanEstablecimientoSalud.fromJson),
       necesidadSalud: json['necesidad_salud'] is Map
           ? EdanNecesidadSalud.fromJson(
               Map<String, dynamic>.from(json['necesidad_salud'] as Map))
           : null,
-      danosViales: parseList(json['danos_viales'], EdanDanoVial.fromJson),
-      danosInfraPublica:
-          parseList(json['danos_infra_publica'], EdanDanoInfraPublica.fromJson),
+      danosViales:
+          parseObjetoOLista(json['danos_viales'], EdanDanoVial.fromJson),
+      danosInfraPublica: parseObjetoOLista(
+          json['danos_infra_publica'], EdanDanoInfraPublica.fromJson),
       serviciosBasicos: serviciosBasicos,
-      unidadesEducativas:
-          parseList(json['unidades_educativas'], EdanDanoUnidadEducativa.fromJson),
-      danosVivienda: parseList(json['danos_vivienda'], EdanDanoVivienda.fromJson),
-      danosAgricultura:
-          parseList(json['danos_agricultura'], EdanDanoAgricultura.fromJson),
-      danosPecuarios: parseList(json['danos_pecuarios'], EdanDanoPecuario.fromJson),
-      infraProductiva:
-          parseList(json['infra_productiva'], EdanInfraProductiva.fromJson),
+      unidadesEducativas: parseObjetoOLista(
+          json['unidades_educativas'], EdanDanoUnidadEducativa.fromJson),
+       danosVivienda:
+          parseObjetoOLista(json['danos_vivienda'], EdanDanoVivienda.fromJson),
+      danosAgricultura: parseObjetoOLista(
+          json['danos_agricultura'], EdanDanoAgricultura.fromJson),
+      danosPecuarios: parseObjetoOLista(
+          json['danos_pecuarios'], EdanDanoPecuario.fromJson),
+      infraProductiva: parseObjetoOLista(
+          json['infra_productiva'], EdanInfraProductiva.fromJson),
       proteccion: proteccion,
       necesidadHumanitaria: json['necesidad_humanitaria'] is Map
           ? EdanNecesidadHumanitaria.fromJson(
@@ -2232,7 +2403,12 @@ class EdanLocalidad {
   /// Recalcula los flags 1:1 de impacto según los datos reales cargados en las
   /// secciones (espejo local del `_marcar_impacto` del backend). Se invoca
   /// antes de persistir para que el flag refleje el estado tras editar.
-  void recalcularFlagsImpacto() {
+  /// Deriva ÚNICAMENTE los 14 `imp_*` desde las listas en memoria
+  /// (`imp` true ⟺ la sección tiene datos AHORA). A diferencia de
+  /// [recalcularFlagsImpacto], NO toca los 9 `grup_*`: en el formulario el
+  /// grupo manda (page01) y solo se deriva el detalle. Usado por el resumen,
+  /// el guardado y el envío para que `imp` refleje los datos del momento.
+  void recalcularImpDesdeListas() {
     impImpactoPoblacion = impactoPoblacion.any((i) =>
         i.fallecidos > 0 || i.heridos > 0 || i.desaparecidos > 0);
     impSaludEstablecimientos = establecimientosSalud.any((e) =>
@@ -2339,20 +2515,88 @@ class EdanLocalidad {
         (necesidadSalud?.tieneDatos ?? false);
     impNecesidadHumanitaria =
         (necesidadHumanitaria?.tieneDatos ?? false);
-
-    // Flags "gruesos": derivados de los datos reales para que la vista y los
-    // avisos de sección del preview sean consistentes con el contenido
-    // (se alinean con los criterios que usan los renderers).
-    impPoblacion = impImpactoPoblacion || impPrimeraRespuesta;
-    impSalud = impSaludEstablecimientos || impNecesidadSalud;
-    impInfraestructura = impDanosViales || impDanosInfraPublica;
-    impServicios = impServiciosBasicos;
-    impEducacion = impUnidadesEducativas;
-    impVivienda = impDanosVivienda;
-    impAgropecuario =
-        impDanosAgricultura || impDanosPecuarios || impInfraProductiva;
     impProteccion = proteccion.any((g) => g.tieneDatos);
-    impNecesidades = impNecesidadHumanitaria;
+
+    // Los grupos NO se tocan aquí (los gobierna page01 / el servidor).
+  }
+
+  void recalcularFlagsImpacto() {
+    recalcularImpDesdeListas();
+    recalcularGruposDesdeImpacto();
+  }
+
+  /// Vacía en memoria las secciones de [rutas] (rutas v2 con guion).
+  /// Se usa al destildar un grupo en page01: como el grupo manda y sus filas
+  /// ya no van al servidor, el modelo no debe conservarlas (el próximo
+  /// guardado las persistiría de nuevo). 1:1 → null, 1:N → lista vacía.
+  /// No toca flags: el llamador gobierna `grup` (page01) e `imp` se re-deriva.
+  void vaciarSecciones(Iterable<String> rutas) {
+    for (final ruta in rutas) {
+      switch (ruta) {
+        case 'impacto-poblacion':
+          impactoPoblacion = [];
+          break;
+        case 'primera-respuesta':
+          necesidadPrimeraRespuesta = null;
+          break;
+        case 'salud-establecimientos':
+          establecimientosSalud = [];
+          break;
+        case 'necesidad-salud':
+          necesidadSalud = null;
+          break;
+        case 'danos-viales':
+          danosViales = [];
+          break;
+        case 'danos-infra-publica':
+          danosInfraPublica = [];
+          break;
+        case 'servicios-basicos':
+          serviciosBasicos = [];
+          break;
+        case 'unidades-educativas':
+          unidadesEducativas = [];
+          break;
+        case 'danos-vivienda':
+          danosVivienda = [];
+          break;
+        case 'danos-agricultura':
+          danosAgricultura = [];
+          break;
+        case 'danos-pecuarios':
+          danosPecuarios = [];
+          break;
+        case 'infra-productiva':
+          infraProductiva = [];
+          break;
+        case 'proteccion':
+          proteccion = [];
+          break;
+        case 'necesidad-humanitaria':
+          necesidadHumanitaria = null;
+          break;
+      }
+    }
+  }
+
+  /// Los 9 `grup_*` (contrato §20.2) son el OR de sus secciones miembro,
+  /// igual que hace `_marcar_impacto` del backend. Separado de
+  /// [recalcularFlagsImpacto] para poder recalcular SOLO los grupos cuando los
+  /// `imp_*` ya vienen derivados de `filas_seccion` (el modelo no carga las
+  /// listas de secciones y `recalcularFlagsImpacto` los pondría en false).
+  void recalcularGruposDesdeImpacto() {
+    // `grup_proteccion` (grupo) y `imp_proteccion` (sección 14) son campos
+    // distintos (v33): ya no comparten nombre.
+    grupPoblacion = impImpactoPoblacion || impPrimeraRespuesta;
+    grupSalud = impSaludEstablecimientos || impNecesidadSalud;
+    grupInfraestructura = impDanosViales || impDanosInfraPublica;
+    grupServicios = impServiciosBasicos;
+    grupEducacion = impUnidadesEducativas;
+    grupVivienda = impDanosVivienda;
+    grupAgropecuario =
+        impDanosAgricultura || impDanosPecuarios || impInfraProductiva;
+    grupProteccion = impProteccion;
+    grupNecesidades = impNecesidadHumanitaria;
   }
 
   static List<Map<String, String>> _parseSeccionesEliminadas(dynamic json) {
@@ -2407,15 +2651,16 @@ class EdanLocalidad {
         'fono_alcalde': fonoAlcalde.isEmpty ? null : fonoAlcalde,
         'tipo_evento_nombre': tipoEventoNombre,
         if (responsable != null) 'responsable': responsable!.toJson(),
-        'imp_poblacion': impPoblacion,
-        'imp_salud': impSalud,
-        'imp_infraestructura': impInfraestructura,
-        'imp_servicios': impServicios,
-        'imp_educacion': impEducacion,
-        'imp_vivienda': impVivienda,
-        'imp_agropecuario': impAgropecuario,
+        'grup_poblacion': grupPoblacion,
+        'grup_salud': grupSalud,
+        'grup_infraestructura': grupInfraestructura,
+        'grup_servicios': grupServicios,
+        'grup_educacion': grupEducacion,
+        'grup_vivienda': grupVivienda,
+        'grup_agropecuario': grupAgropecuario,
+        'grup_proteccion': grupProteccion,
+        'grup_necesidades': grupNecesidades,
         'imp_proteccion': impProteccion,
-        'imp_necesidades': impNecesidades,
         'imp_impacto_poblacion': impImpactoPoblacion,
         'imp_salud_establecimientos': impSaludEstablecimientos,
         'imp_danos_viales': impDanosViales,
@@ -2449,7 +2694,10 @@ class EdanLocalidad {
         'sincronizado': sincronizado,
         'pendiente_eliminacion': pendienteEliminacion,
         'pendiente_actualizacion': pendienteActualizacion,
+        'envio_pendiente': envioPendiente,
         'fecha_modificacion': fechaModificacion,
+        if (uuidEdanLocalidad != null && uuidEdanLocalidad!.isNotEmpty)
+          'uuid_edan_localidad': uuidEdanLocalidad,
         'secciones_eliminadas': seccionesEliminadas.toList(),
       };
 
@@ -2481,6 +2729,8 @@ class EdanLocalidad {
   /// opcional, etc.) y ajusta las secciones al formato del servidor.
   Map<String, dynamic> toApiJson() => {
         'id_local': idLocal,
+        if (uuidEdanLocalidad != null && uuidEdanLocalidad!.isNotEmpty)
+          'uuid_edan_localidad': uuidEdanLocalidad,
         'id_usuario': idUsuario,
         'id_tipo_localidad': idTipoLocalidadResuelto,
         'id_edan_localidad_estado': idEdanLocalidadEstado,
@@ -2497,15 +2747,20 @@ class EdanLocalidad {
         'total_familias_afectadas': totalFamiliasAfectadas,
         'total_familias_damnificadas': totalFamiliasDamnificadas,
         'localidad': nombre,
-        'imp_poblacion': impPoblacion,
-        'imp_salud': impSalud,
-        'imp_infraestructura': impInfraestructura,
-        'imp_servicios': impServicios,
-        'imp_educacion': impEducacion,
-        'imp_vivienda': impVivienda,
-        'imp_agropecuario': impAgropecuario,
+        // `nombre_alcalde`/`fono_alcalde`/`responsable` NO van en la forma API
+        // de la LOCALIDAD: no son columnas de `edan_localidades` ni del schema
+        // `FormularioCompletoUpsert`; pertenecen al EDAN padre. Se conservan en
+        // la forma local (`toJson`) para la UI (page13).
+        'grup_poblacion': grupPoblacion,
+        'grup_salud': grupSalud,
+        'grup_infraestructura': grupInfraestructura,
+        'grup_servicios': grupServicios,
+        'grup_educacion': grupEducacion,
+        'grup_vivienda': grupVivienda,
+        'grup_agropecuario': grupAgropecuario,
+        'grup_proteccion': grupProteccion,
+        'grup_necesidades': grupNecesidades,
         'imp_proteccion': impProteccion,
-        'imp_necesidades': impNecesidades,
         'imp_impacto_poblacion': impImpactoPoblacion,
         'imp_salud_establecimientos': impSaludEstablecimientos,
         'imp_danos_viales': impDanosViales,
@@ -2536,9 +2791,7 @@ class EdanLocalidad {
         'unidades_educativas': unidadesEducativas
             .map((e) => e.toApiJson())
             .toList(),
-        'danos_vivienda': danosVivienda
-            .map((e) => e.toApiJson())
-            .toList(),
+        'danos_vivienda': _danosViviendaApi(),
         'danos_agricultura': danosAgricultura
             .map((e) => e.toApiJson())
             .toList(),
@@ -2555,6 +2808,28 @@ class EdanLocalidad {
         'pendiente_actualizacion': pendienteActualizacion,
         'pendiente_eliminacion': pendienteEliminacion,
       };
+
+  /// `danos_vivienda` es **1:1** en el servidor (una fila por localidad) y sus
+  /// viviendas viajan anidadas bajo `viviendas[]` (spec vivo:
+  /// `FormularioCompletoUpsert`, §20.1 de PLAN_APIS_V2_EDAN). `dano_total` y
+  /// `dano_parcial` ya se derivan de `viviendas[]` dentro de
+  /// `EdanDanoVivienda.toApiJson`, así que aquí no se recalculan.
+  ///
+  /// Devuelve el objeto único (o `null` si todavía no hay fila): el payload
+  /// NO lleva lista para esta sección.
+  Map<String, dynamic>? _danosViviendaApi() {
+    if (danosVivienda.isEmpty) return null;
+    final f = danosVivienda.first;
+    final json = f.toApiJson();
+    json['viviendas'] = f.viviendas.map((v) => v.toJson()).toList();
+    // Regla del servidor (§20.4): si la fila tiene hijas, las coordenadas
+    // viven en cada vivienda; si no tiene (fila legacy) se conservan.
+    if (f.viviendas.isNotEmpty) {
+      json['coordenada_lat'] = null;
+      json['coordenada_lon'] = null;
+    }
+    return json;
+  }
 
   /// La API espera ImpactoPoblacion planos (uno por rango etario); la app
   /// agrupa en EdanImpactoPoblacion con una lista grupos_etarios.
@@ -2623,15 +2898,15 @@ class EdanLocalidad {
   }
 
   bool get tieneImpactos =>
-      impPoblacion ||
-      impSalud ||
-      impInfraestructura ||
-      impServicios ||
-      impEducacion ||
-      impVivienda ||
-      impAgropecuario ||
-      impProteccion ||
-      impNecesidades;
+      grupPoblacion ||
+      grupSalud ||
+      grupInfraestructura ||
+      grupServicios ||
+      grupEducacion ||
+      grupVivienda ||
+      grupAgropecuario ||
+      grupProteccion ||
+      grupNecesidades;
 
   EdanVulnerables get vulnerables => EdanVulnerables(
     ninos: proteccion.isNotEmpty ? proteccion[0] : EdanGrupoVulnerable(),
@@ -2775,6 +3050,12 @@ class EdanResponsable {
     );
   }
 
+  bool get hayDatos =>
+      nombre.trim().isNotEmpty ||
+      cargo.trim().isNotEmpty ||
+      fono.trim().isNotEmpty ||
+      correo.trim().isNotEmpty;
+
   Map<String, dynamic> toJson() => {
         'nombre': nombre,
         'cargo': cargo,
@@ -2851,7 +3132,7 @@ class Edan {
 
     final lugares03 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impPoblacion &&
+        if (entry.value.grupPoblacion &&
             !entry.value.impactoPoblacion.any((i) => i.tieneDatosGlobales))
           '${etiqueta(entry.value, entry.key)} (impacto en población)',
     ];
@@ -2859,7 +3140,7 @@ class Edan {
 
     final lugares04 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impSalud &&
+        if (entry.value.grupSalud &&
             !(entry.value.establecimientosSalud
                     .any((s) => s.nombreEstablecimiento.trim().isNotEmpty) ||
                 (entry.value.necesidadSalud?.botiquines ?? false) ||
@@ -2870,7 +3151,7 @@ class Edan {
 
     final lugares05 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impInfraestructura &&
+        if (entry.value.grupInfraestructura &&
             !(entry.value.danosViales
                     .any((d) => d.viaPuente.trim().isNotEmpty) ||
                 entry.value.danosInfraPublica
@@ -2881,7 +3162,7 @@ class Edan {
 
     final lugares06 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impServicios &&
+        if (entry.value.grupServicios &&
             !entry.value.serviciosBasicos.any((s) => s.tieneDatos))
           '${etiqueta(entry.value, entry.key)} (servicios básicos)',
     ];
@@ -2889,7 +3170,7 @@ class Edan {
 
     final lugares07 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impEducacion &&
+        if (entry.value.grupEducacion &&
             !entry.value.unidadesEducativas.any((u) =>
                 u.nombreEstablecimiento.trim().isNotEmpty ||
                 u.estudiantes > 0 ||
@@ -2901,7 +3182,7 @@ class Edan {
 
     final lugares08 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impVivienda &&
+        if (entry.value.grupVivienda &&
             !entry.value.danosVivienda
                 .any((v) => v.danoParcial > 0 || v.danoTotal > 0))
           '${etiqueta(entry.value, entry.key)} (vivienda)',
@@ -2910,7 +3191,7 @@ class Edan {
 
     final lugares09 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impAgropecuario &&
+        if (entry.value.grupAgropecuario &&
             !(entry.value.danosAgricultura
                     .any((a) => a.tipoCultivo.trim().isNotEmpty) ||
                 entry.value.danosPecuarios
@@ -2922,7 +3203,7 @@ class Edan {
 
     final lugares10 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impProteccion &&
+        if (entry.value.grupProteccion &&
             !entry.value.proteccion.any((g) => g.tieneDatos))
           '${etiqueta(entry.value, entry.key)} (protección)',
     ];
@@ -2930,7 +3211,7 @@ class Edan {
 
     final lugares11 = <String>[
       for (final entry in localidades.asMap().entries)
-        if (entry.value.impNecesidades &&
+        if (entry.value.grupNecesidades &&
             !(entry.value.necesidadHumanitaria?.algunaSeleccionada ?? false))
           '${etiqueta(entry.value, entry.key)} (necesidades humanitarias)',
     ];
@@ -2985,7 +3266,7 @@ class Edan {
   factory Edan.empty() => Edan();
 
   /// Reconstruye un [Edan] a partir de una localidad persistida (rol 7).
-  /// Usado para editar (RespEdanFormScreen) y previsualizar
+  /// Usado para editar (EdanFormWizard) y previsualizar
   /// (UgrEdanPreviewScreen) un reporte guardado como localidad.
   factory Edan.desdeLocalidad(EdanLocalidad loc) => Edan(
         idEdan: loc.idEdan,
@@ -3032,6 +3313,35 @@ class Edan {
     if (r.correo.trim().isEmpty && (token.correo ?? '').trim().isNotEmpty) {
       r.correo = token.correo!;
     }
+  }
+
+  /// Nodo de estado del EDAN padre. Los GET nuevos de la familia cabecera
+  /// (§20.16/§20.17) traen `estado_edan: {id_estado, nombre}` anidado; las
+  /// formas viejas/locales traían `estado` (string o map) o `estado_obj`.
+  /// Se aceptan todas para no romper ni el pull ni `getEdansByMunicipio`.
+  static Map? _nodoEstadoEdan(Map<String, dynamic> json) {
+    for (final k in const ['estado_edan', 'estado', 'estado_obj']) {
+      if (json[k] is Map) return json[k] as Map;
+    }
+    return null;
+  }
+
+  static int _estadoIdEdan(Map<String, dynamic> json) {
+    final directo = _toInt(json['id_estado']);
+    if (directo != 0) return directo;
+    final nodo = _nodoEstadoEdan(json);
+    final id = _toInt(nodo?['id_estado'] ?? nodo?['id_edan_estado']);
+    return id == 0 ? 1 : id;
+  }
+
+  static String _estadoNombreEdan(Map<String, dynamic> json) {
+    final nodo = _nodoEstadoEdan(json);
+    final nombre = nodo?['nombre'] ?? nodo?['name'];
+    if (nombre is String && nombre.trim().isNotEmpty) return nombre;
+    final plano = json['estado'] is String
+        ? json['estado'] as String
+        : json['estadoNombre'];
+    return _str(plano ?? 'borrador', 'borrador');
   }
 
   factory Edan.fromJson(Map<String, dynamic> json) {
@@ -3086,15 +3396,8 @@ class Edan {
               Map<String, dynamic>.from(json['responsable'] as Map))
           : EdanResponsable(),
       idReporte: _toInt(json['id_reporte'] ?? json['idReporte']),
-      idEstado: _toInt(json['id_estado']) == 0
-          ? (json['estado'] is Map ? _toInt((json['estado'] as Map)['id_estado']) : 0) == 0
-              ? 1
-              : _toInt((json['estado'] as Map)['id_estado'])
-          : _toInt(json['id_estado']),
-      estado: json['estado'] is Map
-          ? _str((json['estado'] as Map)['nombre'], 'borrador')
-          : _str(json['estado'] ?? json['estadoNombre'] ??
-              (json['estado_obj'] is Map ? json['estado_obj']['nombre'] : null) ?? 'borrador'),
+      idEstado: _estadoIdEdan(json),
+      estado: _estadoNombreEdan(json),
       sincronizado: _toBool(json['sincronizado']),
       pendienteEliminacion: _toBool(json['pendiente_eliminacion'] ?? json['pendienteEliminacion']),
       pendienteActualizacion: _toBool(json['pendiente_actualizacion'] ?? json['pendienteActualizacion']),
@@ -3140,7 +3443,7 @@ class Edan {
     if (json['impacto_poblacion'] is Map) {
       localidad.impactoPoblacion.add(EdanImpactoPoblacion.fromJson(
           Map<String, dynamic>.from(json['impacto_poblacion'] as Map)));
-      localidad.impPoblacion = true;
+      localidad.grupPoblacion = true;
     }
     if (json['necesidad_primera_respuesta'] is Map) {
       localidad.necesidadPrimeraRespuesta = EdanNecesidadPrimeraRespuesta.fromJson(
@@ -3152,7 +3455,7 @@ class Edan {
           .map((m) => EdanEstablecimientoSalud.fromJson(
               Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.establecimientosSalud.isNotEmpty) localidad.impSalud = true;
+      if (localidad.establecimientosSalud.isNotEmpty) localidad.grupSalud = true;
     }
     if (json['necesidad_salud'] is Map) {
       localidad.necesidadSalud = EdanNecesidadSalud.fromJson(
@@ -3163,7 +3466,7 @@ class Edan {
           .whereType<Map>()
           .map((m) => EdanDanoVial.fromJson(Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.danosViales.isNotEmpty) localidad.impInfraestructura = true;
+      if (localidad.danosViales.isNotEmpty) localidad.grupInfraestructura = true;
     }
     if (json['danos_infra_publica'] is List) {
       localidad.danosInfraPublica = (json['danos_infra_publica'] as List)
@@ -3171,13 +3474,13 @@ class Edan {
           .map((m) => EdanDanoInfraPublica.fromJson(
               Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.danosInfraPublica.isNotEmpty) localidad.impInfraestructura = true;
+      if (localidad.danosInfraPublica.isNotEmpty) localidad.grupInfraestructura = true;
     }
     if (json['servicios_basicos'] is Map ||
         json['servicios_basicos'] is List) {
       final servicios = EdanDanoServicioBasico.fromJson(json['servicios_basicos']);
       localidad.serviciosBasicos = servicios.servicios;
-      if (servicios.algunaSeleccionada) localidad.impServicios = true;
+      if (servicios.algunaSeleccionada) localidad.grupServicios = true;
     }
     if (json['unidades_educativas'] is List) {
       localidad.unidadesEducativas = (json['unidades_educativas'] as List)
@@ -3185,14 +3488,14 @@ class Edan {
           .map((m) => EdanDanoUnidadEducativa.fromJson(
               Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.unidadesEducativas.isNotEmpty) localidad.impEducacion = true;
+      if (localidad.unidadesEducativas.isNotEmpty) localidad.grupEducacion = true;
     }
     if (json['danos_vivienda'] is List) {
       localidad.danosVivienda = (json['danos_vivienda'] as List)
           .whereType<Map>()
           .map((m) => EdanDanoVivienda.fromJson(Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.danosVivienda.isNotEmpty) localidad.impVivienda = true;
+      if (localidad.danosVivienda.isNotEmpty) localidad.grupVivienda = true;
     }
     if (json['danos_agricultura'] is List) {
       localidad.danosAgricultura = (json['danos_agricultura'] as List)
@@ -3200,7 +3503,7 @@ class Edan {
           .map((m) => EdanDanoAgricultura.fromJson(
               Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.danosAgricultura.isNotEmpty) localidad.impAgropecuario = true;
+      if (localidad.danosAgricultura.isNotEmpty) localidad.grupAgropecuario = true;
     }
     if (json['danos_pecuarios'] is List) {
       localidad.danosPecuarios = (json['danos_pecuarios'] as List)
@@ -3208,7 +3511,7 @@ class Edan {
           .map((m) => EdanDanoPecuario.fromJson(
               Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.danosPecuarios.isNotEmpty) localidad.impAgropecuario = true;
+      if (localidad.danosPecuarios.isNotEmpty) localidad.grupAgropecuario = true;
     }
     if (json['infra_productiva'] is List) {
       localidad.infraProductiva = (json['infra_productiva'] as List)
@@ -3216,13 +3519,14 @@ class Edan {
           .map((m) => EdanInfraProductiva.fromJson(
               Map<String, dynamic>.from(m)))
           .toList();
-      if (localidad.infraProductiva.isNotEmpty) localidad.impAgropecuario = true;
+      if (localidad.infraProductiva.isNotEmpty) localidad.grupAgropecuario = true;
     }
     if (json['proteccion'] is Map) {
       final prot = EdanProteccion.fromJson(
           Map<String, dynamic>.from(json['proteccion'] as Map));
       localidad.proteccion = prot.vulnerables.grupos;
       if (prot.vulnerables.algunoPositivo) {
+        localidad.grupProteccion = true;
         localidad.impProteccion = true;
       }
     }
@@ -3396,6 +3700,12 @@ abstract mixin class EdanFotoHolder {
   double get coordenadaLat;
   double get coordenadaLon;
 
+  /// `id_seccion` = `uuid_registro` de la fila en `filas_seccion`. Es la clave
+  /// con la que se asocian sus fotos en la tabla `fotografias` (V2) y con la
+  /// que el motor de sync sube la foto al endpoint `…/edan/fotografias`.
+  String? get idSeccion;
+  set idSeccion(String? valor);
+
   // El paso final de fotos del asistente escribe la coordenada capturada; el
   // mixin solo declara getters, así que también declara los setters que el
   // captura necesita y así no hay que castear cada clase una por una.
@@ -3405,4 +3715,82 @@ abstract mixin class EdanFotoHolder {
   // La foto también se escribe desde el paso final, igual que la coordenada:
   // `mostrarSheetFoto` devuelve la ruta y la página la guarda.
   set fotografia(String? valor);
+}
+
+/// Predicado único de "fila con datos reales" para las secciones 1:N.
+///
+/// Fuente compartida por el guardado V2 (`EdanStoreV2._guardarFilasTx`) y el
+/// rescate de snapshot de la fuente (`EdanSeccionesFuente`), para que la regla
+/// del contrato —"las vacías NO se emiten; solo va lo llenado"— se aplique
+/// igual en ambas puntas. Las filas sembradas vacías (p. ej. las 5 de
+/// `servicios-basicos` de page01/page06, los defaults de `proteccion`) no se
+/// persisten ni viajan; los catálogos (impacto = 4, protección = 8) completan
+/// su set exacto con `_padCatalogoTx`/padding del motor SOLO si su flag `imp_*`
+/// es true, y el flag es true solo cuando hay alguna fila con datos reales.
+///
+/// Conservador por diseño: tipos inesperados y rutas no listadas (1:1) devuelven
+/// `true` — el filtro solo aplica a lo que conoce, nunca borra por ignorancia.
+bool filaSeccionConDatos(String rutaV2, dynamic item) {
+  switch (rutaV2) {
+    case 'impacto-poblacion':
+      // Dos formas según la punta: la expansión del store consulta por GRUPO
+      // (`EdanGrupoEtario`), el guardado genérico por WRAPPER.
+      if (item is EdanGrupoEtario) {
+        return item.marcado || item.tieneDatos;
+      }
+      if (item is! EdanImpactoPoblacion) return true;
+      return item.tieneDatosGlobales ||
+          item.observaciones.trim().isNotEmpty ||
+          item.gruposEtarios.any((g) => g.marcado || g.tieneDatos);
+    case 'salud-establecimientos':
+      if (item is! EdanEstablecimientoSalud) return true;
+      return item.nombreEstablecimiento.trim().isNotEmpty;
+    case 'danos-viales':
+      if (item is! EdanDanoVial) return true;
+      return item.viaPuente.trim().isNotEmpty;
+    case 'danos-infra-publica':
+      if (item is! EdanDanoInfraPublica) return true;
+      return item.tipoEstructura.trim().isNotEmpty;
+    case 'servicios-basicos':
+      if (item is! EdanServicioBasicoDetalle) return true;
+      return item.tieneDatos;
+    case 'unidades-educativas':
+      if (item is! EdanDanoUnidadEducativa) return true;
+      return item.nombreEstablecimiento.trim().isNotEmpty ||
+          item.estudiantes > 0 ||
+          item.profesores > 0 ||
+          item.administrativos > 0;
+    case 'danos-vivienda':
+      if (item is! EdanDanoVivienda) return true;
+      // El guard `!viviendasCargadas` es la misma anti-perdida que
+      // `_sincronizarViviendasDeFilaTx`: un padre sin hidratar de hijos NO
+      // puede considerarse vacío.
+      return item.danoParcial > 0 ||
+          item.danoTotal > 0 ||
+          item.viviendas.isNotEmpty ||
+          !item.viviendasCargadas;
+    case 'danos-agricultura':
+      if (item is! EdanDanoAgricultura) return true;
+      return item.tipoCultivo.trim().isNotEmpty;
+    case 'danos-pecuarios':
+      if (item is! EdanDanoPecuario) return true;
+      return item.especie.trim().isNotEmpty;
+    case 'infra-productiva':
+      if (item is! EdanInfraProductiva) return true;
+      return item.tipo.trim().isNotEmpty;
+    case 'proteccion':
+      if (item is! EdanGrupoVulnerable) return true;
+      return item.tieneDatos;
+    case 'primera-respuesta':
+      if (item is! EdanNecesidadPrimeraRespuesta) return true;
+      return item.tieneDatos;
+    case 'necesidad-salud':
+      if (item is! EdanNecesidadSalud) return true;
+      return item.tieneDatos;
+    case 'necesidad-humanitaria':
+      if (item is! EdanNecesidadHumanitaria) return true;
+      return item.tieneDatos;
+    default:
+      return true;
+  }
 }

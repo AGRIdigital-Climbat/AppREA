@@ -6,7 +6,9 @@ import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/edan/edan_envio_v2.dart';
 import '../../../services/edan/edan_localidades_envio_v2_service.dart';
+import '../../../services/edan/edan_store_v2.dart';
 import '../../../services/edan_secciones_registry.dart';
 import '../../../services/edan_sync_service.dart';
 import 'ugr_edan_preview_screen.dart';
@@ -26,6 +28,26 @@ class UgrLocalidadesTab extends StatefulWidget {
 
   @override
   State<UgrLocalidadesTab> createState() => UgrLocalidadesTabState();
+
+  /// Dedup del merge server+SQLite: devuelve las localidades [locales] que NO
+  /// están ya en [servidor]. Compara por `id_edan_localidad` numérico **y** por
+  /// identidad uuid (`uuid_edan_localidad ?? id_local`), para que un EDAN propio
+  /// ya sincronizado no aparezca duplicado cuando el `idServer` local aún no se
+  /// retro-trajo del servidor (o viceversa).
+  static List<EdanLocalidad> sinDuplicadas(
+    List<EdanLocalidad> servidor,
+    List<EdanLocalidad> locales,
+  ) {
+    String clave(EdanLocalidad l) => l.uuidEdanLocalidad ?? l.idLocal ?? '';
+    final vistosIds = servidor.map((l) => l.idServer).whereType<int>().toSet();
+    final vistosUuid = servidor.map(clave).where((s) => s.isNotEmpty).toSet();
+    return locales.where((l) {
+      final dupId = l.idServer != null && vistosIds.contains(l.idServer);
+      final k = clave(l);
+      final dupUuid = k.isNotEmpty && vistosUuid.contains(k);
+      return !dupId && !dupUuid;
+    }).toList();
+  }
 }
 
 class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
@@ -78,12 +100,11 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       final userId = AuthService.instance.userId;
       if (userId != null) {
         try {
-          final pendientes =
-              await DatabaseHelper.instance.getLocalidadesPendientesUsuario(userId);
-          await _resincronizarBadges(pendientes);
+          final locales = await _cargarLocalidadesLocales(userId);
+          await _resincronizarBadges(locales);
           if (mounted) {
             setState(() {
-              _localidades = pendientes;
+              _localidades = locales;
               _cargando = false;
               _error = null;
             });
@@ -112,31 +133,11 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       final localidades =
           data.map((j) => EdanLocalidad.fromJson(j)).toList();
 
-      // DEBUG TEMPORAL — diagnosticar consolidadas
-      debugPrint('[Localidades] resumen keys: ${resumen.keys.toList()}');
-      debugPrint('[Localidades] resumen: $resumen');
-      if (data.isNotEmpty) {
-        debugPrint('[Localidades] primera localidad keys: ${data[0].keys.toList()}');
-        debugPrint('[Localidades] id_edan raw: ${data[0]['id_edan']} type: ${data[0]['id_edan'].runtimeType}');
-        debugPrint('[Localidades] edan raw: ${data[0]['edan']}');
-        debugPrint('[Localidades] es_huerfana: ${data[0]['es_huerfana']}');
-      }
-      final conApi = localidades.where((l) => l.idEdan != null && l.idEdan! > 0).toList();
-      debugPrint('[Localidades] consolidadas from API: ${conApi.length}');
-      for (final c in conApi) {
-        debugPrint('[Localidades]   - ${c.nombre} idEdan=${c.idEdan}');
-      }
-      // FIN DEBUG
-
       final userId = AuthService.instance.userId;
       if (userId != null) {
         try {
-          final pendientes =
-              await DatabaseHelper.instance.getLocalidadesPendientesUsuario(userId);
-          final apiIds = localidades.map((l) => l.idServer).toSet();
-          final nuevas =
-              pendientes.where((l) => !apiIds.contains(l.idServer)).toList();
-          localidades.addAll(nuevas);
+          final locales = await _cargarLocalidadesLocales(userId);
+          localidades.addAll(UgrLocalidadesTab.sinDuplicadas(localidades, locales));
         } catch (_) {}
       }
 
@@ -421,6 +422,29 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     }
   }
 
+  /// Localidades disponibles en este dispositivo (offline): las que el wizard
+  /// escribió en `localidades_offline` MÁS las recuperadas por el pull V2 en
+  /// `formularios`. El mismo reporte puede estar en ambas tablas y comparte
+  /// `idLocal` (uuid), así que se deduplica por ese id. Sin esto, un UGR que
+  /// recupera sus reportes en un celular nuevo (pull V2) los vería solo online
+  /// y no aparecerían al quedarse sin red.
+  Future<List<EdanLocalidad>> _cargarLocalidadesLocales(int userId) async {
+    final locales = <String, EdanLocalidad>{};
+    final propias = await DatabaseHelper.instance.getLocalidades(userId);
+    for (final l in propias) {
+      final id = l.idLocal;
+      if (id != null) locales[id] = l;
+    }
+    try {
+      final v2 = await EdanStoreV2.instance.listarFormularios(usuarioId: userId);
+      for (final l in v2) {
+        final id = l.idLocal;
+        if (id != null) locales[id] = l;
+      }
+    } catch (_) {}
+    return locales.values.toList();
+  }
+
   /// Resincroniza los flags `imp_*` desde `localidad_secciones_activas`
   /// (fuente autoritativa) o, si no hay fila local/secciones, desde los datos
   /// cargados en el modelo (unión con los gruesos del server/doc). Mismo
@@ -432,6 +456,10 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     for (final loc in localidades) {
       await sincV2.aplicarFlagsDesdeSeccionesActivas(loc,
           unionConGuardados: true);
+      // Paridad con el tab de RESP: los grupos gruesos (`grup_*`) confirmados
+      // por el servidor se re-ORAN sobre el modelo, para que los badges del
+      // ítem reflejen lo que el server tiene aunque el flag local esté viejo.
+      await EdanStoreV2.instance.aplicarGruposServidorAlModelo(loc);
     }
   }
 
@@ -857,9 +885,33 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       final esAprobada = estado == UgrLocalidadEstado.aprobadoUgr ||
           estado == UgrLocalidadEstado.aprobadoAjuste;
       final esRechazada = estado == UgrLocalidadEstado.rechazadoUgr;
+
+      // Si el reporte no está descargado localmente (p.ej. localidades de OTROS
+      // usuarios del municipio), se pide el documento completo al servidor para
+      // que la vista previa muestre las secciones y las FOTOS online
+      // (`Image.network`). Para los reportes propios ya descargados se conserva
+      // la copia local (permite verlos sin conexión y con fotos ya bajadas).
+      EdanLocalidad docPreview = localidad;
+      final uuidLocal = localidad.uuidEdanLocalidad ?? localidad.idLocal;
+      final tieneLocalV2 = uuidLocal != null &&
+          await EdanStoreV2.instance.cargarFormulario(uuidLocal) != null;
+      if (!tieneLocalV2 &&
+          ConnectivityService().isConnected &&
+          localidad.idServer != null) {
+        // APIs nuevas: `GET /formularios/{id}/completo` (cabecera 14 `imp_*` +
+        // nodo `grupos` + 14 secciones + fotos). Sustituye al
+        // `GET /localidades/{id}/documento` del grupo legado.
+        final descargado = await EdanEnvioV2.descargar(
+          localidad.idServer!.toString(),
+          useId: true,
+        );
+        if (descargado != null) docPreview = descargado;
+      }
+      if (!mounted) return;
+
       final cambio = await Navigator.of(context).push<bool>(
         ugrRoute(EdanPreviewRespScreen(
-          localidad: localidad,
+          localidad: docPreview,
           modoUGR: true,
           onAprobar: esAprobada
               ? null
@@ -900,7 +952,10 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
   Future<void> _editarLocalidad(EdanLocalidad localidad) async {
     final result = await Navigator.of(context).push<bool>(
       ugrRoute(
-        EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)),
+        EdanFormWizard(
+          edanAEditar: Edan.desdeLocalidad(localidad),
+          storeV2: EdanStoreV2.instance,
+        ),
         palette: Palettes.rea,
       ),
     );
@@ -945,8 +1000,19 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     final conectado = await ConnectivityService().checkNow();
     try {
       if (localidad.sincronizado && localidad.idServer != null && conectado) {
-        await ApiService.instance.eliminarLocalidadDocumento(localidad.idServer!);
-        await db.deleteLocalidad(idLocal);
+        // API nueva: `DELETE /api/v2/edan/formularios/{uuid_ref}` (cascada de
+        // secciones, viviendas y fotos en el servidor). Sustituye al
+        // `DELETE /localidades/{id}/documento` del grupo legado.
+        final ref = localidad.uuidEdanLocalidad ??
+            localidad.idLocal ??
+            localidad.idServer!.toString();
+        if (await EdanEnvioV2.borrar(ref)) {
+          await db.deleteLocalidad(idLocal);
+        } else {
+          // Rechazada o micro-corte: se marca para el próximo `sincronizar()`,
+          // así el borrado no se pierde ni queda la copia local colgando.
+          await db.markLocalidadAsPendingDeletion(idLocal);
+        }
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

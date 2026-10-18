@@ -4,6 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rea/models/edan.dart';
 import 'package:rea/models/id_seccion_helper.dart';
 
+/// Uniformiza una sección del payload en lista de filas: las 1:N ya vienen
+/// como `List`; las **1:1** (`danos_vivienda`, y en el contrato también
+/// `necesidad_salud`/`necesidad_primera_respuesta`/`necesidad_humanitaria`)
+/// vienen como **objeto único**.
+List<Map<String, dynamic>> _filasDe(Object? v) => v is List
+    ? v.whereType<Map>().map((m) => Map<String, dynamic>.from(m)).toList()
+    : v is Map
+        ? [Map<String, dynamic>.from(v)]
+        : const [];
+
 void main() {
   group('API flow: toApiJson() incluye fotografia (contrato /documento)', () {
     test('EdanEstablecimientoSalud.toApiJson() incluye fotografia', () {
@@ -345,17 +355,17 @@ void main() {
 
   group('API flow: fromJson() roundtrip preserva idSeccion', () {
     test('roundtrip completo preserva todos los idSeccion', () {
-      final idSv = generarIdSeccion('sv');
-      final idDv = generarIdSeccion('dv');
-      final idDi = generarIdSeccion('di');
-      final idSb = generarIdSeccion('sb');
-      final idUe = generarIdSeccion('ue');
-      final idVv = generarIdSeccion('vv');
-      final idDa = generarIdSeccion('da');
-      final idDp = generarIdSeccion('dp');
-      final idIp = generarIdSeccion('ip');
-      final idPo = generarIdSeccion('po');
-      final idIm = generarIdSeccion('im');
+      final idSv = '11111111-1111-4111-8111-111111111111';
+      final idDv = '22222222-2222-4222-8222-222222222222';
+      final idDi = '33333333-3333-4333-8333-333333333333';
+      final idSb = '44444444-4444-4444-8444-444444444444';
+      final idUe = '55555555-5555-4555-8555-555555555555';
+      final idVv = '66666666-6666-4666-8666-666666666666';
+      final idDa = '77777777-7777-4777-8777-777777777777';
+      final idDp = '88888888-8888-4888-8888-888888888888';
+      final idIp = '99999999-9999-4999-8999-999999999999';
+      final idPo = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
+      final idIm = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
 
       final original = EdanLocalidad(
         idLocal: 'test-roundtrip',
@@ -433,15 +443,15 @@ void main() {
         totalPoblacionAfectada: 100,
         totalFamiliasAfectadas: 25,
         totalFamiliasDamnificadas: 8,
-        impPoblacion: true,
-        impSalud: true,
-        impInfraestructura: true,
-        impServicios: true,
-        impEducacion: true,
-        impVivienda: true,
-        impAgropecuario: true,
-        impProteccion: true,
-        impNecesidades: true,
+        grupPoblacion: true,
+        grupSalud: true,
+        grupInfraestructura: true,
+        grupServicios: true,
+        grupEducacion: true,
+        grupVivienda: true,
+        grupAgropecuario: true,
+        grupProteccion: true,
+        grupNecesidades: true,
         impactoPoblacion: [
           EdanImpactoPoblacion(
             idSeccion: generarIdSeccion('im'),
@@ -543,11 +553,12 @@ void main() {
         ],
       );
 
+      loc.recalcularFlagsImpacto();  // como hace el guardado real
       final json = loc.toApiJson();
       expect(json['id_local'], equals('test-full'));
       expect(json['id_usuario'], equals(43));
       expect(json['localidad'], equals('Barrio Test'));
-      expect(json['imp_poblacion'], isTrue);
+      expect(json['grup_poblacion'], isTrue);
       expect(json['imp_proteccion'], isTrue);
 
       expect((json['impacto_poblacion'] as List).length, equals(1));
@@ -556,22 +567,26 @@ void main() {
       expect((json['danos_infra_publica'] as List).length, equals(1));
       expect((json['servicios_basicos'] as List).length, equals(1));
       expect((json['unidades_educativas'] as List).length, equals(1));
-      expect((json['danos_vivienda'] as List).length, equals(1));
+      // `danos_vivienda` es **1:1** en el contrato (Fase C): viaja como objeto
+      // único con sus `viviendas[]` anidadas, nunca como lista.
+      expect(json['danos_vivienda'], isA<Map>(),
+          reason: 'danos_vivienda es 1:1 => objeto, no lista');
+      expect((json['danos_vivienda'] as Map)['viviendas'], isA<List>());
       expect((json['danos_agricultura'] as List).length, equals(1));
       expect((json['danos_pecuarios'] as List).length, equals(1));
       expect((json['infra_productiva'] as List).length, equals(1));
       expect((json['proteccion'] as List), isNotEmpty,
           reason: '/documento incluye proteccion: construccion de foto la sube desde aca');
 
-      // Cada seccion 1:N lleva su fotografia en el payload de /documento
+      // Cada seccion lleva su fotografia en el payload. `danos_vivienda` es
+      // 1:1 (objeto único), por eso se uniformiza con `_filasDe`.
       for (final seccionKey in [
         'establecimientos_salud', 'danos_viales', 'danos_infra_publica',
         'servicios_basicos', 'unidades_educativas', 'danos_vivienda',
         'danos_agricultura', 'danos_pecuarios', 'infra_productiva',
       ]) {
-        final items = json[seccionKey] as List;
-        for (final item in items) {
-          expect((item as Map).containsKey('fotografia'), isTrue,
+        for (final item in _filasDe(json[seccionKey])) {
+          expect(item.containsKey('fotografia'), isTrue,
               reason: '$seccionKey debe incluir fotografia');
           expect(item.containsKey('coordenada_lat'), isTrue,
               reason: '$seccionKey debe incluir coordenada_lat');
@@ -593,7 +608,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-prot',
         nombre: 'Test',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: [
           EdanGrupoVulnerable(
             idSeccion: generarIdSeccion('po'),
@@ -667,7 +682,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-impact',
         nombre: 'Test',
-        impPoblacion: true,
+        grupPoblacion: true,
         impactoPoblacion: [
           EdanImpactoPoblacion(
             idSeccion: generarIdSeccion('im'),
@@ -705,7 +720,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-impact-global',
         nombre: 'Test',
-        impPoblacion: true,
+        grupPoblacion: true,
         impactoPoblacion: [
           EdanImpactoPoblacion(
             idSeccion: generarIdSeccion('im'),
@@ -735,8 +750,8 @@ void main() {
           EdanLocalidad(
             idLocal: 'test-inc',
             nombre: 'Test',
-            impPoblacion: true,
-            impProteccion: true,
+            grupPoblacion: true,
+            grupProteccion: true,
             impactoPoblacion: [],
             proteccion: [
               EdanGrupoVulnerable(mujeres: 0, hombres: 0),
@@ -762,7 +777,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'test-comp',
             nombre: 'Test',
-            impPoblacion: true,
+            grupPoblacion: true,
             impactoPoblacion: [
               EdanImpactoPoblacion(
                 grupoEtario: 'Niño',
@@ -989,8 +1004,9 @@ void main() {
     });
 
     test('roundtrip fromJson→toJson preserva todos los campos', () {
+      const id = 'c9c9c9c9-c9c9-4c9c-8c9c-c9c9c9c9c9c9';
       final original = EdanServicioBasicoDetalle(
-        idSeccion: 'sb_789_ghi',
+        idSeccion: id,
         tipo: 'energia_electrica',
         afectado: true,
         danoParcial: true,
@@ -1002,7 +1018,7 @@ void main() {
       );
       final json = original.toJson();
       final restored = EdanServicioBasicoDetalle.fromJson(json);
-      expect(restored.idSeccion, 'sb_789_ghi');
+      expect(restored.idSeccion, id);
       expect(restored.tipo, 'energia_electrica');
       expect(restored.afectado, isTrue);
       expect(restored.danoParcial, isTrue);
@@ -1027,14 +1043,14 @@ void main() {
         final loc = EdanLocalidad(
           idLocal: 'test-rand-$i',
           nombre: 'Localidad $i',
-          impPoblacion: true,
-          impSalud: activos.contains('sv'),
-          impInfraestructura: activos.contains('dv') || activos.contains('di'),
-          impServicios: activos.contains('sb'),
-          impEducacion: activos.contains('ue'),
-          impVivienda: activos.contains('vv'),
-          impAgropecuario: activos.contains('da') || activos.contains('dp') || activos.contains('ip'),
-          impProteccion: true,
+          grupPoblacion: true,
+          grupSalud: activos.contains('sv'),
+          grupInfraestructura: activos.contains('dv') || activos.contains('di'),
+          grupServicios: activos.contains('sb'),
+          grupEducacion: activos.contains('ue'),
+          grupVivienda: activos.contains('vv'),
+          grupAgropecuario: activos.contains('da') || activos.contains('dp') || activos.contains('ip'),
+          grupProteccion: true,
           establecimientosSalud: activos.contains('sv')
               ? List.generate(
                   rng.nextInt(3) + 1,
@@ -1159,15 +1175,15 @@ void main() {
         final jsonStr = jsonEncode(json);
         expect(jsonStr.isNotEmpty, isTrue);
 
-        // Cada seccion 1:N lleva su fotografia en el payload de /documento
+        // Cada seccion lleva su fotografia en el payload. `danos_vivienda` es
+        // 1:1 (objeto único), así que se uniformiza con `_filasDe`.
         for (final key in [
           'establecimientos_salud', 'danos_viales', 'danos_infra_publica',
           'servicios_basicos', 'unidades_educativas', 'danos_vivienda',
           'danos_agricultura', 'danos_pecuarios', 'infra_productiva',
         ]) {
-          final items = json[key] as List;
-          for (final item in items) {
-            expect((item as Map).containsKey('fotografia'), isTrue,
+          for (final item in _filasDe(json[key])) {
+            expect(item.containsKey('fotografia'), isTrue,
                 reason: 'Localidad $i: $key debe incluir fotografia');
           }
         }
@@ -1185,7 +1201,10 @@ void main() {
             equals(loc.serviciosBasicos.length));
         expect(restored.unidadesEducativas.length,
             equals(loc.unidadesEducativas.length));
-        expect(restored.danosVivienda.length, equals(loc.danosVivienda.length));
+        // `danos_vivienda` es 1:1: el payload lleva UN objeto, así que el
+        // roundtrip no puede devolver N filas (colapsa a la primera).
+        expect(restored.danosVivienda.length,
+            equals(loc.danosVivienda.isEmpty ? 0 : 1));
         expect(restored.danosAgricultura.length,
             equals(loc.danosAgricultura.length));
         expect(restored.danosPecuarios.length, equals(loc.danosPecuarios.length));

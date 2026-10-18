@@ -43,9 +43,10 @@ void main() async {
   };
 
   runZonedGuarded(() {
-    // Unico punto de inicializacion de la conectividad. Las pantallas de rol
-    // ya no la arrancan por su cuenta: cada llamada anterior sumaba un timer
-    // periodico de 15 s y una suscripcion que nunca se cancelaban.
+    // Unico punto de inicializacion de la conectividad. Arranca el primer
+    // chequeo de red cuanto antes; el ConnectivityProvider espera el mismo
+    // Future (initialize es idempotente y esperable) para publicar el estado
+    // real a la UI. Las pantallas de rol ya no la arrancan por su cuenta.
     unawaited(ConnectivityService().initialize());
 
     final connectivityProvider = ConnectivityProvider();

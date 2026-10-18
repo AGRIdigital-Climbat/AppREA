@@ -4,8 +4,6 @@ import 'config/theme.dart';
 import 'widgets/custom_button.dart';
 import 'widgets/custom_text_field.dart';
 import 'widgets/status_badge.dart';
-import 'widgets/reporte_card.dart';
-import 'previews/mock_data.dart';
 
 void main() {
   runApp(MaterialApp(
@@ -90,10 +88,6 @@ class PreviewScreen extends StatelessWidget {
               ],
             ),
           ),
-          _section('ReporteCard'),
-          ReporteCard(reporte: mockReporteOfflineStats, onTap: () {}),
-          ReporteCard(reporte: mockReporteOfflinePendiente, onTap: () {}),
-          ReporteCard(reporte: mockReporteOfflineError, onTap: () {}),
           const SizedBox(height: 32),
         ],
       ),

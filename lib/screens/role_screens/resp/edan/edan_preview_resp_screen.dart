@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
 import '../../../../services/edan/edan_localidades_envio_v2_service.dart';
+import '../../../../services/edan/edan_envio_v2.dart';
+import '../../../../services/edan/edan_store_v2.dart';
 import 'edan_resumen_page.dart';
 
 /// Pantalla de previsualización del EDAN.
@@ -42,22 +44,45 @@ class _EdanPreviewRespScreenState extends State<EdanPreviewRespScreen> {
   bool _cargandoSecciones = true;
   String? _errorCarga;
 
-  EdanLocalidad get _localidad => widget.localidad;
+  late EdanLocalidad _localidad;
 
   @override
   void initState() {
     super.initState();
+    _localidad = widget.localidad;
     _cargarSecciones();
   }
 
   Future<void> _cargarSecciones() async {
     try {
-      final sincV2 = EdanLocalidadesEnvioV2Service();
-      await sincV2.cargarSeccionesDesdeSQLite(_localidad);
-      // Resincroniza los flags imp_* desde localidad_secciones_activas (misma
-      // lógica que EdanDocumentoService.construirDocumento) para que la vista
+      // El wizard V2 guarda las secciones en `filas_seccion` (no en las tablas
+      // legacy `seccion_*`). Si el reporte existe en `formularios`, la fuente
+      // local es V2; si no (p.ej. una localidad de OTRO usuario vista online),
+      // se cae al camino legacy, que además preserva las secciones que ya
+      // vinieran en el JSON de la API.
+      await _cargarSeccionesDe(
+          _localidad.uuidEdanLocalidad ?? _localidad.idLocal);
+      // Resincroniza los flags desde las tablas V2 (misma
+      // fuente que el payload /completo) para que la vista
       // previa refleje exactamente lo que se envía en el JSON.
       await _sincronizarFlagsActivas();
+      // Descarga perezosa: si el dispositivo no tiene NINGUNA fila de
+      // sección (primera descarga resumida, caso Urubo), se baja el detalle
+      // una vez del servidor y se recarga. Sin red o sin detalle, se muestra
+      // lo local con sus badges (el nodo `grupos` ya pinta el grupo).
+      if (await _sinDatosLocales()) {
+        final uuid = _localidad.uuidEdanLocalidad ?? _localidad.idLocal;
+        if (uuid != null && uuid.isNotEmpty) {
+          final remoto = await EdanEnvioV2.descargar(uuid);
+          if (remoto != null && mounted) {
+            _localidad = remoto;
+            await _cargarSeccionesDe(uuid);
+            await _sincronizarFlagsActivas();
+            await EdanStoreV2.instance
+                .aplicarGruposServidorAlModelo(_localidad);
+          }
+        }
+      }
       if (mounted) {
         setState(() {
           _cargandoSecciones = false;
@@ -73,11 +98,54 @@ class _EdanPreviewRespScreenState extends State<EdanPreviewRespScreen> {
     }
   }
 
+  Future<void> _cargarSeccionesDe(String? uuid) async {
+    final sincV2 = EdanLocalidadesEnvioV2Service();
+    final esV2 = uuid != null &&
+        uuid.isNotEmpty &&
+        await EdanStoreV2.instance.cargarFormulario(uuid) != null;
+    if (esV2) {
+      await EdanStoreV2.instance.cargarSecciones(_localidad);
+    } else {
+      await sincV2.cargarSeccionesDesdeSQLite(_localidad);
+    }
+  }
+
+  /// `true` si no hay ninguna fila de sección en el modelo (ni en tablas ni
+  /// en snapshot con datos): el detalle vive solo en el servidor.
+  Future<bool> _sinDatosLocales() async {
+    final uuid = _localidad.uuidEdanLocalidad ?? _localidad.idLocal;
+    if (uuid != null && uuid.isNotEmpty) {
+      try {
+        final rutas =
+            await EdanStoreV2.instance.rutasConDatos(uuid);
+        if (rutas.isNotEmpty) return false;
+      } catch (_) {}
+    }
+    _localidad.recalcularFlagsImpacto();
+    return _localidad.impactoPoblacion
+            .where((i) =>
+                i.fallecidos > 0 || i.heridos > 0 || i.desaparecidos > 0)
+            .isEmpty &&
+        _localidad.establecimientosSalud.isEmpty &&
+        _localidad.danosViales.isEmpty &&
+        _localidad.danosInfraPublica.isEmpty &&
+        _localidad.serviciosBasicos.isEmpty &&
+        _localidad.unidadesEducativas.isEmpty &&
+        _localidad.danosVivienda.isEmpty &&
+        _localidad.danosAgricultura.isEmpty &&
+        _localidad.danosPecuarios.isEmpty &&
+        _localidad.infraProductiva.isEmpty &&
+        _localidad.proteccion.where((g) => g.tieneDatos).isEmpty;
+  }
+
   Future<void> _sincronizarFlagsActivas() async {
-    // Fuente de verdad única: `localidad_secciones_activas` en SQLite (misma
-    // lógica que `construirDocumento`, el wizard y los items del dashboard).
+    // Fuente de verdad: `secciones_grupos_local` ∪ `filas_seccion` para
+    // reportes V2 (`_leerActivasV2`), o `localidad_secciones_activas` en el
+    // camino legacy. `unionConGuardados: true` conserva en OR los grupos que
+    // el badge del listado ya mostraba, para que el preview no pueda ocultar
+    // una sección que la tarjeta dice que existe.
     await EdanLocalidadesEnvioV2Service()
-        .aplicarFlagsDesdeSeccionesActivas(_localidad);
+        .aplicarFlagsDesdeSeccionesActivas(_localidad, unionConGuardados: true);
   }
 
   @override
@@ -388,9 +456,21 @@ class _EdanPreviewRespScreenState extends State<EdanPreviewRespScreen> {
           ),
         ],
       ),
-    ).then((confirmado) {
+    ).then((confirmado) async {
       if (confirmado == true && mounted) {
-        Navigator.of(context).pop(true);
+        // La intención se registra ANTES del pop: si el proceso muere entre
+        // el pop y el `_marcarEnviada()` del llamador, el próximo sync igual
+        // envía (idempotente; el llamador confirma el estado visible).
+        final uuid = _localidad.uuidEdanLocalidad;
+        if (uuid != null && uuid.isNotEmpty) {
+          try {
+            await EdanStoreV2.instance.marcarEnvioPendiente(
+              uuid,
+              UgrLocalidadEstado.enviadoUgr.id,
+            );
+          } catch (_) {}
+        }
+        if (mounted) Navigator.of(context).pop(true);
       }
     });
   }

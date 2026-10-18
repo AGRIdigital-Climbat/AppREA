@@ -18,9 +18,16 @@ class ConnectivityProvider extends ChangeNotifier {
   bool get chequeoCompletado => _chequeoCompletado;
 
   Future<void> initialize() async {
+    // Nos suscribimos antes de esperar el primer chequeo para no perder la
+    // transicion inicial. Luego esperamos a que el servicio resuelva el
+    // chequeo: asi `chequeoCompletado` refleja el estado real y no el optimista
+    // de arranque. Antes se copiaba el valor de inmediato (aun en vuelo) y,
+    // con red estable, nunca llegaba a `true`: el boton Sincronizar quedaba
+    // deshabilitado hasta que un corte de red forzara una transicion.
+    _suscribir();
+    await _connectivityService.initialize();
     _isConnected = _connectivityService.isConnected;
     _chequeoCompletado = _connectivityService.chequeoCompletado;
-    _suscribir();
     notifyListeners();
   }
 

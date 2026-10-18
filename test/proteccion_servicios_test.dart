@@ -128,7 +128,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-8',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
       );
       final json = loc.toApiJson();
       final prot = json['proteccion'] as List;
@@ -145,7 +145,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-1of8',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: grupos,
       );
       final prot = loc.proteccionParaEndpointDedicado();
@@ -166,7 +166,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-3of8',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: grupos,
       );
       final prot = loc.proteccionParaEndpointDedicado();
@@ -188,7 +188,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-catalog',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: grupos,
       );
       final prot = loc.proteccionParaEndpointDedicado();
@@ -215,7 +215,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'test-ids',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: grupos,
       );
       final prot = loc.proteccionParaEndpointDedicado();
@@ -228,8 +228,9 @@ void main() {
 
   group('PROTECCIÓN: roundtrip fromJson→toJson', () {
     test('preserva id_seccion, catálogo y datos', () {
+      const id = 'f9f9f9f9-f9f9-4f9f-8f9f-f9f9f9f9f9f9';
       final original = EdanGrupoVulnerable(
-        idSeccion: 'po_999_xyz',
+        idSeccion: id,
         idGrupoVulnerableCatalogo: 7,
         mujeres: 12,
         hombres: 8,
@@ -240,7 +241,7 @@ void main() {
       final json = original.toJson();
       final restored = EdanGrupoVulnerable.fromJson(json);
 
-      expect(restored.idSeccion, 'po_999_xyz');
+      expect(restored.idSeccion, id);
       expect(restored.idGrupoVulnerableCatalogo, 7);
       expect(restored.mujeres, 12);
       expect(restored.hombres, 8);
@@ -250,23 +251,24 @@ void main() {
     });
 
     test('preserva id_seccion y catálogo en toApiJson→fromJson', () {
+      const id = 'e8e8e8e8-e8e8-4e8e-8e8e-e8e8e8e8e8e8';
       final original = EdanGrupoVulnerable(
-        idSeccion: 'po_888_qrs',
+        idSeccion: id,
         idGrupoVulnerableCatalogo: 4,
         mujeres: 3,
       );
       final apiJson = original.toApiJson({'id': 4, 'nombre': 'Mujeres embarazadas'});
-      expect(apiJson['id_seccion'], 'po_888_qrs');
+      expect(apiJson['id_seccion'], id);
 
       final restored = EdanGrupoVulnerable.fromJson(apiJson);
-      expect(restored.idSeccion, 'po_888_qrs');
+      expect(restored.idSeccion, id);
       expect(restored.idGrupoVulnerableCatalogo, 4);
       expect(restored.mujeres, 3);
     });
   });
 
   group('PROTECCIÓN: incompletosPorSeccion', () {
-    test('impProteccion=true + 8 vacíos → sección 10 incompleta', () {
+    test('grupProteccion=true + 8 vacíos → sección 10 incompleta', () {
       final edan = Edan(
         idDepartamento: 7,
         idProvincia: 701,
@@ -275,7 +277,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'loc-prot',
             nombre: 'Barrio',
-            impProteccion: true,
+            grupProteccion: true,
           ),
         ],
         responsable: EdanResponsable(nombre: 'Test', cargo: 'Test'),
@@ -284,7 +286,7 @@ void main() {
       expect(inc.containsKey('10'), isTrue);
     });
 
-    test('impProteccion=true + 1 grupo con datos → sección 10 completa', () {
+    test('grupProteccion=true + 1 grupo con datos → sección 10 completa', () {
       final grupos = List<EdanGrupoVulnerable>.generate(8, (i) =>
           EdanGrupoVulnerable(idSeccion: generarIdSeccion('po')));
       grupos[0].mujeres = 5;
@@ -297,7 +299,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'loc-prot-ok',
             nombre: 'Barrio',
-            impProteccion: true,
+            grupProteccion: true,
             proteccion: grupos,
           ),
         ],
@@ -307,7 +309,7 @@ void main() {
       expect(inc.containsKey('10'), isFalse);
     });
 
-    test('impProteccion=false → sección 10 no evaluada', () {
+    test('grupProteccion=false → sección 10 no evaluada', () {
       final edan = Edan(
         idDepartamento: 7,
         idProvincia: 701,
@@ -316,7 +318,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'loc-no-prot',
             nombre: 'Barrio',
-            impProteccion: false,
+            grupProteccion: false,
           ),
         ],
         responsable: EdanResponsable(nombre: 'Test', cargo: 'Test'),
@@ -510,8 +512,9 @@ void main() {
 
   group('SERVICIOS BÁSICOS: roundtrip fromJson→toJson', () {
     test('preserva todos los campos', () {
+      const id = 'a9a9a9a9-a9a9-4a9a-8a9a-a9a9a9a9a9a9';
       final original = EdanServicioBasicoDetalle(
-        idSeccion: 'sb_rt_1',
+        idSeccion: id,
         tipo: 'telecomunicaciones',
         afectado: true,
         danoParcial: false,
@@ -524,7 +527,7 @@ void main() {
       final json = original.toJson();
       final restored = EdanServicioBasicoDetalle.fromJson(json);
 
-      expect(restored.idSeccion, 'sb_rt_1');
+      expect(restored.idSeccion, id);
       expect(restored.tipo, 'telecomunicaciones');
       expect(restored.afectado, isTrue);
       expect(restored.danoParcial, isFalse);
@@ -578,7 +581,7 @@ void main() {
   });
 
   group('SERVICIOS BÁSICOS: incompletosPorSeccion', () {
-    test('impServicios=true + todos vacíos → sección 06 incompleta', () {
+    test('grupServicios=true + todos vacíos → sección 06 incompleta', () {
       final edan = Edan(
         idDepartamento: 7,
         idProvincia: 701,
@@ -587,7 +590,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'loc-sb',
             nombre: 'Barrio',
-            impServicios: true,
+            grupServicios: true,
             serviciosBasicos: [
               EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
               EdanServicioBasicoDetalle(tipo: 'agua_potable'),
@@ -600,7 +603,7 @@ void main() {
       expect(inc.containsKey('06'), isTrue);
     });
 
-    test('impServicios=true + 1 con danoParcial → sección 06 completa', () {
+    test('grupServicios=true + 1 con danoParcial → sección 06 completa', () {
       final edan = Edan(
         idDepartamento: 7,
         idProvincia: 701,
@@ -609,7 +612,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'loc-sb-ok',
             nombre: 'Barrio',
-            impServicios: true,
+            grupServicios: true,
             serviciosBasicos: [
               EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
               EdanServicioBasicoDetalle(tipo: 'agua_potable', danoParcial: true),
@@ -622,7 +625,7 @@ void main() {
       expect(inc.containsKey('06'), isFalse);
     });
 
-    test('impServicios=false → sección 06 no evaluada', () {
+    test('grupServicios=false → sección 06 no evaluada', () {
       final edan = Edan(
         idDepartamento: 7,
         idProvincia: 701,
@@ -631,7 +634,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'loc-no-sb',
             nombre: 'Barrio',
-            impServicios: false,
+            grupServicios: false,
           ),
         ],
         responsable: EdanResponsable(nombre: 'Test', cargo: 'Test'),
@@ -657,7 +660,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'combo-1',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: grupos,
       );
       final prot = loc.proteccionParaEndpointDedicado();
@@ -670,7 +673,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'combo-sb',
         nombre: 'Loc',
-        impServicios: true,
+        grupServicios: true,
         serviciosBasicos: [
           EdanServicioBasicoDetalle(tipo: 'energia_electrica', danoParcial: true),
           EdanServicioBasicoDetalle(tipo: 'agua_potable'),
@@ -691,7 +694,7 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'combo-imp',
         nombre: 'Loc',
-        impPoblacion: true,
+        grupPoblacion: true,
         impactoPoblacion: [
           EdanImpactoPoblacion(
             idSeccion: generarIdSeccion('im'),
@@ -740,15 +743,15 @@ void main() {
       final loc = EdanLocalidad(
         idLocal: 'full-loc',
         nombre: 'Barrio Completo',
-        impPoblacion: true,
-        impSalud: true,
-        impInfraestructura: true,
-        impServicios: true,
-        impEducacion: true,
-        impVivienda: true,
-        impAgropecuario: true,
-        impProteccion: true,
-        impNecesidades: true,
+        grupPoblacion: true,
+        grupSalud: true,
+        grupInfraestructura: true,
+        grupServicios: true,
+        grupEducacion: true,
+        grupVivienda: true,
+        grupAgropecuario: true,
+        grupProteccion: true,
+        grupNecesidades: true,
         impactoPoblacion: [
           EdanImpactoPoblacion(
             idSeccion: generarIdSeccion('im'),
@@ -776,10 +779,11 @@ void main() {
         proteccion: protGrupos,
       );
 
+      loc.recalcularFlagsImpacto();  // como hace el guardado real
       final json = loc.toApiJson();
 
-      expect(json['imp_poblacion'], true);
-      expect(json['imp_salud'], true);
+      expect(json['grup_poblacion'], true);
+      expect(json['grup_salud'], true);
       expect(json['imp_proteccion'], true);
 
       expect((json['impacto_poblacion'] as List).length, 1);
@@ -790,12 +794,12 @@ void main() {
     });
   });
 
-  group('COMBINACIÓN: localidad con impProteccion=true pero 0 grupos', () {
+  group('COMBINACIÓN: localidad con grupProteccion=true pero 0 grupos', () {
     test('proteccion vacía (lista vacía) → 0 items en API', () {
       final loc = EdanLocalidad(
         idLocal: 'empty-prot',
         nombre: 'Loc',
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: [],
       );
       final prot = (loc.toApiJson()['proteccion'] as List);
@@ -811,7 +815,7 @@ void main() {
           EdanLocalidad(
             idLocal: 'inc-empty',
             nombre: 'Barrio',
-            impProteccion: true,
+            grupProteccion: true,
             proteccion: [],
           ),
         ],
@@ -836,13 +840,13 @@ void main() {
           EdanLocalidad(
             idLocal: 'ml-1',
             nombre: 'Con datos',
-            impProteccion: true,
+            grupProteccion: true,
             proteccion: prot1,
           ),
           EdanLocalidad(
             idLocal: 'ml-2',
             nombre: 'Sin datos',
-            impProteccion: true,
+            grupProteccion: true,
           ),
         ],
         responsable: EdanResponsable(nombre: 'R', cargo: 'C'),
@@ -927,8 +931,8 @@ void main() {
         final loc = EdanLocalidad(
           idLocal: 'stress-$t',
           nombre: 'Loc$t',
-          impProteccion: true,
-          impServicios: true,
+          grupProteccion: true,
+          grupServicios: true,
           proteccion: protGrupos,
           serviciosBasicos: servicios,
         );
@@ -953,7 +957,7 @@ void main() {
   // ─────────────────────────────────────────────────────
   group('SCHEMA API: proteccion concuerda con contrato', () {
     EdanLocalidad _buildLocalidad({
-      required bool impProteccion,
+      required bool grupProteccion,
       required List<EdanGrupoVulnerable> proteccion,
     }) {
       final loc = EdanLocalidad(
@@ -966,15 +970,15 @@ void main() {
         idMunicipio: 70101,
         fechaLlenado: '2026-08-27',
         fechaEvento: '2026-08-27',
-        impPoblacion: false,
-        impSalud: false,
-        impInfraestructura: false,
-        impServicios: false,
-        impEducacion: false,
-        impVivienda: false,
-        impAgropecuario: false,
-        impProteccion: impProteccion,
-        impNecesidades: false,
+        grupPoblacion: false,
+        grupSalud: false,
+        grupInfraestructura: false,
+        grupServicios: false,
+        grupEducacion: false,
+        grupVivienda: false,
+        grupAgropecuario: false,
+        grupProteccion: grupProteccion,
+        grupNecesidades: false,
         proteccion: proteccion,
       );
       return loc;
@@ -982,7 +986,7 @@ void main() {
 
     test('toApiJson() produce JSON válido con proteccion[] dentro de localidad', () {
       final loc = _buildLocalidad(
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: List<EdanGrupoVulnerable>.generate(8, (i) =>
             EdanGrupoVulnerable(
               idSeccion: generarIdSeccion('po'),
@@ -993,6 +997,7 @@ void main() {
       loc.proteccion[0].hombres = 3;
       loc.proteccion[0].apoyoPsicologico = true;
 
+      loc.recalcularFlagsImpacto();  // como hace el guardado real
       final json = loc.toApiJson();
 
       expect(json['proteccion'], isA<List>(), reason: 'proteccion debe ser array');
@@ -1167,7 +1172,7 @@ void main() {
 
     test('roundtrip completo SQLite: toApiJson preserva todo después de fromJson→toJson', () {
       final original = EdanGrupoVulnerable(
-        idSeccion: generarIdSeccion('po'),
+        idSeccion: 'b8b8b8b8-b8b8-4b8b-8b8b-b8b8b8b8b8b8',
         idGrupoVulnerableCatalogo: 4,
         nombreGrupo: 'Mujeres lactantes',
         mujeres: 7,
@@ -1232,7 +1237,7 @@ void main() {
       grupos[2].hombres = 3;
       grupos[5].mujeres = 10;
 
-      final prot = _buildLocalidad(impProteccion: true, proteccion: grupos)
+      final prot = _buildLocalidad(grupProteccion: true, proteccion: grupos)
           .proteccionParaEndpointDedicado();
 
       expect(prot.length, 2, reason: 'solo 2 grupos con datos');
@@ -1244,7 +1249,7 @@ void main() {
 
     test('fromJson→toJson→toApiJson: 8 default groups roundtrip completo', () {
       final original = _buildLocalidad(
-        impProteccion: true,
+        grupProteccion: true,
         proteccion: List<EdanGrupoVulnerable>.generate(8, (i) =>
             EdanGrupoVulnerable(
               idSeccion: generarIdSeccion('po'),
@@ -1270,7 +1275,7 @@ void main() {
       expect(api.length, 2, reason: 'solo 2 con datos');
     });
 
-    test('envío completo: 1 localidad con impProteccion=true y 3 grupos con datos', () {
+    test('envío completo: 1 localidad con grupProteccion=true y 3 grupos con datos', () {
       final grupos = List<EdanGrupoVulnerable>.generate(8, (i) =>
           EdanGrupoVulnerable(
             idSeccion: generarIdSeccion('po'),
@@ -1285,11 +1290,11 @@ void main() {
       grupos[6].hombres = 2;
       grupos[6].reposicionDocumentos = true;
 
-      final loc = _buildLocalidad(impProteccion: true, proteccion: grupos);
+      final loc = _buildLocalidad(grupProteccion: true, proteccion: grupos);
       final prot = loc.proteccionParaEndpointDedicado();
 
       expect(prot.length, 3);
-      expect(loc.impProteccion, isTrue);
+      expect(loc.grupProteccion, isTrue);
 
       for (final item in prot) {
         expect(item['id_seccion'], startsWith('po_'));
@@ -1308,7 +1313,7 @@ void main() {
             mujeres: (i + 1) * 2,
           ));
 
-      final loc = _buildLocalidad(impProteccion: true, proteccion: grupos);
+      final loc = _buildLocalidad(grupProteccion: true, proteccion: grupos);
       final prot = loc.proteccionParaEndpointDedicado();
 
       expect(prot.length, 8, reason: 'todos tienen mujeres > 0');
@@ -1349,7 +1354,7 @@ void main() {
       porDefecto[0].mujeres = 4;
       porDefecto[0].hombres = 6;
 
-      final loc = _buildLocalidad(impProteccion: true, proteccion: porDefecto);
+      final loc = _buildLocalidad(grupProteccion: true, proteccion: porDefecto);
       final prot = loc.proteccionParaEndpointDedicado();
       expect(prot.length, 1, reason: 'solo grupo 0 tiene datos');
       final item = prot[0];

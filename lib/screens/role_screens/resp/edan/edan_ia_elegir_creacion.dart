@@ -7,6 +7,7 @@ import '../../../../config/theme.dart';
 import '../../../../providers/edan_ia_borrador_provider.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/connectivity_service.dart';
+import '../../../../services/edan/edan_store_v2.dart';
 import '../../ugr/ugr_route.dart';
 import 'edan_form_wizard.dart';
 import 'edan_ia_asistente_screen.dart';
@@ -204,7 +205,10 @@ Future<bool> abrirCreacionEdan(
   switch (modo) {
     case EdanModoCreacion.wizard:
       final creado = await Navigator.of(context).push<bool>(
-        ugrRoute(const EdanFormWizard(), palette: Palettes.rea),
+        ugrRoute(
+          EdanFormWizard(storeV2: EdanStoreV2.instance),
+          palette: Palettes.rea,
+        ),
       );
       return creado == true;
 

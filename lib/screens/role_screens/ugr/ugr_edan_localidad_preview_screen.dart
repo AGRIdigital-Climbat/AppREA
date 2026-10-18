@@ -157,12 +157,12 @@ class _UgrEdanLocalidadPreviewScreenState
       '13',
       if (localidad.impImpactoPoblacion || localidad.impPrimeraRespuesta) '03',
       if (localidad.impSaludEstablecimientos || localidad.impNecesidadSalud) '04',
-      if (localidad.impInfraestructura) '05',
-      if (localidad.impServicios) '06',
-      if (localidad.impEducacion) '07',
-      if (localidad.impVivienda) '08',
-      if (localidad.impAgropecuario) '09',
-      if (localidad.impProteccion) '10',
+      if (localidad.grupInfraestructura) '05',
+      if (localidad.grupServicios) '06',
+      if (localidad.grupEducacion) '07',
+      if (localidad.grupVivienda) '08',
+      if (localidad.grupAgropecuario) '09',
+      if (localidad.grupProteccion) '10',
       if (localidad.impNecesidadHumanitaria) '11',
     };
 
@@ -355,15 +355,15 @@ class _UgrEdanLocalidadPreviewScreenState
 
   List<String> _impactosLocalidad() {
     return [
-      if (localidad.impPoblacion) 'Población',
-      if (localidad.impSalud) 'Salud',
-      if (localidad.impInfraestructura) 'Infraestructura',
-      if (localidad.impServicios) 'Servicios básicos',
-      if (localidad.impEducacion) 'Educación',
-      if (localidad.impVivienda) 'Vivienda',
-      if (localidad.impAgropecuario) 'Agropecuario',
-      if (localidad.impProteccion) 'Protección',
-      if (localidad.impNecesidades) 'Necesidades humanitarias',
+      if (localidad.grupPoblacion) 'Población',
+      if (localidad.grupSalud) 'Salud',
+      if (localidad.grupInfraestructura) 'Infraestructura',
+      if (localidad.grupServicios) 'Servicios básicos',
+      if (localidad.grupEducacion) 'Educación',
+      if (localidad.grupVivienda) 'Vivienda',
+      if (localidad.grupAgropecuario) 'Agropecuario',
+      if (localidad.grupProteccion) 'Protección',
+      if (localidad.grupNecesidades) 'Necesidades humanitarias',
     ];
   }
 

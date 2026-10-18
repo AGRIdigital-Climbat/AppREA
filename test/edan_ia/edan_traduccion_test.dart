@@ -527,11 +527,11 @@ void main() {
       final r = traducir(EdanBorradorIa());
       expect(r.seccionesActivas, isEmpty);
       final l = r.localidad;
-      expect(l.impPoblacion, isFalse);
-      expect(l.impSalud, isFalse);
-      expect(l.impAgropecuario, isFalse);
+      expect(l.grupPoblacion, isFalse);
+      expect(l.grupSalud, isFalse);
+      expect(l.grupAgropecuario, isFalse);
       expect(l.impProteccion, isFalse);
-      expect(l.impNecesidades, isFalse);
+      expect(l.grupNecesidades, isFalse);
     });
 
     test('cada sección activa su flag propio y el suyo de familia', () {
@@ -539,9 +539,9 @@ void main() {
         ..agricultura = [BchAgricultura(cultivo: 'Maíz', hasAfectadas: 120)]);
       expect(r.seccionesActivas, ['danos-agricultura']);
       expect(r.localidad.impDanosAgricultura, isTrue);
-      expect(r.localidad.impAgropecuario, isTrue);
+      expect(r.localidad.grupAgropecuario, isTrue);
       expect(r.localidad.impDanosPecuarios, isFalse);
-      expect(r.localidad.impEducacion, isFalse);
+      expect(r.localidad.grupEducacion, isFalse);
     });
 
     test('varias secciones de la misma familia encienden el flag de familia', () {
@@ -549,20 +549,24 @@ void main() {
             ..agricultura = [BchAgricultura(cultivo: 'Maíz', hasAfectadas: 1)]
             ..pecuario = [BchPecuario(especie: 'Vacas', animalesAfectados: 1)])
           .localidad;
-      expect(l.impAgropecuario, isTrue);
+      expect(l.grupAgropecuario, isTrue);
       expect(l.impDanosAgricultura, isTrue);
       expect(l.impDanosPecuarios, isTrue);
     });
 
-    test('necesidad de salud enciende salud y necesidades', () {
+    test('necesidad de salud enciende salud, y NO necesidades', () {
       final b = EdanBorradorIa()..necesidadSalud.inundacion = 'dengue';
       final l = traducir(b).localidad;
       expect(l.impNecesidadSalud, isTrue);
-      expect(l.impSalud, isTrue);
-      expect(l.impNecesidades, isTrue);
+      expect(l.grupSalud, isTrue);
+      // La matriz grupo × secciones es la autoridad (§20.2): `grup_necesidades`
+      // sale SOLO de `necesidad-humanitaria`. Antes `necesidad-salud` también
+      // la encendía, acoplando page04 con page11.
+      expect(l.grupNecesidades, isFalse,
+          reason: 'necesidad-salud pertenece al grupo salud, no al de necesidades');
     });
 
-    test('todas las secciones juntas cubren los 22 flags', () {
+    test('todas las secciones juntas cubren los 23 flags', () {
       final b = EdanBorradorIa()
         ..impactoDe('Niño(a) 0-5 años')!.fallecidos = 1
         ..primeraRespuesta.busqueda = true
@@ -583,14 +587,14 @@ void main() {
       expect(r.avisos, isEmpty, reason: 'esta ficha no debe dejar avisos');
       final l = r.localidad;
       for (final f in [
-        l.impPoblacion,
-        l.impSalud,
-        l.impInfraestructura,
-        l.impServicios,
-        l.impEducacion,
-        l.impVivienda,
-        l.impAgropecuario,
-        l.impNecesidades,
+        l.grupPoblacion,
+        l.grupSalud,
+        l.grupInfraestructura,
+        l.grupServicios,
+        l.grupEducacion,
+        l.grupVivienda,
+        l.grupAgropecuario,
+        l.grupNecesidades,
         l.impImpactoPoblacion,
         l.impPrimeraRespuesta,
         l.impSaludEstablecimientos,

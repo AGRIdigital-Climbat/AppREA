@@ -6,7 +6,6 @@ import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 import '../models/edan.dart';
 import '../models/id_seccion_helper.dart';
-import '../models/reporte_offline.dart';
 import 'edan_secciones_registry.dart';
 
 class DatabaseHelper {
@@ -36,12 +35,18 @@ class DatabaseHelper {
     return _database!;
   }
 
+  /// Versión del esquema que crea/migra [_onUpgrade]. **Única fuente**: la
+  /// comparan `openDatabase` y los tests que verifican que la BD de prueba es
+  /// la misma de la app (históricamente estos se quedaban en 30 y fallaban al
+  /// migrar a 32).
+  static const int versionEsquema = 41;
+
   Future<Database> _initDatabase() async {
     final path =
         rutaDePrueba ?? join(await _localDbPath(), 'rea_database.db');
     return await openDatabase(
       path,
-      version: 29,
+      version: versionEsquema,
       onCreate: _createDatabase,
       onUpgrade: _onUpgrade,
       onOpen: _onOpen,
@@ -61,52 +66,6 @@ class DatabaseHelper {
   }
 
   Future<void> _createDatabase(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE reportes_offline (
-        id_local INTEGER PRIMARY KEY AUTOINCREMENT,
-        id_server INTEGER,
-        usuario_id INTEGER NOT NULL,
-        departamento_id INTEGER NOT NULL,
-        provincia_id INTEGER NOT NULL,
-        municipio_id INTEGER NOT NULL,
-        comunidad TEXT NOT NULL,
-        departamento_nombre TEXT,
-        provincia_nombre TEXT,
-        municipio_nombre TEXT,
-        fecha_evento TEXT NOT NULL,
-        hora_evento TEXT,
-        tipo_evento_id INTEGER NOT NULL,
-        coordenada_lat REAL,
-        coordenada_lon REAL,
-        descripcion TEXT,
-        estado_id INTEGER DEFAULT 1,
-        estado_nombre TEXT,
-        categorias TEXT,
-        imagenes TEXT,
-        fotografia_server_path TEXT,
-        sincronizado INTEGER DEFAULT 0,
-        pendiente_eliminacion INTEGER DEFAULT 0,
-        pendiente_actualizacion INTEGER DEFAULT 0,
-        es_borrador INTEGER DEFAULT 0,
-        fecha_creacion TEXT NOT NULL,
-        fecha_modificacion TEXT,
-        intentos_sync INTEGER DEFAULT 0,
-        ultimo_error TEXT,
-        imagen_descargada INTEGER DEFAULT 0
-      )
-    ''');
-
-    await db.execute('''
-      CREATE TABLE borradores (
-        id_borrador INTEGER PRIMARY KEY AUTOINCREMENT,
-        usuario_id INTEGER NOT NULL,
-        datos_formulario TEXT NOT NULL,
-        imagenes_paths TEXT,
-        fecha_creacion TEXT NOT NULL,
-        fecha_modificacion TEXT NOT NULL
-      )
-    ''');
-
     await db.execute('''
       CREATE TABLE sincronizaciones (
         id_sync INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -302,15 +261,15 @@ class DatabaseHelper {
         total_poblacion_afectada INTEGER DEFAULT 0,
         total_familias_afectadas INTEGER DEFAULT 0,
         total_familias_damnificadas INTEGER DEFAULT 0,
-        imp_poblacion INTEGER DEFAULT 0,
-        imp_salud INTEGER DEFAULT 0,
-        imp_infraestructura INTEGER DEFAULT 0,
-        imp_servicios INTEGER DEFAULT 0,
-        imp_educacion INTEGER DEFAULT 0,
-        imp_vivienda INTEGER DEFAULT 0,
-        imp_agropecuario INTEGER DEFAULT 0,
-        imp_proteccion INTEGER DEFAULT 0,
-        imp_necesidades INTEGER DEFAULT 0,
+        grup_poblacion INTEGER DEFAULT 0,
+        grup_salud INTEGER DEFAULT 0,
+        grup_infraestructura INTEGER DEFAULT 0,
+        grup_servicios INTEGER DEFAULT 0,
+        grup_educacion INTEGER DEFAULT 0,
+        grup_vivienda INTEGER DEFAULT 0,
+        grup_agropecuario INTEGER DEFAULT 0,
+        grup_proteccion INTEGER DEFAULT 0,
+        grup_necesidades INTEGER DEFAULT 0,
         id_edan_localidad_estado INTEGER,
         estado_localidad TEXT,
         datos_json TEXT NOT NULL,
@@ -351,469 +310,235 @@ class DatabaseHelper {
         PRIMARY KEY (id_local, seccion)
       )
     ''');
+
+    // Schema V2 (v30): formularios, filas de sección, viviendas, fotos y colas.
+    await _crearTablasV2(db);
   }
 
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN departamento_nombre TEXT',
-      );
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN provincia_nombre TEXT',
-      );
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN municipio_nombre TEXT',
-      );
-    }
-    if (oldVersion < 3) {
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN estado_nombre TEXT',
-      );
-    }
-    if (oldVersion < 4) {
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN fotografia_server_path TEXT',
-      );
-    }
-    if (oldVersion < 5) {
-      await db.execute(
-        'CREATE TABLE catalogo_estados (id_estado INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)',
-      );
-      await db.execute(
-        'CREATE TABLE catalogo_categorias (id_categoria INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)',
-      );
-      await db.execute(
-        'CREATE TABLE catalogo_tipos_evento (id_tipo_evento INTEGER PRIMARY KEY, nombre TEXT NOT NULL)',
-      );
-    }
-    if (oldVersion < 12) {
-      await db.execute(
-        'CREATE TABLE catalogo_tipo_localidad (id_tipo_localidad INTEGER PRIMARY KEY, nombre TEXT NOT NULL, descripcion TEXT, orden INTEGER)',
-      );
-    }
-    if (oldVersion < 6) {
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN es_borrador INTEGER DEFAULT 0',
-      );
-    }
-    if (oldVersion < 7) {
-      await db.execute(
-        'ALTER TABLE reportes_offline ADD COLUMN imagen_descargada INTEGER DEFAULT 0',
-      );
-    }
-    if (oldVersion < 8) {
-      await db.execute('''
-        CREATE TABLE edans_offline (
-          id_local INTEGER PRIMARY KEY AUTOINCREMENT,
-          id_server INTEGER,
-          id_edan INTEGER,
-          usuario_id INTEGER NOT NULL,
-          codigo_edan TEXT,
-          municipio_id INTEGER,
-          municipio_nombre TEXT,
-          fecha_evento TEXT,
-          fecha_llenado TEXT,
-          id_estado INTEGER DEFAULT 1,
-          estado_edan TEXT DEFAULT 'borrador',
-          datos_json TEXT NOT NULL,
-          sincronizado INTEGER DEFAULT 0,
-          pendiente_eliminacion INTEGER DEFAULT 0,
-          pendiente_actualizacion INTEGER DEFAULT 0,
-          es_borrador INTEGER DEFAULT 0,
-          fecha_creacion TEXT NOT NULL,
-          fecha_modificacion TEXT,
-          intentos_sync INTEGER DEFAULT 0,
-          ultimo_error TEXT
-        )
-      ''');
-    }
-    if (oldVersion < 9) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS config (
-          clave TEXT PRIMARY KEY,
-          valor TEXT NOT NULL
-        )
-      ''');
-    }
-    if (oldVersion < 10) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_estados_edan (
-          id_estado INTEGER PRIMARY KEY,
-          nombre TEXT NOT NULL,
-          descripcion TEXT,
-          orden INTEGER
-        )
-      ''');
-    }
-    if (oldVersion < 11) {
-      // Migración v11: limpiar datos viejos y crear tabla localidades_offline
-      // según decisión de diseño: dropear tablas edans_offline y recrear
-      await db.execute('DROP TABLE IF EXISTS edans_offline');
-      await db.execute('''
-        CREATE TABLE edans_offline (
-          id_local INTEGER PRIMARY KEY AUTOINCREMENT,
-          id_server INTEGER,
-          id_edan INTEGER,
-          usuario_id INTEGER NOT NULL,
-          codigo_edan TEXT,
-          municipio_id INTEGER,
-          municipio_nombre TEXT,
-          fecha_evento TEXT,
-          fecha_llenado TEXT,
-          id_estado INTEGER DEFAULT 1,
-          estado_edan TEXT DEFAULT 'borrador',
-          datos_json TEXT NOT NULL,
-          sincronizado INTEGER DEFAULT 0,
-          pendiente_eliminacion INTEGER DEFAULT 0,
-          pendiente_actualizacion INTEGER DEFAULT 0,
-          es_borrador INTEGER DEFAULT 0,
-          fecha_creacion TEXT NOT NULL,
-          fecha_modificacion TEXT,
-          intentos_sync INTEGER DEFAULT 0,
-          ultimo_error TEXT
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE localidades_offline (
-          id_local TEXT PRIMARY KEY,
-          id_server INTEGER,
-          id_edan INTEGER,
-          es_huerfana INTEGER DEFAULT 1,
-          usuario_id INTEGER NOT NULL,
-          id_tipo_localidad INTEGER,
-          id_tipo_evento INTEGER,
-          id_departamento INTEGER,
-          id_provincia INTEGER,
-          id_municipio INTEGER,
-          localidad TEXT,
-          fecha_llenado TEXT,
-          fecha_evento TEXT,
-          hora_evento TEXT,
-          total_poblacion_afectada INTEGER DEFAULT 0,
-          total_familias_afectadas INTEGER DEFAULT 0,
-          total_familias_damnificadas INTEGER DEFAULT 0,
-          imp_poblacion INTEGER DEFAULT 0,
-          imp_salud INTEGER DEFAULT 0,
-          imp_infraestructura INTEGER DEFAULT 0,
-          imp_servicios INTEGER DEFAULT 0,
-          imp_educacion INTEGER DEFAULT 0,
-          imp_vivienda INTEGER DEFAULT 0,
-          imp_agropecuario INTEGER DEFAULT 0,
-          imp_proteccion INTEGER DEFAULT 0,
-          imp_necesidades INTEGER DEFAULT 0,
-          id_edan_localidad_estado INTEGER,
-          estado_localidad TEXT,
-          datos_json TEXT NOT NULL,
-          sincronizado INTEGER DEFAULT 0,
-          pendiente_eliminacion INTEGER DEFAULT 0,
-          pendiente_actualizacion INTEGER DEFAULT 0,
-          fecha_creacion TEXT NOT NULL,
-          fecha_modificacion TEXT,
-          intentos_sync INTEGER DEFAULT 0,
-          ultimo_error TEXT
-        )
-      ''');
-    }
-    if (oldVersion < 13) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_cultivos (
-          id_cultivo INTEGER PRIMARY KEY,
-          nombre TEXT NOT NULL,
-          grupo TEXT
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_pecuario_grupos (
-          id_pecuario_grupo INTEGER PRIMARY KEY,
-          nombre TEXT NOT NULL,
-          grupo TEXT
-        )
-      ''');
-    }
-    if (oldVersion < 14) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_grupo_vulnerable (
-          id_grupo_vulnerable INTEGER PRIMARY KEY,
-          codigo TEXT NOT NULL,
-          nombre TEXT NOT NULL,
-          descripcion TEXT,
-          orden INTEGER,
-          activo INTEGER DEFAULT 1
-        )
-      ''');
-    }
-    if (oldVersion < 15) {
-      await db.execute(
-        'ALTER TABLE localidades_offline ADD COLUMN departamento_nombre TEXT',
-      );
-      await db.execute(
-        'ALTER TABLE localidades_offline ADD COLUMN provincia_nombre TEXT',
-      );
-      await db.execute(
-        'ALTER TABLE localidades_offline ADD COLUMN municipio_nombre TEXT',
-      );
-    }
-    if (oldVersion < 16) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_departamentos (
-          id INTEGER PRIMARY KEY,
-          codigo_ine TEXT,
-          nombre TEXT NOT NULL
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_provincias (
-          id INTEGER PRIMARY KEY,
-          codigo_ine TEXT,
-          id_departamento INTEGER,
-          nombre TEXT NOT NULL
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_municipios (
-          id INTEGER PRIMARY KEY,
-          codigo_ine TEXT,
-          id_departamento INTEGER,
-          id_provincia INTEGER,
-          nombre TEXT NOT NULL
-        )
-      ''');
-    }
-    if (oldVersion < 17) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_tipos_repositorio (
-          id_tipo_documento INTEGER PRIMARY KEY,
-          codigo TEXT NOT NULL,
-          nombre TEXT NOT NULL,
-          descripcion TEXT,
-          orden INTEGER DEFAULT 0,
-          activo INTEGER DEFAULT 1,
-          extensiones_permitidas TEXT DEFAULT 'pdf',
-          tamano_maximo_bytes INTEGER DEFAULT 52428800
-        )
-      ''');
-    }
-    if (oldVersion < 18) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS catalogo_grupo_etario (
-          id_grupo_etario INTEGER PRIMARY KEY,
-          codigo TEXT NOT NULL,
-          nombre TEXT NOT NULL,
-          descripcion TEXT,
-          orden INTEGER,
-          activo INTEGER DEFAULT 1
-        )
-      ''');
-    }
-    if (oldVersion < 19) {
-      await db.execute('''
-        CREATE TABLE localidad_seccion_sync (
-          id_local TEXT NOT NULL,
-          seccion TEXT NOT NULL,
-          modificada INTEGER DEFAULT 0,
-          fecha_modificacion TEXT,
-          PRIMARY KEY (id_local, seccion)
-        )
-      ''');
-      final secciones = EdanSeccionesRegistry.rutasV2Todas();
-      final unionSecciones = secciones
-          .map((s) => "SELECT '$s' AS seccion")
-          .join(' UNION ALL ');
-      await db.execute('''
-        INSERT INTO localidad_seccion_sync
-          (id_local, seccion, modificada, fecha_modificacion)
-        SELECT l.id_local, s.seccion,
-               CASE
-                 WHEN l.sincronizado = 0 AND l.pendiente_eliminacion = 0
-                 THEN 1 ELSE 0
-               END,
-               l.fecha_modificacion
-        FROM localidades_offline l
-        CROSS JOIN ($unionSecciones) s
-        WHERE NOT EXISTS (
-          SELECT 1 FROM localidad_seccion_sync x
-          WHERE x.id_local = l.id_local AND x.seccion = s.seccion
-        )
-      ''');
-    }
-    // v20: tablas de sección por Modelo A (roles RESP). Se inicia limpio; las
-    // nuevas tablas por sección con columna `editado` (1 = pendiente de envío).
-    // `localidades_offline`/`datos_json`/`localidad_seccion_sync` se conservan
-    // para el rol 6 UGR (consolidar).
-    if (oldVersion < 20) {
-      await _crearTablasSeccionV20(db);
-    }
-    // v21: alinear las tablas de sección RESP con el schema v2 del backend.
-    // Recrea desde cero las 5 tablas cuyas columnas no coinciden con las claves
-    // que el modelo emite (causa de `DatabaseException: no column named` en
-    // guardarFilasSeccion). Se conservan las columnas de edición/sync
-    // (`editado`, `marcado_borrar`, `insertada_en_server`). Rod 6 UGR intacto.
-    if (oldVersion < 21) {
-      await _recrearTablasSeccionV21(db);
-    }
-    // v22: extender foto_pendiente con tracking de descarga y retry.
-    if (oldVersion < 22) {
-      await _migrarFotoPendienteV22(db);
-    }
-    // v23: columna editado en localidades_offline como flag único de pendiente.
-    if (oldVersion < 23) {
-      await db.execute(
-        'ALTER TABLE localidades_offline ADD COLUMN editado INTEGER NOT NULL DEFAULT 0',
-      );
-      // Backfill: sincronizado=0 o pendiente_actualizacion=1 → editado=1.
-      await db.execute(
-        'UPDATE localidades_offline SET editado = 1 WHERE sincronizado = 0',
-      );
-      await db.execute(
-        'UPDATE localidades_offline SET editado = 1 WHERE pendiente_actualizacion = 1',
-      );
-      // Backfill desde secciones: si alguna tabla tiene editado=1 para esa localidad.
-      for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
-        await db.execute(
-          'UPDATE localidades_offline SET editado = 1 '
-          'WHERE id_local IN (SELECT DISTINCT id_local FROM $tabla WHERE editado = 1)',
-        );
-      }
-    }
-    // v24: fecha_modificacion_local en cada tabla de sección (LWW por fila).
-    // La app compara fecha a fecha con el servidor en el pull y envía la fecha
-    // en cada POST de sección (GREATEST en el server). Columna opcional para
-    // instalaciones nuevas (ya existe en CREATE TABLE) y backfill en las viejas.
-    if (oldVersion < 24) {
-      for (final tabla in EdanSeccionesRegistry.tablasSqlite()) {
-        // Idempotente: solo agrega la columna si no existe aún (una versión
-        // vieja que se migra en cascada ya la creó en su CREATE TABLE).
-        final columnas = await db.rawQuery('PRAGMA table_info($tabla)');
-        final nombres = columnas.map((c) => c['name'] as String).toSet();
-        if (!nombres.contains('fecha_modificacion_local')) {
-          await db.execute(
-            'ALTER TABLE $tabla ADD COLUMN fecha_modificacion_local TEXT',
-          );
-        }
-        await db.execute(
-          'UPDATE $tabla SET fecha_modificacion_local = datetime(\'now\') '
-          'WHERE fecha_modificacion_local IS NULL',
-        );
-      }
-    }
-    if (oldVersion < 25) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS localidad_secciones_activas (
-          id_local TEXT NOT NULL,
-          seccion TEXT NOT NULL,
-          activa INTEGER DEFAULT 1,
-          PRIMARY KEY (id_local, seccion)
-        )
-      ''');
-    }
-    if (oldVersion < 26) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS foto_pendiente_v2 (
-          id_foto TEXT PRIMARY KEY,
-          id_local TEXT NOT NULL,
-          id_seccion TEXT NOT NULL,
-          ruta_local_archivo TEXT,
-          path_servidor TEXT,
-          latitud REAL,
-          longitud REAL,
-          subida INTEGER DEFAULT 0,
-          descargada INTEGER DEFAULT 0,
-          intentos INTEGER DEFAULT 0,
-          ultimo_error TEXT,
-          fecha_creacion TEXT NOT NULL
-        )
-      ''');
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS pendientes_eliminar (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          id_local TEXT NOT NULL,
-          id_server INTEGER,
-          id_seccion TEXT NOT NULL,
-          ruta_v2 TEXT NOT NULL,
-          tabla_sqlite TEXT NOT NULL,
-          insertada_en_server INTEGER DEFAULT 0,
-          sincronizado INTEGER DEFAULT 0,
-          fecha_creacion TEXT NOT NULL
-        )
-      ''');
-    }
-    if (oldVersion < 27) {
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS pendientes_eliminar (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          id_local TEXT NOT NULL,
-          id_server INTEGER,
-          id_seccion TEXT NOT NULL,
-          ruta_v2 TEXT NOT NULL,
-          tabla_sqlite TEXT NOT NULL,
-          insertada_en_server INTEGER DEFAULT 0,
-          sincronizado INTEGER DEFAULT 0,
-          fecha_creacion TEXT NOT NULL
-        )
-      ''');
-    }
-    if (oldVersion < 28) {
-      // Asegura que la tabla de cola de deletes offline exista. Cubre el caso
-      // de DBs inicializadas directamente en una versión alta (>= 26) cuyo
-      // onCreate no creaba `pendientes_eliminar`. Idempotente: no toca datos.
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS pendientes_eliminar (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          id_local TEXT NOT NULL,
-          id_server INTEGER,
-          id_seccion TEXT NOT NULL,
-          ruta_v2 TEXT NOT NULL,
-          tabla_sqlite TEXT NOT NULL,
-          insertada_en_server INTEGER DEFAULT 0,
-          sincronizado INTEGER DEFAULT 0,
-          fecha_creacion TEXT NOT NULL
-        )
-      ''');
-    }
+  Future<void> _crearTablasV2(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS formularios (
+        uuid_edan_localidad TEXT PRIMARY KEY,
+        id_server INTEGER,
+        localidad TEXT NOT NULL DEFAULT '',
+        id_municipio INTEGER,
+        id_departamento INTEGER,
+        id_provincia INTEGER,
+        id_tipo_evento INTEGER,
+        id_tipo_localidad INTEGER,
+        id_edan_localidad_estado INTEGER,
+        fecha_llenado TEXT,
+        fecha_evento TEXT,
+        hora_evento TEXT,
+        total_poblacion_afectada INTEGER NOT NULL DEFAULT 0,
+        total_familias_afectadas INTEGER NOT NULL DEFAULT 0,
+        total_familias_damnificadas INTEGER NOT NULL DEFAULT 0,
+        grup_poblacion INTEGER NOT NULL DEFAULT 0,
+        grup_salud INTEGER NOT NULL DEFAULT 0,
+        grup_infraestructura INTEGER NOT NULL DEFAULT 0,
+        grup_servicios INTEGER NOT NULL DEFAULT 0,
+        grup_educacion INTEGER NOT NULL DEFAULT 0,
+        grup_vivienda INTEGER NOT NULL DEFAULT 0,
+        grup_agropecuario INTEGER NOT NULL DEFAULT 0,
+        grup_proteccion INTEGER NOT NULL DEFAULT 0,
+        grup_necesidades INTEGER NOT NULL DEFAULT 0,
+        secciones_activas_json TEXT NOT NULL DEFAULT '[]',
+        fecha_modificacion TEXT,
+        estado_local TEXT NOT NULL DEFAULT 'borrador',
+        id_usuario INTEGER,
+        datos_json TEXT,
+        datos_json_servidor TEXT,
+        pendiente_push INTEGER NOT NULL DEFAULT 0,
+        sync_state TEXT NOT NULL DEFAULT 'pending_create',
+        pending_submit INTEGER NOT NULL DEFAULT 0,
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        estado_destino INTEGER,
+        firma_contenido TEXT,
+        firma_enviada TEXT,
+        usuario_nombre TEXT,
+        usuario_login TEXT,
+        id_rol INTEGER,
+        usuario_rol TEXT,
+        estado_nombre TEXT,
+        tipo_evento_nombre TEXT,
+        tipo_localidad_nombre TEXT,
+        departamento_nombre TEXT,
+        departamento_codigo TEXT,
+        provincia_nombre TEXT,
+        provincia_codigo TEXT,
+        municipio_nombre TEXT,
+        municipio_codigo TEXT,
+        id_edan INTEGER,
+        edan_codigo TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_formularios_id_server
+        ON formularios(id_server) WHERE id_server IS NOT NULL
+    ''');
 
-    if (oldVersion < 29) {
-      // Limpieza de duplicados por identidad de catálogo: un mismo grupo
-      // vulnerable / grupo etario no debe figurar más de una vez por
-      // localidad (aunque cada fila arrastre un id_seccion distinto).
-      // Se conserva la primera fila insertada (rowid más bajo).
-      await db.execute('''
-        DELETE FROM seccion_proteccion
-        WHERE id_local IS NOT NULL
-          AND id_grupo_vulnerable_catalogo IS NOT NULL
-          AND rowid NOT IN (
-            SELECT MIN(rowid)
-            FROM seccion_proteccion
-            WHERE id_local IS NOT NULL
-              AND id_grupo_vulnerable_catalogo IS NOT NULL
-            GROUP BY id_local, id_grupo_vulnerable_catalogo
-          )
-      ''');
-      await db.execute('''
-        DELETE FROM seccion_impacto_poblacion
-        WHERE id_local IS NOT NULL
-          AND id_grupo_etario IS NOT NULL
-          AND rowid NOT IN (
-            SELECT MIN(rowid)
-            FROM seccion_impacto_poblacion
-            WHERE id_local IS NOT NULL
-              AND id_grupo_etario IS NOT NULL
-            GROUP BY id_local, id_grupo_etario
-          )
-      ''');
-      // Índices UNIQUE: refuerzan la unicidad a nivel de BD para evitar que la
-      // raíz del problema (duplicados por id_seccion distinto sobre el mismo
-      // catálogo) vuelva a ocurrir. SQLite permite múltiples nulos, así que las
-      // filas sin catálogo no se ven afectadas.
-      await db.execute('''
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_seccion_proteccion_grupo
-          ON seccion_proteccion (id_local, id_grupo_vulnerable_catalogo)
-          WHERE id_local IS NOT NULL AND id_grupo_vulnerable_catalogo IS NOT NULL
-      ''');
-      await db.execute('''
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_seccion_impacto_grupo
-          ON seccion_impacto_poblacion (id_local, id_grupo_etario)
-          WHERE id_local IS NOT NULL AND id_grupo_etario IS NOT NULL
-      ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS filas_seccion (
+        uuid_registro TEXT PRIMARY KEY,
+        uuid_edan_localidad TEXT NOT NULL,
+        tipo TEXT NOT NULL,
+        datos_json TEXT NOT NULL,
+        fecha_modificacion_local TEXT,
+        estado_sync TEXT NOT NULL DEFAULT 'pendiente',
+        remote_id INTEGER,
+        is_deleted INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_filas_form
+        ON filas_seccion(uuid_edan_localidad, tipo)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS viviendas (
+        uuid_registro TEXT PRIMARY KEY,
+        uuid_dano_vivienda TEXT NOT NULL,
+        tipo_dano TEXT NOT NULL CHECK (tipo_dano IN ('TOTAL','PARCIAL')),
+        coordenada_lat REAL,
+        coordenada_lon REAL,
+        fotografia TEXT,
+        fecha_modificacion_local TEXT,
+        estado_sync TEXT NOT NULL DEFAULT 'pendiente',
+        is_deleted INTEGER NOT NULL DEFAULT 0
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_viv_dano
+        ON viviendas(uuid_dano_vivienda)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS fotografias (
+        uuid_fotografia TEXT PRIMARY KEY,
+        uuid_edan_localidad TEXT NOT NULL,
+        tipo_entidad TEXT NOT NULL,
+        uuid_registro TEXT NOT NULL,
+        ruta_local TEXT,
+        ruta_servidor TEXT,
+        sha256 TEXT,
+        borrado_logico INTEGER NOT NULL DEFAULT 0,
+        fecha_modificacion TEXT,
+        remote_id INTEGER,
+        file_name TEXT,
+        mime_type TEXT,
+        size_bytes INTEGER,
+        upload_state TEXT NOT NULL DEFAULT 'pending',
+        is_deleted INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        last_error TEXT,
+        intentos_descarga INTEGER NOT NULL DEFAULT 0,
+        fecha_proximo_intento TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_fotos_registro
+        ON fotografias(tipo_entidad, uuid_registro)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_sincronizacion (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tabla TEXT NOT NULL,
+        uuid_registro TEXT NOT NULL,
+        accion TEXT NOT NULL,
+        estado TEXT NOT NULL,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        ultimo_error TEXT,
+        fecha_proximo_intento TEXT,
+        fecha_registro TEXT NOT NULL DEFAULT (datetime('now')),
+        operation_uuid TEXT,
+        idempotency_key TEXT,
+        depends_on TEXT,
+        payload_json TEXT
+      )
+    ''');
+    await db.execute('''
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_cola
+        ON cola_sincronizacion(tabla, uuid_registro, accion)
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS cola_fotos (
+        uuid_fotografia TEXT PRIMARY KEY,
+        ruta_local TEXT NOT NULL,
+        tipo_entidad TEXT,
+        uuid_registro TEXT,
+        sha256 TEXT,
+        estado TEXT NOT NULL,
+        intentos INTEGER NOT NULL DEFAULT 0,
+        ultimo_error TEXT,
+        fecha_proximo_intento TEXT,
+        file_name TEXT,
+        mime_type TEXT,
+        size_bytes INTEGER,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )
+    ''');
+
+    // Tabla AUXILIAR (v31): matriz grupo × secciones por localidad.
+    // NO es dato del formulario: no entra en `datos_json` ni en el payload del
+    // servidor. Registra qué secciones están activas y POR QUÉ, de modo que al
+    // reabrir un borrador se pueda mostrar una sección aunque el usuario haya
+    // desmarcado su grupo, si es que esa sección tiene datos reales.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS secciones_grupos_local (
+        uuid_edan_localidad TEXT NOT NULL,
+        seccion TEXT NOT NULL,
+        grupo TEXT,
+        origen TEXT NOT NULL DEFAULT 'usuario',
+        activa INTEGER NOT NULL DEFAULT 1,
+        PRIMARY KEY (uuid_edan_localidad, seccion)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_sgl_local
+        ON secciones_grupos_local(uuid_edan_localidad)
+    ''');
+
+    // Tabla AUXILIAR (v32): los 9 `grup_*` de una localidad, con DOS columnas
+    // de propósito distinto (PLAN_APP_EDAN_OFFLINE_V2 §4.2):
+    //   · `seleccion_usuario` — lo que tildó el usuario en page01. Gobierna
+    //     qué secciones se muestran al crear/editar.
+    //   · `grup_servidor`     — caché del nodo `grupos` que devuelve el
+    //     GET /formularios/{uuid}/completo (y el pull). El servidor lo deriva
+    //     como OR de las secciones miembro; es solo lectura.
+    // La matriz grupo × secciones vive en `edan_secciones_registry.dart`; aquí
+    // solo se persiste el cruce.
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS grupos_local (
+        uuid_edan_localidad TEXT NOT NULL,
+        grupo TEXT NOT NULL,
+        seleccion_usuario INTEGER NOT NULL DEFAULT 0,
+        grup_servidor INTEGER,
+        PRIMARY KEY (uuid_edan_localidad, grupo)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_grupos_local
+        ON grupos_local(uuid_edan_localidad)
+    ''');
+  }
+
+  /// Diseño limpio (v40): el esquema V2 se define UNA vez en
+  /// `_crearTablasV2` / `_createDatabase`. No hay cadena de migraciones
+  /// ALTER: cualquier versión anterior se alinea con DROP + CREATE limpio
+  /// de las tablas V2 (los catálogos y auxiliares se conservan). Sincronizar
+  /// antes de instalar: lo no subido se pierde en el alineamiento.
+  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 41) {
+      await db.execute('DROP TABLE IF EXISTS formularios');
+      await db.execute('DROP TABLE IF EXISTS filas_seccion');
+      await db.execute('DROP TABLE IF EXISTS viviendas');
+      await db.execute('DROP TABLE IF EXISTS cola_sincronizacion');
+      await db.execute('DROP TABLE IF EXISTS fotografias');
+      await db.execute('DROP TABLE IF EXISTS cola_fotos');
+      await _crearTablasV2(db);
+      return;
     }
   }
 
@@ -1293,40 +1018,6 @@ class DatabaseHelper {
     ''');
   }
 
-  /// Migración v22: agrega columnas de tracking de descarga y retry a
-  /// `foto_pendiente`. Las tablas existentes solo tienen `subida` y
-  /// `path_servidor`. Se agregan: `descargada`, `ruta_descarga`,
-  /// `intentos_subida`, `intentos_descarga`, `ultimo_error`.
-  Future<void> _migrarFotoPendienteV22(Database db) async {
-    final columnas = await db.rawQuery('PRAGMA table_info(foto_pendiente)');
-    final existentes = columnas.map((c) => c['name'] as String).toSet();
-    if (!existentes.contains('descargada')) {
-      await db.execute(
-        'ALTER TABLE foto_pendiente ADD COLUMN descargada INTEGER DEFAULT 0',
-      );
-    }
-    if (!existentes.contains('ruta_descarga')) {
-      await db.execute(
-        'ALTER TABLE foto_pendiente ADD COLUMN ruta_descarga TEXT',
-      );
-    }
-    if (!existentes.contains('intentos_subida')) {
-      await db.execute(
-        'ALTER TABLE foto_pendiente ADD COLUMN intentos_subida INTEGER DEFAULT 0',
-      );
-    }
-    if (!existentes.contains('intentos_descarga')) {
-      await db.execute(
-        'ALTER TABLE foto_pendiente ADD COLUMN intentos_descarga INTEGER DEFAULT 0',
-      );
-    }
-    if (!existentes.contains('ultimo_error')) {
-      await db.execute(
-        'ALTER TABLE foto_pendiente ADD COLUMN ultimo_error TEXT',
-      );
-    }
-  }
-
   Future<void> _onOpen(Database db) async {
     await db.execute('''
       CREATE TABLE IF NOT EXISTS municipio_geojson (
@@ -1337,267 +1028,66 @@ class DatabaseHelper {
         fecha_actualizacion TEXT
       )
     ''');
+    // Reparo idempotente: el pull guardaba `filas_seccion.tipo` con nombre de
+    // TABLA (`danos_agricultura`) y toda la app lee RUTA (`danos-agricultura`).
+    // Renombra solo las filas afectadas (caso Urubo en vivo); las que ya están
+    // en forma ruta no se tocan. Corre en cada apertura: es barato y cubre
+    // equipos que ya descargaron antes del fix.
+    await repararTiposFilaSeccion(db);
   }
 
-  Future<int> insertReporte(ReporteOffline reporte) async {
-    final db = await database;
-    return await db.insert('reportes_offline', reporte.toMap());
+  /// Mapa TABLA del servidor → RUTA v2 local para `filas_seccion.tipo`.
+  /// Debe coincidir con `EdanSeccionesRegistry` (hay test de paridad que lo
+  /// verifica; la duplicación evita un import circular registry↔helper).
+  static const Map<String, String> mapaTablaARuta = {
+    'impacto_poblacion': 'impacto-poblacion',
+    'salud_establecimientos': 'salud-establecimientos',
+    'danos_viales': 'danos-viales',
+    'danos_infra_publica': 'danos-infra-publica',
+    'servicios_basicos': 'servicios-basicos',
+    'unidades_educativas': 'unidades-educativas',
+    'danos_vivienda': 'danos-vivienda',
+    'danos_agricultura': 'danos-agricultura',
+    'danos_pecuario': 'danos-pecuarios',
+    'infra_productiva': 'infra-productiva',
+    'proteccion': 'proteccion',
+    'primera_respuesta': 'primera-respuesta',
+    'salud_necesidades': 'necesidad-salud',
+    'necesidades_humanitarias': 'necesidad-humanitaria',
+  };
+
+  /// Renombra en `filas_seccion.tipo` los nombres de tabla a rutas v2.
+  /// Idempotente y seguro: solo actualiza filas cuyo `tipo` sea exactamente
+  /// una clave del mapa. Devuelve cuántas filas reparó.
+  static Future<int> repararTiposFilaSeccion(DatabaseExecutor db) async {
+    var reparadas = 0;
+    for (final e in mapaTablaARuta.entries) {
+      reparadas += await db.rawUpdate(
+        'UPDATE filas_seccion SET tipo = ? WHERE tipo = ?',
+        [e.value, e.key],
+      );
+    }
+    return reparadas;
   }
 
-  Future<List<ReporteOffline>> getReportes(int usuarioId) async {
-    final db = await database;
-    final maps = await db.query(
-      'reportes_offline',
-      where: 'usuario_id = ?',
-      whereArgs: [usuarioId],
-      orderBy: 'fecha_creacion DESC',
-    );
-    return maps.map((map) => ReporteOffline.fromMap(map)).toList();
-  }
 
-  Future<List<ReporteOffline>> getUnsyncedReports() async {
-    final db = await database;
-    final maps = await db.query(
-      'reportes_offline',
-      where: 'sincronizado = 0 AND es_borrador = 0',
-      orderBy: 'fecha_creacion ASC',
-    );
-    return maps.map((map) => ReporteOffline.fromMap(map)).toList();
-  }
 
-  Future<int> markAsSynced(int idLocal, int idServer) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      {
-        'id_server': idServer,
-        'sincronizado': 1,
-        'pendiente_eliminacion': 0,
-        'pendiente_actualizacion': 0,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-        'intentos_sync': 0,
-        'ultimo_error': null,
-      },
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> updateEstado(
-    int idLocal,
-    int? estadoId,
-    String? estadoNombre,
-  ) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      {
-        'estado_id': ?estadoId,
-        'estado_nombre': ?estadoNombre,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-      },
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<void> updateFromServer(
-    int idLocal, {
-    int? estadoId,
-    String? estadoNombre,
-    String? departamentoNombre,
-    String? provinciaNombre,
-    String? municipioNombre,
-  }) async {
-    final db = await database;
-    final updates = <String, dynamic>{
-      'fecha_modificacion': DateTime.now().toIso8601String(),
-    };
-    if (estadoId != null) updates['estado_id'] = estadoId;
-    if (estadoNombre != null) updates['estado_nombre'] = estadoNombre;
-    if (departamentoNombre != null)
-      updates['departamento_nombre'] = departamentoNombre;
-    if (provinciaNombre != null) updates['provincia_nombre'] = provinciaNombre;
-    if (municipioNombre != null) updates['municipio_nombre'] = municipioNombre;
-    if (updates.length <= 1) return;
-    await db.update(
-      'reportes_offline',
-      updates,
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<ReporteOffline?> getReporteByServerId(int idServer) async {
-    final db = await database;
-    final maps = await db.query(
-      'reportes_offline',
-      where: 'id_server = ?',
-      whereArgs: [idServer],
-      limit: 1,
-    );
-    if (maps.isEmpty) return null;
-    return ReporteOffline.fromMap(maps.first);
-  }
 
-  Future<ReporteOffline?> getReporteByIdLocal(int idLocal) async {
-    final db = await database;
-    final maps = await db.query(
-      'reportes_offline',
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-      limit: 1,
-    );
-    if (maps.isEmpty) return null;
-    return ReporteOffline.fromMap(maps.first);
-  }
 
-  Future<List<ReporteOffline>> getSyncedReports(int usuarioId) async {
-    final db = await database;
-    final maps = await db.query(
-      'reportes_offline',
-      where: 'usuario_id = ? AND sincronizado = 1',
-      whereArgs: [usuarioId],
-    );
-    return maps.map((map) => ReporteOffline.fromMap(map)).toList();
-  }
 
-  Future<bool> updateEstadoByServerId(
-    int idServer,
-    int estadoId,
-    String estadoNombre,
-  ) async {
-    final db = await database;
-    final result = await db.update(
-      'reportes_offline',
-      {
-        'estado_id': estadoId,
-        'estado_nombre': estadoNombre,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-      },
-      where: 'id_server = ?',
-      whereArgs: [idServer],
-    );
-    return result > 0;
-  }
 
-  Future<int> markAsDeleted(int idLocal) async {
-    final db = await database;
-    return await db.delete(
-      'reportes_offline',
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> updateSyncAttempts(
-    int idLocal,
-    int intentos,
-    String error,
-  ) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      {
-        'intentos_sync': intentos,
-        'ultimo_error': error,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-      },
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> markAsPendingDeletion(int idLocal) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      {
-        'pendiente_eliminacion': 1,
-        'sincronizado': 0,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-      },
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> markAsPendingUpdate(int idLocal) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      {
-        'pendiente_actualizacion': 1,
-        'sincronizado': 0,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-      },
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> saveSyncHistory(int enviados, int fallidos) async {
-    final db = await database;
-    return await db.insert('sincronizaciones', {
-      'fecha_sync': DateTime.now().toIso8601String(),
-      'reportes_enviados': enviados,
-      'reportes_fallidos': fallidos,
-    });
-  }
 
-  Future<int> updateReporte(ReporteOffline reporte) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      reporte.toMap(),
-      where: 'id_local = ?',
-      whereArgs: [reporte.idLocal],
-    );
-  }
 
-  Future<int> deleteReporte(int idLocal) async {
-    final db = await database;
-    return await db.delete(
-      'reportes_offline',
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> updateLocationNames(
-    int idLocal, {
-    String? departamentoNombre,
-    String? provinciaNombre,
-    String? municipioNombre,
-  }) async {
-    final data = <String, dynamic>{
-      'fecha_modificacion': DateTime.now().toIso8601String(),
-    };
-    if (departamentoNombre != null)
-      data['departamento_nombre'] = departamentoNombre;
-    if (provinciaNombre != null) data['provincia_nombre'] = provinciaNombre;
-    if (municipioNombre != null) data['municipio_nombre'] = municipioNombre;
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      data,
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
-  Future<int> saveFotografiaServerPath(int idLocal, String path) async {
-    final db = await database;
-    return await db.update(
-      'reportes_offline',
-      {
-        'fotografia_server_path': path,
-        'fecha_modificacion': DateTime.now().toIso8601String(),
-      },
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
+
 
   Future<void> saveEstados(List<Map<String, dynamic>> estados) async {
     final db = await database;
@@ -1839,105 +1329,7 @@ class DatabaseHelper {
     );
   }
 
-  Future<bool> upsertReportFromServer(
-    int usuarioId,
-    Map<String, dynamic> data,
-  ) async {
-    final db = await database;
-    final idServer = data['id_reporte'] as int?;
-    if (idServer == null) return false;
 
-    final existing = await db.query(
-      'reportes_offline',
-      where: 'id_server = ?',
-      whereArgs: [idServer],
-      limit: 1,
-    );
-
-    final categorias = data['categorias'] != null
-        ? (data['categorias'] as List)
-              .map(
-                (c) =>
-                    c is Map ? (c['id_categoria'] ?? c['id']) as int : c as int,
-              )
-              .toList()
-        : null;
-
-    final row = {
-      'usuario_id': usuarioId,
-      'id_server': idServer,
-      'departamento_id': (data['id_departamento'] as num?)?.toInt() ?? 0,
-      'provincia_id': (data['id_provincia'] as num?)?.toInt() ?? 0,
-      'municipio_id': (data['id_municipio'] as num?)?.toInt() ?? 0,
-      'comunidad': (data['comunidad'] as String?) ?? '',
-      'departamento_nombre': data['departamento']?['nombre'] as String?,
-      'provincia_nombre': data['provincia']?['nombre'] as String?,
-      'municipio_nombre': data['municipio']?['nombre'] as String?,
-      'fecha_evento':
-          (data['fecha_evento'] as String?) ?? DateTime.now().toIso8601String(),
-      'hora_evento': data['hora_evento'] as String?,
-      'tipo_evento_id': (data['id_tipo_evento'] as num?)?.toInt() ?? 0,
-      'coordenada_lat': double.tryParse(
-        data['coordenada_lat']?.toString() ?? '',
-      ),
-      'coordenada_lon': double.tryParse(
-        data['coordenada_lon']?.toString() ?? '',
-      ),
-      'descripcion': data['descripcion'] as String?,
-      'estado_id': (data['id_estado'] as num?)?.toInt() ?? 1,
-      'estado_nombre': data['estado']?['nombre'] as String?,
-      'categorias': categorias != null ? jsonEncode(categorias) : null,
-      'fotografia_server_path': data['fotografia'] as String?,
-      'sincronizado': 1,
-      'pendiente_eliminacion': 0,
-      'pendiente_actualizacion': 0,
-      'fecha_creacion':
-          data['fecha_reporte'] as String? ?? DateTime.now().toIso8601String(),
-      'fecha_modificacion': DateTime.now().toIso8601String(),
-      'intentos_sync': 0,
-      'ultimo_error': null,
-    };
-
-    if (existing.isNotEmpty) {
-      final idLocal = existing.first['id_local'] as int;
-      row['id_local'] = idLocal;
-      row['imagenes'] = existing.first['imagenes'];
-      await db.update(
-        'reportes_offline',
-        row,
-        where: 'id_local = ?',
-        whereArgs: [idLocal],
-      );
-    } else {
-      await db.insert('reportes_offline', row);
-    }
-    return true;
-  }
-
-  Future<void> updateReporteLocalImage(int idServer, String localPath) async {
-    final db = await database;
-    final existing = await db.query(
-      'reportes_offline',
-      where: 'id_server = ?',
-      whereArgs: [idServer],
-      limit: 1,
-    );
-    if (existing.isEmpty) return;
-    final idLocal = existing.first['id_local'] as int;
-    final currentImages = existing.first['imagenes'] as String?;
-    final imageList = currentImages != null
-        ? List<String>.from(jsonDecode(currentImages))
-        : <String>[];
-    if (!imageList.contains(localPath)) {
-      imageList.add(localPath);
-    }
-    await db.update(
-      'reportes_offline',
-      {'imagenes': jsonEncode(imageList)},
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
   Future<void> saveMunicipioGeojson({
     required int municipioId,
@@ -1969,26 +1361,7 @@ class DatabaseHelper {
     return maps.first;
   }
 
-  Future<List<ReporteOffline>> getReportesSinDescargar(int usuarioId) async {
-    final db = await database;
-    final maps = await db.query(
-      'reportes_offline',
-      where:
-          'usuario_id = ? AND fotografia_server_path IS NOT NULL AND imagen_descargada = 0 AND (imagenes IS NULL OR imagenes = ?)',
-      whereArgs: [usuarioId, '[]'],
-    );
-    return maps.map((map) => ReporteOffline.fromMap(map)).toList();
-  }
 
-  Future<void> marcarImagenDescargada(int idLocal) async {
-    final db = await database;
-    await db.update(
-      'reportes_offline',
-      {'imagen_descargada': 1},
-      where: 'id_local = ?',
-      whereArgs: [idLocal],
-    );
-  }
 
   Edan _edanFromRow(Map<String, dynamic> row) {
     final datos = jsonDecode(row['datos_json'] as String);
@@ -2208,8 +1581,6 @@ class DatabaseHelper {
 
   Future<void> clearAll() async {
     final db = await database;
-    await db.delete('reportes_offline');
-    await db.delete('borradores');
     await db.delete('sincronizaciones');
     await db.delete('catalogo_estados');
     await db.delete('catalogo_categorias');
@@ -2223,6 +1594,15 @@ class DatabaseHelper {
     await db.delete('municipio_geojson');
     await db.delete('edans_offline');
     await db.delete('localidades_offline');
+    await db.delete('foto_pendiente_v2');
+    await db.delete('pendientes_eliminar');
+    await db.delete('formularios');
+    await db.delete('filas_seccion');
+    await db.delete('viviendas');
+    await db.delete('fotografias');
+    await db.delete('cola_sincronizacion');
+    await db.delete('cola_fotos');
+    await db.delete('config');
     _database = null;
   }
 
@@ -2237,12 +1617,26 @@ class DatabaseHelper {
   }
 
   Future<void> saveLastSyncDate(int timestamp) async {
+    await setConfig('ultima_sync', timestamp.toString());
+  }
+
+  /// Lee un valor de configuración genérico.
+  Future<String?> getConfig(String clave) async {
+    final db = await database;
+    final result = await db.rawQuery(
+      'SELECT valor FROM config WHERE clave = ?',
+      [clave],
+    );
+    if (result.isEmpty) return null;
+    return result.first['valor']?.toString();
+  }
+
+  /// Escribe un valor de configuración genérico.
+  Future<void> setConfig(String clave, String valor) async {
     final db = await database;
     await db.rawInsert(
-      '''
-      INSERT OR REPLACE INTO config (clave, valor) VALUES (?, ?)
-    ''',
-      ['ultima_sync', timestamp],
+      'INSERT OR REPLACE INTO config (clave, valor) VALUES (?, ?)',
+      [clave, valor],
     );
   }
 
@@ -2282,6 +1676,11 @@ class DatabaseHelper {
 
   // ========== LOCALIDADES_OFFLINE CRUD ==========
 
+  /// Mapeo público de una fila `localidades_offline` a modelo (Etapa 5: el
+  /// listado unificado lo usa para las filas legacy sin contraparte V2).
+  EdanLocalidad localidadFromRow(Map<String, dynamic> row) =>
+      _localidadFromRow(row);
+
   EdanLocalidad _localidadFromRow(Map<String, dynamic> row) {
     final datos = jsonDecode(row['datos_json'] as String);
     final loc = EdanLocalidad.fromJson(Map<String, dynamic>.from(datos as Map));
@@ -2310,9 +1709,8 @@ class DatabaseHelper {
     if (loc.municipioNombre == null || loc.municipioNombre!.isEmpty) {
       loc.municipioNombre = row['municipio_nombre'] as String?;
     }
-    // Toda lectura desde SQLite pasa por aquí. Aplica la misma lógica de
-    // deduplicación por id_seccion que `construirDocumento`: une el modelo
-    // para que datos_json con duplicados nunca se propague a la UI.
+    // Toda lectura desde SQLite pasa por aquí. Deduplica por `id_seccion` para
+    // que un `datos_json` con duplicados nunca se propague a la UI.
     loc.deduplicarSecciones();
     return loc;
   }
@@ -2337,7 +1735,16 @@ class DatabaseHelper {
     final db = await database;
     final now = DateTime.now().toIso8601String();
     localidad.fechaModificacion = now;
-    localidad.recalcularFlagsImpacto();
+    // NO se llama `recalcularFlagsImpacto()` aquí. Ese método deriva los 9
+    // flags gruesos a partir de los datos reales; al ejecutarse durante el
+    // GUARDADO local (primer insert del wizard) los pisaba a `false` porque
+    // las secciones aún estaban vacías, y al reabrir el borrador las páginas
+    // 03–11 desaparecían aunque los datos sí estaban en `filas_seccion`.
+    //
+    // Los flags de grupo `grup_*` son responsabilidad del usuario (los
+    // checkboxes de page01, persistidos en la auxiliar `secciones_grupos_local`);
+    // los de sección `imp_*` se derivan de los datos al ENVIAR, en
+    // `EdanSeccionesFuente` / `EdanLocalidadesEnvioV2Service`.
     final row = {
       'id_local': localidad.idLocal ?? _generateUuid(),
       'id_server': localidad.idServer,
@@ -2359,15 +1766,15 @@ class DatabaseHelper {
       'total_poblacion_afectada': localidad.totalPoblacionAfectada,
       'total_familias_afectadas': localidad.totalFamiliasAfectadas,
       'total_familias_damnificadas': localidad.totalFamiliasDamnificadas,
-      'imp_poblacion': localidad.impPoblacion ? 1 : 0,
-      'imp_salud': localidad.impSalud ? 1 : 0,
-      'imp_infraestructura': localidad.impInfraestructura ? 1 : 0,
-      'imp_servicios': localidad.impServicios ? 1 : 0,
-      'imp_educacion': localidad.impEducacion ? 1 : 0,
-      'imp_vivienda': localidad.impVivienda ? 1 : 0,
-      'imp_agropecuario': localidad.impAgropecuario ? 1 : 0,
-      'imp_proteccion': localidad.impProteccion ? 1 : 0,
-      'imp_necesidades': localidad.impNecesidades ? 1 : 0,
+      'grup_poblacion': localidad.grupPoblacion ? 1 : 0,
+      'grup_salud': localidad.grupSalud ? 1 : 0,
+      'grup_infraestructura': localidad.grupInfraestructura ? 1 : 0,
+      'grup_servicios': localidad.grupServicios ? 1 : 0,
+      'grup_educacion': localidad.grupEducacion ? 1 : 0,
+      'grup_vivienda': localidad.grupVivienda ? 1 : 0,
+      'grup_agropecuario': localidad.grupAgropecuario ? 1 : 0,
+      'grup_proteccion': localidad.grupProteccion ? 1 : 0,
+      'grup_necesidades': localidad.grupNecesidades ? 1 : 0,
       'id_edan_localidad_estado': localidad.idEdanLocalidadEstado,
       'estado_localidad': localidad.estadoLocalidad?.label,
       'datos_json': jsonEncode(localidad.toJson()),
@@ -2514,15 +1921,15 @@ class DatabaseHelper {
       'total_poblacion_afectada': l.totalPoblacionAfectada,
       'total_familias_afectadas': l.totalFamiliasAfectadas,
       'total_familias_damnificadas': l.totalFamiliasDamnificadas,
-      'imp_poblacion': l.impPoblacion ? 1 : 0,
-      'imp_salud': l.impSalud ? 1 : 0,
-      'imp_infraestructura': l.impInfraestructura ? 1 : 0,
-      'imp_servicios': l.impServicios ? 1 : 0,
-      'imp_educacion': l.impEducacion ? 1 : 0,
-      'imp_vivienda': l.impVivienda ? 1 : 0,
-      'imp_agropecuario': l.impAgropecuario ? 1 : 0,
-      'imp_proteccion': l.impProteccion ? 1 : 0,
-      'imp_necesidades': l.impNecesidades ? 1 : 0,
+      'grup_poblacion': l.grupPoblacion ? 1 : 0,
+      'grup_salud': l.grupSalud ? 1 : 0,
+      'grup_infraestructura': l.grupInfraestructura ? 1 : 0,
+      'grup_servicios': l.grupServicios ? 1 : 0,
+      'grup_educacion': l.grupEducacion ? 1 : 0,
+      'grup_vivienda': l.grupVivienda ? 1 : 0,
+      'grup_agropecuario': l.grupAgropecuario ? 1 : 0,
+      'grup_proteccion': l.grupProteccion ? 1 : 0,
+      'grup_necesidades': l.grupNecesidades ? 1 : 0,
       'id_edan_localidad_estado': l.idEdanLocalidadEstado,
       'estado_localidad': l.estadoLocalidad?.label,
       'datos_json': jsonEncode(l.toJson()),
@@ -3131,6 +2538,7 @@ class DatabaseHelper {
     await db.delete('pendientes_eliminar', where: 'id = ?', whereArgs: [id]);
   }
 
+
   // ========== Secciones activas (checkbox → secciones del JSON) ==========
 
   /// Marca secciones como activas (1) para una localidad.
@@ -3256,7 +2664,7 @@ class DatabaseHelper {
       'ruta_local_archivo': rutaLocalArchivo,
       'coordenada_lat': lat,
       'coordenada_lon': lon,
-      'subida': pathServidor != null ? 0 : 0,
+      'subida': pathServidor != null && pathServidor.isNotEmpty ? 1 : 0,
       'descargada': pathServidor != null ? 0 : 1,
       'path_servidor': pathServidor,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
@@ -3386,7 +2794,7 @@ class DatabaseHelper {
       'path_servidor': pathServidor,
       'latitud': lat,
       'longitud': lon,
-      'subida': 0,
+      'subida': pathServidor != null && pathServidor.isNotEmpty ? 1 : 0,
       'descargada': pathServidor != null && pathServidor.isNotEmpty ? 0 : 1,
       'intentos': 0,
       'fecha_creacion': DateTime.now().toIso8601String(),
@@ -3475,6 +2883,33 @@ class DatabaseHelper {
       limit: 1,
     );
     return maps.isEmpty ? null : maps.first;
+  }
+
+  /// Elimina los registros de `foto_pendiente_v2` de una sección y devuelve las
+  /// rutas locales asociadas para que el llamador borre los archivos. Evita
+  /// dejar fotos huérfanas (archivo en disco + subida pendiente) cuando se
+  /// elimina el ítem de sección dueño de la foto.
+  Future<List<String>> eliminarFotosDeSeccionV2(
+    String idLocal,
+    String idSeccion,
+  ) async {
+    final db = await database;
+    final rows = await db.query(
+      'foto_pendiente_v2',
+      columns: ['ruta_local_archivo'],
+      where: 'id_local = ? AND id_seccion = ?',
+      whereArgs: [idLocal, idSeccion],
+    );
+    await db.delete(
+      'foto_pendiente_v2',
+      where: 'id_local = ? AND id_seccion = ?',
+      whereArgs: [idLocal, idSeccion],
+    );
+    return rows
+        .map((r) => r['ruta_local_archivo'] as String?)
+        .whereType<String>()
+        .where((r) => r.isNotEmpty)
+        .toList();
   }
 
   int _toInt(dynamic value) {

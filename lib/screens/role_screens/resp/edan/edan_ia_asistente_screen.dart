@@ -25,6 +25,7 @@ import '../../../../models/edan.dart';
 import '../../../../models/edan_borrador_ia.dart';
 import '../../../../providers/edan_ia_borrador_provider.dart';
 import '../../../../services/edan_ia/edan_traduccion.dart';
+import '../../../../services/edan/edan_store_v2.dart';
 import 'edan_ia_paso_fotos.dart';
 
 /// Pantalla de conversación. Recibe el provider ya construido para que la
@@ -147,6 +148,7 @@ class _EdanIaAsistenteScreenState extends State<EdanIaAsistenteScreen> {
     Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => EdanIaPasoFotosScreen(
         localidad: r.localidad,
+        store: EdanStoreV2.instance,
         onListo: (l) {
           // Se guarda ESTA localidad, la que volvió del paso final con
           // `fotografia` y las coordenadas. Antes se llamaba a guardar sin

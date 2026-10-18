@@ -18,6 +18,7 @@ import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:rea/providers/edan_ia_borrador_provider.dart';
 import 'package:rea/services/database_helper.dart';
+import 'package:rea/services/edan/edan_store_v2.dart';
 import 'package:rea/services/edan_ia/puente_service.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -98,7 +99,6 @@ void main() {
         apiKey: 'llave',
         client: cliente,
       ),
-      db: db,
     );
     await prov.enviar('se desbordó el río en Yapacaní, son 350 personas');
     return prov;
@@ -119,17 +119,20 @@ void main() {
     puente.coordenadaLon = -65.2667;
 
     // Y al volver, la pantalla pasa esa localidad, no una traducción nueva.
-    final idLocal = await prov.guardar(usuarioId: 7, preparado: preparado);
-    expect(idLocal, isNotEmpty, reason: 'sin id la UI no sabe qué guardó');
+    final uuid = await prov.guardar(usuarioId: 7, preparado: preparado);
+    expect(uuid, isNotEmpty, reason: 'sin uuid la UI no sabe qué guardó');
 
-    final leidas = await db.getLocalidades(7);
-    expect(leidas, hasLength(1));
-    final r = leidas.single;
-    expect(r.idLocal, idLocal);
+    // Diseño limpio: la única persistencia son las tablas V2.
+    final store = EdanStoreV2(db: db);
+    final lista = await store.listarFormularios(usuarioId: 7);
+    expect(lista, hasLength(1));
+    final r = lista.single;
+    expect(r.uuidEdanLocalidad, uuid);
+    await store.cargarSecciones(r);
     expect(r.municipioNombre, 'Yapacaní');
     expect(r.totalPoblacionAfectada, 350);
     expect(r.sincronizado, isFalse);
-    expect(r.impInfraestructura, isTrue);
+    expect(r.grupInfraestructura, isTrue);
 
     final releido = r.danosViales.single;
     expect(releido.fotografia, '/fotos/puente_1.jpg');
@@ -146,9 +149,11 @@ void main() {
     preparado.localidad.danosViales.first.fotografia = '/fotos/puente_1.jpg';
 
     // Sin `preparado`, el provider traduce de nuevo y la foto no viaja.
-    final idLocal = await prov.guardar(usuarioId: 7);
-    final r = (await db.getLocalidades(7)).single;
-    expect(r.idLocal, idLocal);
+    final uuid = await prov.guardar(usuarioId: 7);
+    final store = EdanStoreV2(db: db);
+    final r = (await store.listarFormularios(usuarioId: 7)).single;
+    expect(r.uuidEdanLocalidad, uuid);
+    await store.cargarSecciones(r);
     expect(r.danosViales.single.fotografia, isNull);
   });
 }

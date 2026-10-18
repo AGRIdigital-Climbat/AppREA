@@ -11,7 +11,7 @@ void main() {
       (l.necesidadSalud?.numeroPersonas ?? 0) > 0;
 
   test('page04 con establecimiento -> completa tras round-trip (reabrir)', () {
-    final loc = EdanLocalidad(impSalud: true);
+    final loc = EdanLocalidad(grupSalud: true);
     loc.establecimientosSalud.add(EdanEstablecimientoSalud(
       idSeccion: 'es-abc',
       nombreEstablecimiento: 'Hospital Test',
@@ -30,7 +30,7 @@ void main() {
   });
 
   test('page04 con solo N personas -> completa tras round-trip', () {
-    final loc = EdanLocalidad(impSalud: true);
+    final loc = EdanLocalidad(grupSalud: true);
     loc.necesidadSalud?.numeroPersonas = 40;
 
     final reabierto = EdanLocalidad.fromJson(loc.toJson());
@@ -41,7 +41,7 @@ void main() {
   });
 
   test('page04 vacía -> NO completa tras round-trip', () {
-    final loc = EdanLocalidad(impSalud: true);
+    final loc = EdanLocalidad(grupSalud: true);
     final reabierto = EdanLocalidad.fromJson(loc.toJson());
     expect(seccionCompleta04(reabierto), false);
   });

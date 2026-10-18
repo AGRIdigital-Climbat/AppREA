@@ -3,9 +3,7 @@ import 'package:flutter/widget_previews.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
 import '../widgets/status_badge.dart';
-import '../widgets/reporte_card.dart';
 import '../config/theme.dart';
-import 'mock_data.dart';
 import 'screen_wrapper.dart';
 
 @Preview(name: 'Button Normal', group: 'CustomButton', wrapper: reaSimpleWrapper)
@@ -92,17 +90,4 @@ Widget statusBadgeError() {
   );
 }
 
-@Preview(name: 'ReporteCard Sincronizado', group: 'ReporteCard', wrapper: reaSimpleWrapper)
-Widget reporteCardSynced() {
-  return ReporteCard(reporte: mockReporteOfflineStats, onTap: () {});
-}
 
-@Preview(name: 'ReporteCard Pendiente', group: 'ReporteCard', wrapper: reaSimpleWrapper)
-Widget reporteCardPending() {
-  return ReporteCard(reporte: mockReporteOfflinePendiente, onTap: () {});
-}
-
-@Preview(name: 'ReporteCard Error', group: 'ReporteCard', wrapper: reaSimpleWrapper)
-Widget reporteCardError() {
-  return ReporteCard(reporte: mockReporteOfflineError, onTap: () {});
-}

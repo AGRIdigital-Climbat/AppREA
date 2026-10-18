@@ -104,6 +104,7 @@ class EdanItemCard extends StatelessWidget {
                       seccion: seccionRespaldo,
                       onEliminada: () => onFotoEliminada?.call(),
                     ),
+                    onRetomar: onCambiarFoto,
                   )
                 else
                   _miniaturaSinFoto(context, coordsOk: coordsOk),

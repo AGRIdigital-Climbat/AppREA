@@ -1,23 +1,26 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../models/reporte.dart';
-import '../models/reporte_offline.dart';
 import '../models/departamento.dart';
 import '../models/provincia.dart';
 import '../models/municipio.dart';
 import '../models/municipio_geojson.dart';
 import '../services/database_helper.dart';
 import '../services/api_service.dart';
+import '../services/edan/edan_store_v2.dart';
 import '../services/sync_manager.dart';
 import '../services/auth_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class ReporteProvider extends ChangeNotifier {
   final DatabaseHelper _db = DatabaseHelper.instance;
   final ApiService _api = ApiService.instance;
   final SyncManager _syncManager = SyncManager.instance;
 
-  List<ReporteOffline> _reportes = [];
+  /// Marca por DISPOSITIVO: ¿los catálogos generales ya se bajaron y guardaron?
+  static const String _kCatalogsSyncKey = 'catalogs_generales_sync';
+
   List<Departamento> _departamentos = [];
   List<Provincia> _provincias = [];
   List<Municipio> _municipios = [];
@@ -38,12 +41,13 @@ class ReporteProvider extends ChangeNotifier {
   bool _isLoadingProvincias = false;
   bool _isLoadingMunicipios = false;
   bool _isInitializing = false;
+  bool _isDescargandoCatalogos = false;
+  bool _catalogsAllOk = true;
   bool _geoError = false;
   bool _provinciasError = false;
   bool _municipiosError = false;
   String _downloadPhase = '';
 
-  List<ReporteOffline> get reportes => _reportes;
   List<Departamento> get departamentos => _departamentos;
   List<Provincia> get provincias => _provincias;
   List<Municipio> get municipios => _municipios;
@@ -64,10 +68,32 @@ class ReporteProvider extends ChangeNotifier {
   bool get isLoadingProvincias => _isLoadingProvincias;
   bool get isLoadingMunicipios => _isLoadingMunicipios;
   bool get isInitializing => _isInitializing;
+  bool get isDescargandoCatalogos => _isDescargandoCatalogos;
   bool get geoError => _geoError;
   bool get provinciasError => _provinciasError;
   bool get municipiosError => _municipiosError;
   String get downloadPhase => _downloadPhase;
+
+  /// Fases de descarga de catálogos en orden: el progreso se deriva de la
+  /// fase actual (sin tocar los 10 pasos). `null` = sin descarga en curso.
+  static const List<String> fasesCatalogos = [
+    'Descargando tipos de evento...',
+    'Descargando tipos de localidad...',
+    'Descargando cultivos...',
+    'Descargando grupos pecuarios...',
+    'Descargando grupos vulnerables...',
+    'Descargando grupos etarios...',
+    'Descargando tipos de repositorio...',
+    'Descargando estados de localidad...',
+    'Descargando estados EDAN...',
+  ];
+
+  /// 0..1 mientras se descargan catálogos; `null` en otro caso.
+  double? get progresoCatalogos {
+    final i = fasesCatalogos.indexOf(_downloadPhase);
+    if (i < 0) return null;
+    return (i + 1) / (fasesCatalogos.length + 1);
+  }
 
   StreamSubscription<int>? _pendingSubscription;
 
@@ -82,24 +108,48 @@ class ReporteProvider extends ChangeNotifier {
       notifyListeners();
     });
 
-    await loadReportes();
-    _downloadPhase = 'Cargando catÃ¡logos locales...';
+    _downloadPhase = 'Cargando catálogos locales...';
     notifyListeners();
     await loadCatalogsLocal();
 
-    if (AuthService.instance.isAuthenticated) {
-      _downloadPhase = 'Descargando departamentos...';
-      notifyListeners();
-      await loadGeography();
-
-      _downloadPhase = 'Descargando catÃ¡logos del servidor...';
-      notifyListeners();
-      await fetchAndCacheCatalogs();
-    }
-
+    // Arranque offline-first (arquitectura §23): la UI se pinta con SQLite
+    // de inmediato; la red (geografía + catálogos) corre en segundo plano
+    // sin bloquear la primera pintura. Al terminar se avisa al store para
+    // que las pestañas recarguen nombres de catálogo.
     _downloadPhase = '';
     _isInitializing = false;
     notifyListeners();
+
+    if (AuthService.instance.isAuthenticated) {
+      unawaited(_cargarRedEnSegundoPlano());
+    }
+  }
+
+  /// Geografía + catálogos del servidor en segundo plano. Nunca bloquea la
+  /// UI; al terminar avisa vía `EdanStoreV2.catalogosVersion` para que las
+  /// pestañas recarguen los nombres resueltos por catálogo.
+  Future<void> _cargarRedEnSegundoPlano() async {
+    try {
+      await loadGeography();
+      await _descargarCatalogosGenerales();
+    } catch (_) {
+      // Sin red: queda lo local; el botón "Actualizar catálogos" del Perfil
+      // y el próximo arranque lo reintentan.
+    }
+    EdanStoreV2.instance.avisarCatalogos();
+  }
+
+  /// Baja y guarda en SQLite los catalogos generales (compartidos por los roles
+  /// 6 y 7) UNA SOLA VEZ por dispositivo (marca `catalogs_generales_sync`). En
+  /// reaperturas se leen de SQLite; el boton "Actualizar catalogos" del Perfil
+  /// los vuelve a descargar a mano.
+  Future<void> _descargarCatalogosGenerales() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (prefs.getBool(_kCatalogsSyncKey) ?? false) return;
+    await fetchAndCacheCatalogs();
+    if (_catalogsAllOk) {
+      await prefs.setBool(_kCatalogsSyncKey, true);
+    }
   }
 
   Future<void> initializeResp() async {
@@ -121,59 +171,8 @@ class ReporteProvider extends ChangeNotifier {
 
     await initialize();
 
-    if (AuthService.instance.isAuthenticated) {
-      _downloadPhase = 'Descargando estados EDAN...';
-      notifyListeners();
-      await _fetchAndCacheEstadosEdan();
-    }
-
     _downloadPhase = '';
     _isInitializing = false;
-    notifyListeners();
-  }
-
-  Future<void> _fetchAndCacheEstadosEdan() async {
-    try {
-      final estados = await _api.getEstadosEdan();
-      final mapeados = estados.map((e) {
-        return {
-          'id_estado': e['id_estado'] ?? e['id'] ?? 0,
-          'nombre': e['nombre'] ?? e['descripcion'] ?? 'Desconocido',
-          'descripcion': e['descripcion'],
-          'orden': e['orden'],
-        };
-      }).toList();
-      _estadosEdan = mapeados
-          .map((e) => Estado.fromJson(e))
-          .where((e) => e.idEstado != 0)
-          .toList();
-      await _db.saveEstadosEdan(
-          _estadosEdan.map((e) => {
-                'id_estado': e.idEstado,
-                'nombre': e.nombre,
-                'descripcion': e.descripcion,
-                'orden': e.orden,
-              }).toList());
-    } catch (_) {}
-  }
-
-  Future<void> loadReportes() async {
-    _isLoading = true;
-    notifyListeners();
-
-    try {
-      final userId = AuthService.instance.userId;
-      if (userId != null) {
-        _reportes = await _db.getReportes(userId);
-        _pendingCount = _reportes.where((r) => r.necesitaSync).length;
-      }
-    } catch (e) {
-      debugPrint('[loadReportes] Error: $e');
-      _reportes = [];
-      _pendingCount = 0;
-    }
-
-    _isLoading = false;
     notifyListeners();
   }
 
@@ -182,13 +181,15 @@ class ReporteProvider extends ChangeNotifier {
     _geoError = false;
     notifyListeners();
     try {
-      _departamentos = await _api.getDepartamentos();
+      final departamentos = await _api.getDepartamentos();
       // Cachear en SQLite para offline
       await _db.saveDepartamentos(
-          _departamentos.map((d) => d.toJson()).toList());
+          departamentos.map((d) => d.toJson()).toList());
+      // Solo reemplazar la lista en memoria si la red respondió: un fallo
+      // no debe vaciar lo ya cargado desde SQLite.
+      _departamentos = departamentos;
     } catch (e) {
       _geoError = true;
-      _departamentos = [];
     }
     _isLoadingGeografia = false;
     notifyListeners();
@@ -197,6 +198,7 @@ class ReporteProvider extends ChangeNotifier {
   Future<void> loadProvincias(int idDepartamento) async {
     _isLoadingProvincias = true;
     _provinciasError = false;
+    final previas = _provincias;
     _provincias = [];
     _municipios = [];
     notifyListeners();
@@ -207,6 +209,8 @@ class ReporteProvider extends ChangeNotifier {
           _provincias.map((p) => p.toJson()).toList());
     } catch (e) {
       _provinciasError = true;
+      // Sin red se conserva lo que había en memoria.
+      _provincias = previas;
     }
     _isLoadingProvincias = false;
     notifyListeners();
@@ -215,6 +219,7 @@ class ReporteProvider extends ChangeNotifier {
   Future<void> loadMunicipios(int idProvincia, int idDepartamento) async {
     _isLoadingMunicipios = true;
     _municipiosError = false;
+    final previos = _municipios;
     _municipios = [];
     notifyListeners();
     try {
@@ -227,6 +232,8 @@ class ReporteProvider extends ChangeNotifier {
           _municipios.map((m) => m.toJson()).toList());
     } catch (e) {
       _municipiosError = true;
+      // Sin red se conserva lo que había en memoria.
+      _municipios = previos;
     }
     _isLoadingMunicipios = false;
     notifyListeners();
@@ -306,7 +313,7 @@ class ReporteProvider extends ChangeNotifier {
       _tiposRepositorio = [];
     }
 
-    // Cachear catÃ¡logos geogrÃ¡ficos desde SQLite (offline)
+    // Cachear catálogos geográficos desde SQLite (offline)
     try {
       final depData = await _db.getDepartamentosLocal();
       if (depData.isNotEmpty) {
@@ -345,16 +352,26 @@ class ReporteProvider extends ChangeNotifier {
 
   Future<Map<String, int>> fetchAndCacheCatalogs() async {
     int tiposCount = 0;
+    int estadosCount = 0;
+    _catalogsAllOk = true;
+    _isDescargandoCatalogos = true;
+    notifyListeners();
 
     try {
+      _downloadPhase = 'Descargando tipos de evento...';
+      notifyListeners();
       final tipos = await _api.getTiposEvento();
       _tiposEvento = tipos;
       await _db.saveTiposEvento(
           tipos.map((t) => {'id_tipo_evento': t.idTipoEvento, 'nombre': t.nombre}).toList());
       tiposCount = tipos.length;
-    } catch (_) {}
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
 
     try {
+      _downloadPhase = 'Descargando tipos de localidad...';
+      notifyListeners();
       final tiposLocalidad = await _api.getTipoLocalidad();
       _tiposLocalidad = tiposLocalidad;
       await _db.saveTiposLocalidad(tiposLocalidad
@@ -366,23 +383,35 @@ class ReporteProvider extends ChangeNotifier {
               })
           .toList());
       tiposCount += tiposLocalidad.length;
-    } catch (_) {}
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
 
     try {
+      _downloadPhase = 'Descargando cultivos...';
+      notifyListeners();
       final cultivos = await _api.getCultivos();
       _cultivos = cultivos;
       await _db.saveCultivos(
           cultivos.map((c) => {'id_cultivo': c.idCultivo, 'nombre': c.nombre, 'grupo': c.grupo}).toList());
-    } catch (_) {}
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
 
     try {
+      _downloadPhase = 'Descargando grupos pecuarios...';
+      notifyListeners();
       final pecuarioGrupos = await _api.getPecuarioGrupos();
       _pecuarioGrupos = pecuarioGrupos;
       await _db.savePecuarioGrupos(
           pecuarioGrupos.map((p) => {'id_pecuario_grupo': p.idPecuarioGrupo, 'nombre': p.nombre, 'grupo': p.grupo}).toList());
-    } catch (_) {}
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
 
     try {
+      _downloadPhase = 'Descargando grupos vulnerables...';
+      notifyListeners();
       final gruposVulnerables = await _api.getGruposVulnerables();
       _gruposVulnerables = gruposVulnerables;
       await _db.saveGruposVulnerables(
@@ -395,6 +424,7 @@ class ReporteProvider extends ChangeNotifier {
             'activo': g.activo ? 1 : 0,
           }).toList());
     } catch (_) {
+      _catalogsAllOk = false;
       try {
         final gruposData = await _db.getGruposVulnerablesLocal();
         _gruposVulnerables = gruposData
@@ -406,6 +436,8 @@ class ReporteProvider extends ChangeNotifier {
     }
 
     try {
+      _downloadPhase = 'Descargando grupos etarios...';
+      notifyListeners();
       final gruposEtarios = await _api.getGruposEtarios();
       _gruposEtarios = gruposEtarios;
       await _db.saveGruposEtarios(
@@ -418,6 +450,7 @@ class ReporteProvider extends ChangeNotifier {
                 'activo': g.activo ? 1 : 0,
               }).toList());
     } catch (_) {
+      _catalogsAllOk = false;
       try {
         final gruposEtariosData = await _db.getGruposEtariosLocal();
         _gruposEtarios = gruposEtariosData
@@ -429,6 +462,8 @@ class ReporteProvider extends ChangeNotifier {
     }
 
     try {
+      _downloadPhase = 'Descargando tipos de repositorio...';
+      notifyListeners();
       final tiposRepositorio = await _api.listarTiposRepositorio();
       _tiposRepositorio = tiposRepositorio;
       await _db.saveTiposRepositorio(
@@ -442,15 +477,79 @@ class ReporteProvider extends ChangeNotifier {
                 'extensiones_permitidas': t['extensiones_permitidas'] ?? 'pdf',
                 'tamano_maximo_bytes': t['tamano_maximo_bytes'] ?? 52428800,
               }).toList());
-    } catch (_) {}
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
+
+    // Estados de localidad (borrador/enviado/aprobado/rechazado...). Catalogo
+    // general: el endpoint devuelve id_edan_localidad_estado + descripcion.
+    try {
+      _downloadPhase = 'Descargando estados de localidad...';
+      notifyListeners();
+      final estadosLocalidad = await _api.getLocalidadesEstado();
+      final mapeados = estadosLocalidad.map((e) {
+        return {
+          'id_estado':
+              e['id_edan_localidad_estado'] ?? e['id_estado'] ?? e['id'] ?? 0,
+          'nombre': e['nombre'] ?? e['descripcion'] ?? 'Desconocido',
+          'descripcion': e['descripcion'],
+          'orden': e['orden'],
+        };
+      }).toList();
+      _estados = mapeados
+          .map((e) => Estado.fromJson(e))
+          .where((e) => e.idEstado != 0)
+          .toList();
+      await _db.saveEstados(_estados
+          .map((e) => {
+                'id_estado': e.idEstado,
+                'nombre': e.nombre,
+                'descripcion': e.descripcion,
+                'orden': e.orden,
+              })
+          .toList());
+      estadosCount = _estados.length;
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
+
+    // Estados EDAN (los usa el UGR para aprobar/rechazar). Tambien general.
+    try {
+      _downloadPhase = 'Descargando estados EDAN...';
+      notifyListeners();
+      final estados = await _api.getEstadosEdan();
+      final mapeados = estados.map((e) {
+        return {
+          'id_estado': e['id_estado'] ?? e['id'] ?? 0,
+          'nombre': e['nombre'] ?? e['descripcion'] ?? 'Desconocido',
+          'descripcion': e['descripcion'],
+          'orden': e['orden'],
+        };
+      }).toList();
+      _estadosEdan = mapeados
+          .map((e) => Estado.fromJson(e))
+          .where((e) => e.idEstado != 0)
+          .toList();
+      await _db.saveEstadosEdan(
+          _estadosEdan.map((e) => {
+                'id_estado': e.idEstado,
+                'nombre': e.nombre,
+                'descripcion': e.descripcion,
+                'orden': e.orden,
+              }).toList());
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
 
     await _downloadAndCacheMunicipioGeojson();
 
+    _downloadPhase = '';
+    _isDescargandoCatalogos = false;
     notifyListeners();
-    return {'tipos': tiposCount};
+    return {'estados': estadosCount, 'tipos': tiposCount};
   }
 
-  /// Descarga SOLO gruposVulnerables si estÃ¡ vacÃ­o
+  /// Descarga SOLO gruposVulnerables si está vacío
   Future<void> fetchGruposVulnerablesIfNeeded() async {
     if (_gruposVulnerables.isNotEmpty) return;
 
@@ -480,7 +579,7 @@ class ReporteProvider extends ChangeNotifier {
     }
   }
 
-  /// Descarga SOLO grupos etarios si estÃ¡ vacÃ­o (catÃ¡logo v2).
+  /// Descarga SOLO grupos etarios si está vacío (catálogo v2).
   Future<void> fetchGruposEtariosIfNeeded() async {
     if (_gruposEtarios.isNotEmpty) return;
 
@@ -508,110 +607,6 @@ class ReporteProvider extends ChangeNotifier {
         _gruposEtarios = [];
       }
     }
-  }
-
-  Future<Map<String, int>> fetchAndCacheCatalogsEdan() async {
-    int estadosCount = 0;
-    int tiposCount = 0;
-
-    try {
-      final estados = await _api.getEstadosEdan();
-      final mapeados = estados.map((e) {
-        return {
-          'id_estado': e['id_estado'] ?? e['id'] ?? 0,
-          'nombre': e['nombre'] ?? e['descripcion'] ?? 'Desconocido',
-          'descripcion': e['descripcion'],
-          'orden': e['orden'],
-        };
-      }).toList();
-      _estadosEdan = mapeados
-          .map((e) => Estado.fromJson(e))
-          .where((e) => e.idEstado != 0)
-          .toList();
-      await _db.saveEstadosEdan(
-          _estadosEdan.map((e) => {
-                'id_estado': e.idEstado,
-                'nombre': e.nombre,
-                'descripcion': e.descripcion,
-                'orden': e.orden,
-              }).toList());
-      estadosCount = _estadosEdan.length;
-    } catch (_) {}
-
-    try {
-      final tipos = await _api.getTiposEvento();
-      _tiposEvento = tipos;
-      await _db.saveTiposEvento(
-          tipos.map((t) => {'id_tipo_evento': t.idTipoEvento, 'nombre': t.nombre}).toList());
-      tiposCount = tipos.length;
-    } catch (_) {}
-
-    try {
-      final tiposRepositorio = await _api.listarTiposRepositorio();
-      _tiposRepositorio = tiposRepositorio;
-      await _db.saveTiposRepositorio(
-          tiposRepositorio.map((t) => {
-                'id_tipo_documento': t['id_tipo_documento'] ?? t['id'],
-                'codigo': t['codigo'] ?? '',
-                'nombre': t['nombre'] ?? '',
-                'descripcion': t['descripcion'],
-                'orden': t['orden'] ?? 0,
-                'activo': (t['activo'] == true || t['activo'] == 1) ? 1 : 0,
-                'extensiones_permitidas': t['extensiones_permitidas'] ?? 'pdf',
-                'tamano_maximo_bytes': t['tamano_maximo_bytes'] ?? 52428800,
-              }).toList());
-    } catch (_) {}
-
-    await _downloadAndCacheMunicipioGeojson();
-
-    try {
-      final gruposVulnerables = await _api.getGruposVulnerables();
-      _gruposVulnerables = gruposVulnerables;
-      await _db.saveGruposVulnerables(
-          gruposVulnerables.map((g) => {
-            'id_grupo_vulnerable': g.idGrupoVulnerable,
-            'codigo': g.codigo,
-            'nombre': g.nombre,
-            'descripcion': g.descripcion,
-            'orden': g.orden,
-            'activo': g.activo ? 1 : 0,
-          }).toList());
-    } catch (_) {
-      try {
-        final gruposData = await _db.getGruposVulnerablesLocal();
-        _gruposVulnerables = gruposData
-            .map((g) => GrupoVulnerableCatalogo.fromJson(g))
-            .toList();
-      } catch (_) {
-        _gruposVulnerables = [];
-      }
-    }
-
-    try {
-      final gruposEtarios = await _api.getGruposEtarios();
-      _gruposEtarios = gruposEtarios;
-      await _db.saveGruposEtarios(
-          gruposEtarios.map((g) => {
-            'id_grupo_etario': g.idGrupoEtario,
-            'codigo': g.codigo,
-            'nombre': g.nombre,
-            'descripcion': g.descripcion,
-            'orden': g.orden,
-            'activo': g.activo ? 1 : 0,
-          }).toList());
-    } catch (_) {
-      try {
-        final gruposEtariosData = await _db.getGruposEtariosLocal();
-        _gruposEtarios = gruposEtariosData
-            .map((g) => GrupoEtarioCatalogo.fromJson(g))
-            .toList();
-      } catch (_) {
-        _gruposEtarios = [];
-      }
-    }
-
-    notifyListeners();
-    return {'estados': estadosCount, 'tipos': tiposCount};
   }
 
   Future<void> _downloadAndCacheMunicipioGeojson() async {
@@ -652,7 +647,7 @@ class ReporteProvider extends ChangeNotifier {
       _municipioGeojson = geojson;
       notifyListeners();
     } catch (_) {
-      // Silencioso: no rompe el flujo de catÃ¡logos
+      // Silencioso: no rompe el flujo de catálogos
     }
   }
 
@@ -685,7 +680,6 @@ class ReporteProvider extends ChangeNotifier {
   void clearData() {
     _pendingSubscription?.cancel();
     _pendingSubscription = null;
-    _reportes = [];
     _departamentos = [];
     _provincias = [];
     _municipios = [];

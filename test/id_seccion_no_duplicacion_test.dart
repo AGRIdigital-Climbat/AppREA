@@ -1,6 +1,6 @@
-// Pruebas del contrato de `id_seccion` (DOCUMENTO_V2_SYNC.md):
-//   - `id_seccion` se genera SOLO al guardar (asignarIdSeccionSiFalta), jamás en
-//     deserialización (requireIdSeccion) ni en la capa visual.
+// Pruebas del contrato de identidad de fila:
+//   - Al deserializar NUNCA se genera id; `uuidFilaDe` prefiere `uuid_registro`
+//     válido y descarta `id_seccion` legacy con prefijo (mandarlo daría 422).
 //   - `deduplicarSecciones` evita arrays 1:N duplicados (regla 3 -> NO 6).
 // Ejecutar: cd REA; flutter test test/id_seccion_no_duplicacion_test.dart
 
@@ -29,14 +29,29 @@ EdanGrupoVulnerable _grupo({
 }
 
 void main() {
-  group('requireIdSeccion: nunca genera id al deserializar', () {
-    test('con id presente lo conserva', () {
-      expect(requireIdSeccion('abc-123', 'po'), 'abc-123');
+  group('uuidFilaDe: nunca genera id al deserializar', () {
+    test('uuid_registro válido manda sobre id_seccion legacy', () {
+      expect(
+          uuidFilaDe({
+            'uuid_registro': 'c3484037-9523-4aa7-e6b7-57a9fe67b953',
+            'id_seccion': '1k2ma9o87-d0601a819c58d',
+          }),
+          'c3484037-9523-4aa7-e6b7-57a9fe67b953');
+    });
+
+    test('id_seccion legacy con prefijo se descarta (daría 422)', () {
+      expect(uuidFilaDe({'id_seccion': 'po_abc123'}), isNull);
+      expect(uuidFilaDe({'id_seccion': '1k2ma9o87-d0601a819c58d'}), isNull);
+    });
+
+    test('uuid válido en id_seccion se conserva', () {
+      const u = 'aaaaaaaa-1111-4111-8111-111111111111';
+      expect(uuidFilaDe({'id_seccion': u}), u);
     });
 
     test('sin id devuelve null y JAMAS genera uno nuevo', () {
-      expect(requireIdSeccion(null, 'po'), isNull);
-      expect(requireIdSeccion('', 'po'), isNull);
+      expect(uuidFilaDe({}), isNull);
+      expect(uuidFilaDe({'id_seccion': ''}), isNull);
     });
   });
 

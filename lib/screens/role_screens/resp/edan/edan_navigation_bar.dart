@@ -11,9 +11,13 @@ class EdanNavigationBar extends StatelessWidget {
   final bool isPreview;
   final bool saving;
   final VoidCallback onBack;
-  final VoidCallback onNext;
+  final VoidCallback? onNext;
   final VoidCallback? onSaveDraft;
   final VoidCallback? onEnviar;
+
+  /// Tooltip de "siguiente" cuando hay secciones sin completar (null =
+  /// habilitado).
+  final String? nextTooltip;
 
   const EdanNavigationBar({
     super.key,
@@ -22,9 +26,10 @@ class EdanNavigationBar extends StatelessWidget {
     required this.isPreview,
     required this.saving,
     required this.onBack,
-    required this.onNext,
+    this.onNext,
     this.onSaveDraft,
     this.onEnviar,
+    this.nextTooltip,
   });
 
   @override
@@ -98,14 +103,31 @@ class EdanNavigationBar extends StatelessWidget {
                             ),
                           ),
                         ))
-                  : ElevatedButton.icon(
-                      onPressed: saving ? null : onNext,
-                      icon: const Icon(Icons.arrow_forward, size: 18),
-                      label: const Text('Siguiente'),
-                      style: ElevatedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                    ),
+                  : (onNext != null && nextTooltip == null
+                      ? ElevatedButton.icon(
+                          onPressed: saving ? null : onNext,
+                          icon: const Icon(Icons.arrow_forward, size: 18),
+                          label: const Text('Siguiente'),
+                          style: ElevatedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                        )
+                      : Tooltip(
+                          message: nextTooltip ?? 'Faltan secciones por completar',
+                          child: ElevatedButton.icon(
+                            onPressed: null,
+                            icon: const Icon(Icons.arrow_forward, size: 18),
+                            label: const Text('Siguiente'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.divider,
+                              foregroundColor: AppColors.textSecondary,
+                              disabledBackgroundColor: AppColors.divider,
+                              disabledForegroundColor:
+                                  AppColors.textSecondary,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
+                          ),
+                        )),
             ),
           ],
         ),

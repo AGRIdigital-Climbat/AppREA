@@ -7,7 +7,15 @@ import '../../../../widgets/custom_text_field.dart';
 class EdanPage02 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage02({super.key, required this.localidad});
+  /// Avisa al wizard que el modelo cambió (gate del botón Siguiente) sin
+  /// reconstruir la lista de páginas.
+  final VoidCallback? onCambio;
+
+  const EdanPage02({
+    super.key,
+    required this.localidad,
+    this.onCambio,
+  });
 
   @override
   State<EdanPage02> createState() => _EdanPage02State();
@@ -38,12 +46,23 @@ class _EdanPage02State extends State<EdanPage02> {
     _familiasDamnificadas.addListener(_onFamiliasDamnificadas);
   }
 
-  void _onPoblacion() => widget.localidad.totalPoblacionAfectada =
-      int.tryParse(_poblacion.text) ?? 0;
-  void _onFamiliasAfectadas() => widget.localidad.totalFamiliasAfectadas =
-      int.tryParse(_familiasAfectadas.text) ?? 0;
-  void _onFamiliasDamnificadas() => widget.localidad.totalFamiliasDamnificadas =
-      int.tryParse(_familiasDamnificadas.text) ?? 0;
+  void _onPoblacion() {
+    widget.localidad.totalPoblacionAfectada =
+        int.tryParse(_poblacion.text) ?? 0;
+    widget.onCambio?.call();
+  }
+
+  void _onFamiliasAfectadas() {
+    widget.localidad.totalFamiliasAfectadas =
+        int.tryParse(_familiasAfectadas.text) ?? 0;
+    widget.onCambio?.call();
+  }
+
+  void _onFamiliasDamnificadas() {
+    widget.localidad.totalFamiliasDamnificadas =
+        int.tryParse(_familiasDamnificadas.text) ?? 0;
+    widget.onCambio?.call();
+  }
 
   @override
   void dispose() {

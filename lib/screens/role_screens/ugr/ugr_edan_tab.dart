@@ -137,16 +137,60 @@ class UgrEdanTabState extends State<UgrEdanTab>
     final localidades = e['localidades'];
     if (localidades is List && localidades.isNotEmpty) {
       final secciones = <String>{};
+      // Los grupos llegan con tres grafías según quién escribió el registro:
+      // planos `grup_poblacion` (payload v1), camel `grupPoblacion` (modelo
+      // local) o anidados en el nodo `grupos` del `GET /completo`. Como
+      // respaldo se acepta también la bandera de SECCIÓN homónima
+      // (`imp_*`), que en los documentos viejos cumplía ambos papeles.
+      bool marcado(Map loc, String grupo, String seccion) {
+        // Las localidades de los GET nuevos (familia cabecera §20.17) llegan
+        // como DOCUMENTO: los `grup_*`/`imp_*` están bajo `cabecera` (y en su
+        // nodo `grupos`), no en la raíz. Se leen ambas formas.
+        final cab = loc['cabecera'] is Map ? loc['cabecera'] as Map : null;
+        final grupos = loc['grupos'] is Map ? loc['grupos'] as Map : null;
+        final cabGrupos =
+            cab != null && cab['grupos'] is Map ? cab['grupos'] as Map : null;
+        bool plano(String clave) =>
+            loc[clave] == true ||
+            (grupos?[clave] == true) ||
+            (cab?[clave] == true) ||
+            (cabGrupos?[clave] == true);
+        final camel = grupo
+            .replaceAllMapped(RegExp(r'_([a-z])'), (m) => m[1]!.toUpperCase());
+        return plano(grupo) || plano(camel) || plano(seccion);
+      }
+
       for (final loc in localidades) {
         if (loc is! Map) continue;
-        if (loc['imp_poblacion'] == true || loc['impPoblacion'] == true) secciones.add('Población');
-        if (loc['imp_salud'] == true || loc['impSalud'] == true) secciones.add('Salud');
-        if (loc['imp_infraestructura'] == true || loc['impInfraestructura'] == true) secciones.add('Infra');
-        if (loc['imp_servicios'] == true || loc['impServicios'] == true) secciones.add('Servicios');
-        if (loc['imp_educacion'] == true || loc['impEducacion'] == true) secciones.add('Educación');
-        if (loc['imp_vivienda'] == true || loc['impVivienda'] == true) secciones.add('Vivienda');
-        if (loc['imp_agropecuario'] == true || loc['impAgropecuario'] == true) secciones.add('Agropecuario');
-        if (loc['imp_proteccion'] == true || loc['impProteccion'] == true) secciones.add('Protección');
+        if (marcado(loc, 'grup_poblacion', 'imp_impacto_poblacion')) {
+          secciones.add('Población');
+        }
+        if (marcado(loc, 'grup_salud', 'imp_salud_establecimientos')) {
+          secciones.add('Salud');
+        }
+        if (marcado(loc, 'grup_infraestructura', 'imp_danos_viales')) {
+          secciones.add('Infra');
+        }
+        if (marcado(loc, 'grup_servicios', 'imp_servicios_basicos')) {
+          secciones.add('Servicios');
+        }
+        if (marcado(loc, 'grup_educacion', 'imp_unidades_educativas')) {
+          secciones.add('Educación');
+        }
+        if (marcado(loc, 'grup_vivienda', 'imp_danos_vivienda')) {
+          secciones.add('Vivienda');
+        }
+        if (marcado(loc, 'grup_agropecuario', 'imp_danos_agricultura')) {
+          secciones.add('Agropecuario');
+        }
+        if (marcado(loc, 'grup_proteccion', 'imp_proteccion')) {
+          secciones.add('Protección');
+        }
+        // Falta histórico: `Necesidades` nunca se evaluaba aquí (solo 8 de los
+        // 9 grupos aparecen). Se agrega para que el badge sea completo.
+        if (marcado(loc, 'grup_necesidades', 'imp_necesidad_humanitaria')) {
+          secciones.add('Necesidades');
+        }
       }
       e['secciones'] = secciones.toList();
     }
@@ -400,7 +444,7 @@ class _EdanServidorCard extends StatelessWidget {
         edan['municipio_nombre'] ?? edan['municipioNombre'] ?? edan['municipio']);
     final departamento = _safeStr(
         edan['departamento_nombre'] ?? edan['departamentoNombre'] ?? edan['departamento']);
-    final estado = _safeStr(edan['estado']);
+    final estado = _safeStr(edan['estado'] ?? edan['estado_edan']);
     final localidades = _safeInt(edan['num_localidades'] ?? edan['total_localidades']);
     final fechaEvento = _safeStr(edan['fecha_evento'] ?? edan['fechaEvento']);
     final horaEvento = _safeStr(edan['hora_evento'] ?? edan['horaEvento']);

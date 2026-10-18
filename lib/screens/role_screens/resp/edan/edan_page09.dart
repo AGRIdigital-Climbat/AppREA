@@ -5,6 +5,7 @@ import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
 import '../../../../models/reporte.dart';
 import '../../../../providers/reporte_provider.dart';
+import '../../../../services/edan/edan_store.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -20,13 +21,25 @@ import 'edan_aviso.dart';
 class EdanPage09 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage09({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+  final EdanStore? store;
+
+  const EdanPage09({super.key, required this.localidad, this.store, this.onCambio});
 
   @override
   State<EdanPage09> createState() => _EdanPage09State();
 }
 
 class _EdanPage09State extends State<EdanPage09> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   final _afectadasAg = TextEditingController();
   final _perdidasAg = TextEditingController();
   final _necAg = TextEditingController();
@@ -53,6 +66,24 @@ class _EdanPage09State extends State<EdanPage09> {
     _parcialIp.dispose();
     _totalIp.dispose();
     super.dispose();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _hidratarFotos();
+  }
+
+  Future<void> _hidratarFotos() async {
+    final cambio = await EdanBotonSacarFoto.hidratarFotosDeItems(
+      widget.store,
+      [
+        ...widget.localidad.danosAgricultura,
+        ...widget.localidad.danosPecuarios,
+        ...widget.localidad.infraProductiva,
+      ],
+    );
+    if (cambio && mounted) setState(() {});
   }
 
   // ─── Agricultura ───
@@ -527,6 +558,7 @@ class _EdanPage09State extends State<EdanPage09> {
   }
 
   Future<void> _fotoAgricultura(EdanDanoAgricultura a) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(a);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: a.fotos,
@@ -534,19 +566,23 @@ class _EdanPage09State extends State<EdanPage09> {
       lonActual: a.coordenadaLon,
       seccion: 'Agricultura',
       idLocal: widget.localidad.idLocal,
-      idSeccion: a.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         a.coordenadaLat = lat;
         a.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => a.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'danos-agricultura',
     );
     if (!ok || !mounted) return;
     setState(() {});
   }
 
   Future<void> _fotoPecuario(EdanDanoPecuario p) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(p);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: p.fotos,
@@ -554,19 +590,23 @@ class _EdanPage09State extends State<EdanPage09> {
       lonActual: p.coordenadaLon,
       seccion: 'Pecuario',
       idLocal: widget.localidad.idLocal,
-      idSeccion: p.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         p.coordenadaLat = lat;
         p.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => p.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'danos-pecuarios',
     );
     if (!ok || !mounted) return;
     setState(() {});
   }
 
   Future<void> _fotoInfra(EdanInfraProductiva i) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(i);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: i.fotos,
@@ -574,13 +614,16 @@ class _EdanPage09State extends State<EdanPage09> {
       lonActual: i.coordenadaLon,
       seccion: 'Infraestructura productiva',
       idLocal: widget.localidad.idLocal,
-      idSeccion: i.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         i.coordenadaLat = lat;
         i.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => i.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'infra-productiva',
     );
     if (!ok || !mounted) return;
     setState(() {});
@@ -595,9 +638,12 @@ class _EdanPage09State extends State<EdanPage09> {
       tablaSqlite: 'seccion_danos_agricultura',
       titulo: '¿Eliminar cultivo?',
       mensaje: 'Se eliminará el registro de "${a.tipoCultivo}".',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = a.idSeccion;
     setState(() => widget.localidad.danosAgricultura.remove(a));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
   }
 
   Future<void> _eliminarPecuario(EdanDanoPecuario p) async {
@@ -609,9 +655,12 @@ class _EdanPage09State extends State<EdanPage09> {
       tablaSqlite: 'seccion_danos_pecuarios',
       titulo: '¿Eliminar especie?',
       mensaje: 'Se eliminará el registro de "${p.especie}".',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = p.idSeccion;
     setState(() => widget.localidad.danosPecuarios.remove(p));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
   }
 
   Future<void> _eliminarInfra(EdanInfraProductiva i) async {
@@ -623,9 +672,12 @@ class _EdanPage09State extends State<EdanPage09> {
       tablaSqlite: 'seccion_infra_productiva',
       titulo: '¿Eliminar infraestructura?',
       mensaje: 'Se eliminará el registro de "${i.tipo}" infraestructura productiva.',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = i.idSeccion;
     setState(() => widget.localidad.infraProductiva.remove(i));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
   }
 
   @override

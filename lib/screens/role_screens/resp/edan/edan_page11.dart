@@ -9,13 +9,24 @@ import '../../../../models/edan.dart';
 class EdanPage11 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage11({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+
+  const EdanPage11({super.key, required this.localidad, this.onCambio});
 
   @override
   State<EdanPage11> createState() => _EdanPage11State();
 }
 
 class _EdanPage11State extends State<EdanPage11> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   final Map<String, TextEditingController> _obs = {};
 
   @override

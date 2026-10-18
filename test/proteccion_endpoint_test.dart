@@ -222,8 +222,9 @@ void main() {
   // ─────────────────────────────────────────────────────
   group('Roundtrip serialización', () {
     test('toJson/fromJson preserva nombre_grupo', () {
+      const id = 'c0c0c0c0-c0c0-4c0c-8c0c-c0c0c0c0c0c0';
       final original = EdanGrupoVulnerable(
-        idSeccion: 'po_rt_001',
+        idSeccion: id,
         idGrupoVulnerableCatalogo: 3,
         nombreGrupo: 'Niños 0-5 años',
         mujeres: 7,
@@ -238,7 +239,7 @@ void main() {
           reason: 'toJson() no incluye total (es getter calculado)');
 
       final restored = EdanGrupoVulnerable.fromJson(json);
-      expect(restored.idSeccion, 'po_rt_001');
+      expect(restored.idSeccion, id);
       expect(restored.idGrupoVulnerableCatalogo, 3);
       expect(restored.nombreGrupo, 'Niños 0-5 años');
       expect(restored.mujeres, 7);
@@ -250,10 +251,15 @@ void main() {
     });
 
     test('localidad roundtrip: 8 grupos preservan idSeccion', () {
+      String gid(int i) {
+        final h = i.toRadixString(16);
+        final seg = (String c) => (c * 8).substring(0, 8);
+        return '${seg(h)}-${(h * 4).substring(0, 4)}-4${(h * 3).substring(0, 3)}-8${(h * 3).substring(0, 3)}-${(h * 12).substring(0, 12)}';
+      }
       final grupos = List.generate(
         8,
         (i) => EdanGrupoVulnerable(
-          idSeccion: 'po_grp_$i',
+          idSeccion: gid(i),
           idGrupoVulnerableCatalogo: i + 1,
           mujeres: i * 2,
           hombres: i,
@@ -267,7 +273,7 @@ void main() {
       final restored = EdanLocalidad.fromJson(json);
       expect(restored.proteccion.length, 8);
       for (var i = 0; i < 8; i++) {
-        expect(restored.proteccion[i].idSeccion, 'po_grp_$i');
+        expect(restored.proteccion[i].idSeccion, gid(i));
         expect(restored.proteccion[i].mujeres, i * 2);
         expect(restored.proteccion[i].hombres, i);
         expect(restored.proteccion[i].total, i * 3);

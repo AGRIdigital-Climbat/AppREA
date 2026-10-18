@@ -709,7 +709,6 @@ void main() {
 /// Voz que sí registra lo que se habla, como una persona en el campo.
 class _VozFalsa implements EdanIaVoz {
   final dicho = <String>[];
-  String? _aEscuchar;
   final pistas = <EdanPistaVoz>[];
 
   @override

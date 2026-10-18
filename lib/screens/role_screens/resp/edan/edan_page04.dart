@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
+import '../../../../services/edan/edan_store.dart';
 import 'edan_boton_sacar_foto.dart';
 import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
@@ -12,13 +13,25 @@ import 'edan_subsection_header.dart';
 class EdanPage04 extends StatefulWidget {
   final EdanLocalidad localidad;
 
-  const EdanPage04({super.key, required this.localidad});
+  /// Notifica al wizard que los datos cambiaron para que reevalúe el botón
+  /// Siguiente de ESTA página. No reconstruye la lista de páginas.
+  final VoidCallback? onCambio;
+  final EdanStore? store;
+
+  const EdanPage04({super.key, required this.localidad, this.store, this.onCambio});
 
   @override
   State<EdanPage04> createState() => _EdanPage04State();
 }
 
 class _EdanPage04State extends State<EdanPage04> {
+  /// Toda mutación de datos pasa por `setState` en esta página, así que
+  /// el override notifica al wizard en un solo punto (coalescido por él).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    widget.onCambio?.call();
+  }
   late final TextEditingController _personas;
   late final TextEditingController _otras;
   late final TextEditingController _obsSalud;
@@ -36,23 +49,22 @@ class _EdanPage04State extends State<EdanPage04> {
   @override
   void initState() {
     super.initState();
+    _hidratarFotos();
+    // `fromJson` deja el objeto en `null` si `necesidad_salud` no era un Map
+    // (p.j. un borrador importado con la clave ausente). Antes los `!` de
+    // abajo rompían la pantalla al instante; ahora se siembra perezosamente.
+    final ns = widget.localidad.necesidadSalud ??= EdanNecesidadSalud();
     _personas = TextEditingController(
-        text: widget.localidad.necesidadSalud!.numeroPersonas > 0
-            ? '${widget.localidad.necesidadSalud!.numeroPersonas}'
-            : '');
-    _otras = TextEditingController(
-        text: widget.localidad.necesidadSalud!.otrasNecesidades);
-    _obsSalud = TextEditingController(
-        text: widget.localidad.necesidadSalud!.observaciones);
+        text: ns.numeroPersonas > 0 ? '${ns.numeroPersonas}' : '');
+    _otras = TextEditingController(text: ns.otrasNecesidades);
+    _obsSalud = TextEditingController(text: ns.observaciones);
     _personas.addListener(() {
       final n = int.tryParse(_personas.text) ?? 0;
-      widget.localidad.necesidadSalud!.numeroPersonas = n;
-      widget.localidad.necesidadSalud!.botiquines = n > 0;
+      ns.numeroPersonas = n;
+      ns.botiquines = n > 0;
     });
-    _otras.addListener(
-        () => widget.localidad.necesidadSalud!.otrasNecesidades = _otras.text);
-    _obsSalud.addListener(
-        () => widget.localidad.necesidadSalud!.observaciones = _obsSalud.text);
+    _otras.addListener(() => ns.otrasNecesidades = _otras.text);
+    _obsSalud.addListener(() => ns.observaciones = _obsSalud.text);
   }
 
   @override
@@ -201,12 +213,24 @@ class _EdanPage04State extends State<EdanPage04> {
       tablaSqlite: 'seccion_salud_establecimientos',
       titulo: '¿Eliminar establecimiento?',
       mensaje: 'Se eliminará el registro de salud "${est.nombreEstablecimiento}".',
+      store: widget.store,
     );
     if (!ok || !mounted) return;
+    final uuid = est.idSeccion;
     setState(() => widget.localidad.establecimientosSalud.remove(est));
+    await EdanBotonSacarFoto.purgarFotosDeItem(widget.store, uuid);
+  }
+
+  Future<void> _hidratarFotos() async {
+    final cambio = await EdanBotonSacarFoto.hidratarFotosDeItems(
+      widget.store,
+      widget.localidad.establecimientosSalud,
+    );
+    if (cambio && mounted) setState(() {});
   }
 
   Future<void> _foto(EdanEstablecimientoSalud est) async {
+    final uuid = EdanBotonSacarFoto.asegurarUuidRegistro(est);
     final ok = await EdanBotonSacarFoto.mostrarSheetFoto(
       context,
       fotos: est.fotos,
@@ -214,13 +238,16 @@ class _EdanPage04State extends State<EdanPage04> {
       lonActual: est.coordenadaLon,
       seccion: 'Salud',
       idLocal: widget.localidad.idLocal,
-      idSeccion: est.idSeccion,
+      idSeccion: uuid,
       idEdanLocalidad: widget.localidad.idServer ?? widget.localidad.idEdan,
       onCoordenadasCapturadas: (lat, lon) {
         est.coordenadaLat = lat;
         est.coordenadaLon = lon;
       },
       onFotoGuardada: (path) => est.fotografia = path,
+      store: widget.store,
+      uuidRegistro: uuid,
+      rutaSeccion: 'salud-establecimientos',
     );
     if (!ok || !mounted) return;
     setState(() {});

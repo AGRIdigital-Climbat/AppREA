@@ -33,7 +33,20 @@ class ConnectivityService {
   static const int _maxConsecutiveFailures = 3;
   Timer? _periodicTimer;
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
-  bool _initialized = false;
+
+  /// Future del arranque en curso. Permite que [initialize] sea idempotente
+  /// *y* esperable: si dos pantallas lo llaman a la vez, la segunda recibe el
+  /// mismo Future en vez de retornar de inmediato con el estado aun sin
+  /// resolver (que era justo el bug que dejaba el boton Sincronizar apagado).
+  Future<void>? _initFuture;
+
+  /// Chequeo de red inyectable para pruebas (evita plugin y red reales).
+  @visibleForTesting
+  static Future<bool> Function()? debugChequeoDeRed;
+
+  /// En pruebas: no suscribirse a connectivity_plus.
+  @visibleForTesting
+  static bool debugOmitirPlugin = false;
 
   bool get isConnected => _isConnected;
 
@@ -47,15 +60,18 @@ class ConnectivityService {
   /// Idempotente: se puede llamar desde varias pantallas sin duplicar la
   /// suscripcion a `onConnectivityChanged` ni el timer periodico. Antes cada
   /// entrada a una pantalla de rol suma un timer de 15 s que nunca se cancela.
-  Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
+  Future<void> initialize() {
+    return _initFuture ??= _initializeInterno();
+  }
 
-    _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
-      _,
-    ) async {
-      await _consultarYActualizar();
-    });
+  Future<void> _initializeInterno() async {
+    if (!debugOmitirPlugin) {
+      _connectivitySubscription = _connectivity.onConnectivityChanged.listen((
+        _,
+      ) async {
+        await _consultarYActualizar();
+      });
+    }
 
     await _consultarYActualizar();
 
@@ -72,9 +88,17 @@ class ConnectivityService {
     }
     // El primer chequeo NO pasa por la histeresis: si estamos sin red hay que
     // saberlo ya, no 45 segundos despues.
+    //
+    // Importante: se comunica SIEMPRE a los suscriptores, sin el atajo de
+    // `_aplicarEstado` (que solo emite cuando el estado cambia). Como el valor
+    // optimista inicial es `true`, con red estable el resultado tambien es
+    // `true` y no se emitia nada: el `ConnectivityProvider` nunca recibia
+    // `chequeoCompletado = true` y el boton Sincronizar quedaba deshabilitado
+    // de por vida (hasta que un corte de red forzara una transicion).
     _chequeoCompletado = true;
     _consecutiveFailures = connected ? 0 : _maxConsecutiveFailures;
-    _aplicarEstado(connected);
+    _isConnected = connected;
+    _connectionController.add(connected);
     // Traza unica: deja registro de con que estado arranco la sesion, que es
     // lo primero que hay que saber cuando el modo offline se comporta raro.
     debugPrint('[Connectivity] primer chequeo: ${connected ? 'online' : 'offline'}');
@@ -100,6 +124,8 @@ class ConnectivityService {
   }
 
   Future<bool> _checkConnection() async {
+    final override = debugChequeoDeRed;
+    if (override != null) return override();
     try {
       final results = await _connectivity
           .checkConnectivity()
@@ -134,12 +160,28 @@ class ConnectivityService {
     return connected;
   }
 
+  /// Reinicia el singleton al estado inicial para pruebas. No cierra el
+  /// StreamController (que es broadcast y se reutiliza entre pruebas).
+  @visibleForTesting
+  void debugReset() {
+    _periodicTimer?.cancel();
+    _periodicTimer = null;
+    _connectivitySubscription?.cancel();
+    _connectivitySubscription = null;
+    _initFuture = null;
+    _isConnected = true;
+    _chequeoCompletado = false;
+    _consecutiveFailures = 0;
+    debugChequeoDeRed = null;
+    debugOmitirPlugin = false;
+  }
+
   void dispose() {
     _periodicTimer?.cancel();
     _periodicTimer = null;
     _connectivitySubscription?.cancel();
     _connectivitySubscription = null;
-    _initialized = false;
+    _initFuture = null;
     _connectionController.close();
   }
 }

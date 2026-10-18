@@ -148,12 +148,12 @@ void main() {
 
   test('los flags imp_* coinciden con las secciones activas', () async {
     final r = await guardarYReleer(borrador());
-    expect(r.impInfraestructura, isTrue);
-    expect(r.impAgropecuario, isTrue);
+    expect(r.grupInfraestructura, isTrue);
+    expect(r.grupAgropecuario, isTrue);
     expect(r.impProteccion, isTrue);
-    expect(r.impNecesidades, isTrue);
-    expect(r.impSalud, isFalse);
-    expect(r.impServicios, isFalse);
+    expect(r.grupNecesidades, isTrue);
+    expect(r.grupSalud, isFalse);
+    expect(r.grupServicios, isFalse);
   });
 
   test('actualizar no duplica la localidad ni pierde secciones', () async {
@@ -209,12 +209,14 @@ void main() {
     expect(releido.fotos.first.ruta, '/fotos/puente_2.jpg');
   });
 
-  test('el esquema creado por la prueba es el de la app (versión 29)', () async {
+  test('el esquema creado por la prueba es el de la app', () async {
     await db.insertLocalidad(traducirBorrador(borrador()).localidad, usuarioId: 7);
     final d = await db.database;
 
     final version = await d.rawQuery('PRAGMA user_version');
-    expect(version.first.values.first, 29);
+    // Se compara contra la constante de la app: si alguien sube el esquema y
+    // no actualiza aquí, el test lo detecta sin quedar anclado a un número.
+    expect(version.first.values.first, DatabaseHelper.versionEsquema);
 
     // Las tablas que el asistente toca tienen que existir tal cual.
     final tablas = (await d.rawQuery(
@@ -231,6 +233,12 @@ void main() {
         'seccion_danos_viales',
         'seccion_danos_agricultura',
         'localidad_secciones_activas',
+        'formularios',
+        'filas_seccion',
+        'viviendas',
+        'fotografias',
+        'cola_sincronizacion',
+        'cola_fotos',
       ]),
     );
   });

@@ -130,7 +130,7 @@ class SyncDebugCollector {
         continue;
       }
 
-      buffer.writeln('[$entry.statusIcon] ${entry.metodo} ${entry.endpoint}');
+      buffer.writeln('[${entry.statusIcon}] ${entry.metodo} ${entry.endpoint}');
       buffer.writeln('   Status: ${entry.statusCode ?? "N/A"} | ${entry.duracion?.inMilliseconds ?? "?"}ms');
       if (entry.error != null) buffer.writeln('   Error: ${entry.error}');
       if (entry.localidadId != null) buffer.writeln('   Localidad: ${entry.localidadId}');

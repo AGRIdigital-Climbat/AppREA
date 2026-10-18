@@ -349,34 +349,40 @@ class PerfilTabState extends State<PerfilTab> {
                   ),
                 ),
               ],
+              if (rp.isDescargandoCatalogos) ...[
+                const SizedBox(height: 10),
+                const LinearProgressIndicator(minHeight: 4),
+                const SizedBox(height: 6),
+                Text(
+                  rp.downloadPhase.isEmpty
+                      ? 'Descargando catalogos...'
+                      : rp.downloadPhase,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary.withValues(alpha: 0.8),
+                  ),
+                ),
+              ],
               const SizedBox(height: 10),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton.icon(
-                  onPressed: () async {
-                    final messenger = ScaffoldMessenger.of(context);
-                    messenger.showSnackBar(
-                      const SnackBar(
-                        content: Text('Cargando catalogos...'),
-                        backgroundColor: AppColors.inProgress,
-                      ),
-                    );
-                    final result = esEdan
-                        ? await rp.fetchAndCacheCatalogsEdan()
-                        : await rp.fetchAndCacheCatalogs();
-                    if (context.mounted) {
-                      messenger.showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            esEdan
-                                ? '${result['estados']} estados, ${result['tipos']} tipos y geojson del municipio cargados'
-                                : '${result['estados']} estados, ${result['tipos']} tipos y ${result['categorias']} categorias cargados',
-                          ),
-                          backgroundColor: AppColors.completed,
-                        ),
-                      );
-                    }
-                  },
+                  onPressed: rp.isDescargandoCatalogos
+                      ? null
+                      : () async {
+                          final messenger = ScaffoldMessenger.of(context);
+                          await rp.fetchAndCacheCatalogs();
+                          if (context.mounted) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  '${rp.estados.length} estados, ${rp.tiposEvento.length} tipos y ${rp.categorias.length} categorias cargados',
+                                ),
+                                backgroundColor: AppColors.completed,
+                              ),
+                            );
+                          }
+                        },
                   icon: const Icon(Icons.sync, size: 16),
                   label: const Text('Actualizar catalogos'),
                   style: ElevatedButton.styleFrom(

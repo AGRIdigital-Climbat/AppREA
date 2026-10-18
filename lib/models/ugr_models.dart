@@ -240,84 +240,84 @@ class UgrEdan {
     ];
 
     final seccionesEspecificas = <UgrSeccion>[
-      if (!esBorrador || e.localidades.any((l) => l.impSalud))
+      if (!esBorrador || e.localidades.any((l) => l.grupSalud))
         UgrSeccion(
           nombre: '04 · Salud',
           descripcion: 'Daños en servicios de salud y necesidades',
           icon: Icons.local_hospital_outlined,
           completada: e.localidades.any((l) =>
-              l.impSalud &&
+              l.grupSalud &&
               l.establecimientosSalud
                   .any((s) => s.nombreEstablecimiento.trim().isNotEmpty)),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impInfraestructura))
+      if (!esBorrador || e.localidades.any((l) => l.grupInfraestructura))
         UgrSeccion(
           nombre: '05 · Infraestructura',
           descripcion: 'Daños viales y en infraestructura pública',
           icon: Icons.route_outlined,
           completada: e.localidades.any((l) =>
-              l.impInfraestructura &&
+              l.grupInfraestructura &&
               (l.danosViales.any((d) => d.viaPuente.trim().isNotEmpty) ||
                   l.danosInfraPublica
                       .any((d) => d.tipoEstructura.trim().isNotEmpty))),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impServicios))
+      if (!esBorrador || e.localidades.any((l) => l.grupServicios))
         UgrSeccion(
           nombre: '06 · Servicios básicos',
           descripcion: 'Agua, luz, alcantarillado y comunicaciones',
           icon: Icons.water_drop_outlined,
           completada: e.localidades.any((l) =>
-              l.impServicios && l.serviciosBasicos.any((s) => s.tieneDatos)),
+              l.grupServicios && l.serviciosBasicos.any((s) => s.tieneDatos)),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impEducacion))
+      if (!esBorrador || e.localidades.any((l) => l.grupEducacion))
         UgrSeccion(
           nombre: '07 · Educación',
           descripcion: 'Unidades educativas y afectación',
           icon: Icons.school_outlined,
           completada: e.localidades.any((l) =>
-              l.impEducacion &&
+              l.grupEducacion &&
               l.unidadesEducativas.any((u) =>
                   u.nombreEstablecimiento.trim().isNotEmpty ||
                   u.estudiantes > 0 ||
                   u.profesores > 0 ||
                   u.administrativos > 0)),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impVivienda))
+      if (!esBorrador || e.localidades.any((l) => l.grupVivienda))
         UgrSeccion(
           nombre: '08 · Vivienda',
           descripcion: 'Daños parciales y totales por localidad',
           icon: Icons.home_outlined,
           completada: e.localidades.any((l) =>
-              l.impVivienda &&
+              l.grupVivienda &&
               l.danosVivienda.any((v) => v.comunidad.trim().isNotEmpty)),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impAgropecuario))
+      if (!esBorrador || e.localidades.any((l) => l.grupAgropecuario))
         UgrSeccion(
           nombre: '09 · Agropecuario',
           descripcion: 'Agricultura, pecuario e infraestructura productiva',
           icon: Icons.grain,
           completada: e.localidades.any((l) =>
-              l.impAgropecuario &&
+              l.grupAgropecuario &&
               (l.danosAgricultura
                       .any((a) => a.tipoCultivo.trim().isNotEmpty) ||
                   l.danosPecuarios.any((p) => p.especie.trim().isNotEmpty) ||
                   l.infraProductiva.any((i) => i.tipo.trim().isNotEmpty))),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impProteccion))
+      if (!esBorrador || e.localidades.any((l) => l.grupProteccion))
         UgrSeccion(
           nombre: '10 · Protección',
           descripcion: 'Población vulnerable y afectación por sexo',
           icon: Icons.volunteer_activism_outlined,
           completada: e.localidades.any((l) =>
-              l.impProteccion && l.proteccion.any((g) => g.tieneDatos)),
+              l.grupProteccion && l.proteccion.any((g) => g.tieneDatos)),
         ),
-      if (!esBorrador || e.localidades.any((l) => l.impNecesidades))
+      if (!esBorrador || e.localidades.any((l) => l.grupNecesidades))
         UgrSeccion(
           nombre: '11 · Necesidades humanitarias',
           descripcion: 'Alimentos, refugio, higiene y otros',
           icon: Icons.inventory_2_outlined,
           completada: e.localidades.any((l) =>
-              l.impNecesidades && (l.necesidadHumanitaria?.algunaSeleccionada ?? false)),
+              l.grupNecesidades && (l.necesidadHumanitaria?.algunaSeleccionada ?? false)),
         ),
       UgrSeccion(
         nombre: '13 · Responsable del formulario',

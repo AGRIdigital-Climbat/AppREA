@@ -5,9 +5,9 @@ import '../../../models/edan.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/database_helper.dart';
-import '../../../services/edan/edan_documento_sync_service.dart';
+import '../../../services/edan/edan_envio_v2.dart';
 import '../../../services/edan/edan_localidades_envio_v2_service.dart';
-import '../../../services/edan/edan_sync_respo_service.dart';
+import '../../../services/edan/edan_store_v2.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
@@ -27,56 +27,62 @@ class RespDashboardTab extends StatefulWidget {
 class RespDashboardTabState extends State<RespDashboardTab>
     with WidgetsBindingObserver {
   List<EdanLocalidad> _localidades = [];
-  bool _wasSyncingMunicipio = false;
+  bool _wasSyncing = false;
 
-  Map<String, int> get _indicadores {
-    final total = _localidades.length;
-    final huerfanas = _localidades.where((l) => l.esHuerfana).length;
-    final enviadas = _localidades
-        .where((l) => l.estadoLocalidad == UgrLocalidadEstado.enviadoUgr)
-        .length;
-    final aprobadas = _localidades
-        .where((l) => l.estadoLocalidad == UgrLocalidadEstado.aprobadoUgr)
-        .length;
-    final rechazadas = _localidades
-        .where((l) => l.estadoLocalidad == UgrLocalidadEstado.rechazadoUgr)
-        .length;
-    return {
-      'total': total,
-      'huerfanas': huerfanas,
-      'enviadas': enviadas,
-      'aprobadas': aprobadas,
-      'rechazadas': rechazadas,
-    };
-  }
+  /// Indicadores del Inicio calculados SOLO de SQLite (offline-first):
+  /// `_conteosEstado` trae los 6 estados disgregados (id 1-6) y `_totalRemoto`
+  /// su suma. Ya no se consultan al servidor: coinciden con la lista.
+  Map<int, int> _conteosEstado = {};
+  int _totalRemoto = 0;
+
+  /// Motivo del fallo de la carga base (lectura local); `null` = sin error.
+  /// Visible en el Inicio para que "lista vacía" nunca sea silenciosa.
+  String? _errorCarga;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _wasSyncingMunicipio =
-        EdanSyncRespoService.instance.sincronizandoMunicipio.value;
-    EdanSyncRespoService.instance.sincronizandoMunicipio.addListener(
-      _onSyncMunicipioChanged,
-    );
+    // V2: escuchar el notificador REAL del motor (el viejo
+    // `EdanSyncRespoService.sincronizandoMunicipio` ya nadie lo dispara →
+    // el Inicio nunca se refrescaba al terminar la descarga en el login).
+    _wasSyncing = EdanStoreV2.instance.sincronizandoNotifier.value;
+    EdanStoreV2.instance.sincronizandoNotifier.addListener(_onSyncChanged);
+    EdanStoreV2.instance.primeraDescarga.addListener(_onPrimeraDescarga);
+    EdanStoreV2.instance.catalogosVersion.addListener(_onCatalogos);
+    // Los contadores cambian al guardar/borrar/sync: recargan al instante.
+    EdanStoreV2.instance.datosVersion.addListener(_onDatos);
     _cargarLocalidades();
   }
 
   @override
   void dispose() {
-    EdanSyncRespoService.instance.sincronizandoMunicipio.removeListener(
-      _onSyncMunicipioChanged,
-    );
+    EdanStoreV2.instance.sincronizandoNotifier.removeListener(_onSyncChanged);
+    EdanStoreV2.instance.primeraDescarga.removeListener(_onPrimeraDescarga);
+    EdanStoreV2.instance.catalogosVersion.removeListener(_onCatalogos);
+    EdanStoreV2.instance.datosVersion.removeListener(_onDatos);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
 
-  void _onSyncMunicipioChanged() {
-    final syncing = EdanSyncRespoService.instance.sincronizandoMunicipio.value;
-    if (_wasSyncingMunicipio && !syncing) {
+  void _onSyncChanged() {
+    final syncing = EdanStoreV2.instance.sincronizandoNotifier.value;
+    if (_wasSyncing && !syncing) {
       _cargarLocalidades();
     }
-    _wasSyncingMunicipio = syncing;
+    _wasSyncing = syncing;
+  }
+
+  /// Cada corrida del motor (primera descarga incluida) termina con un
+  /// incremento: refrescar aunque la pantalla se haya montado tarde.
+  void _onPrimeraDescarga() {
+    _cargarLocalidades();
+  }
+
+  /// Los catálogos de red terminaron (llegaron tarde): recargar para
+  /// resolver nombres geográficos/tipo sin esperar otro sync.
+  void _onCatalogos() {
+    _cargarLocalidades();
   }
 
   @override
@@ -95,25 +101,43 @@ class RespDashboardTabState extends State<RespDashboardTab>
     if (userId == null) {
       return;
     }
+    // Sin `catch (_)` monolítico: la lectura base, el enriquecimiento de flags
+    // y el catálogo son pasos por-ítem; un fallo no vacía la lista en silencio
+    // ni deja el Inicio mudo.
+    var visibles = <EdanLocalidad>[];
+    String? errorCarga;
     try {
-      final db = DatabaseHelper.instance;
-      final localidades = await db.getLocalidades(userId);
-      final visibles = localidades
+      // Etapa 5: fuente única (ver pestaña de reportes).
+      final store = EdanStoreV2.instance;
+      final localidades = await store.listarReportes(usuarioId: userId);
+      visibles = localidades
           .where((l) => !l.pendienteEliminacion)
           .toList();
-      // Resincronizar flags imp_* desde localidad_secciones_activas, en unión
-      // con lo marcado en page01 (flags de datos_json), para que los badges
-      // del item reflejen los GRUPOS activos (pantallas de page01), igual que
-      // el JSON del long press y la vista previa.
-      final sincV2 = EdanLocalidadesEnvioV2Service();
-      for (final loc in visibles) {
+    } catch (e) {
+      errorCarga = e.toString();
+      debugPrint('[RespDashboard] listarReportes falló: $e');
+    }
+    // Resincronizar flags imp_* desde localidad_secciones_activas, en unión
+    // con lo marcado en page01 (flags de datos_json), para que los badges
+    // del item reflejen los GRUPOS activos (pantallas de page01), igual que
+    // el JSON del long press y la vista previa.
+    final sincV2 = EdanLocalidadesEnvioV2Service();
+    final storeV2 = EdanStoreV2.instance;
+    for (final loc in visibles) {
+      try {
         await sincV2.aplicarFlagsDesdeSeccionesActivas(loc,
             unionConGuardados: true);
+        await storeV2.aplicarGruposServidorAlModelo(loc);
+      } catch (e) {
+        debugPrint('[RespDashboard] flags/grupos de ${loc.nombre} '
+            'omitidos: $e');
       }
-      // Resolver nombres geográficos desde catálogo si faltan
-      if (mounted) {
-        final rp = context.read<ReporteProvider>();
-        for (final loc in visibles) {
+    }
+    // Resolver nombres geográficos desde catálogo si faltan (por ítem)
+    if (mounted) {
+      final rp = context.read<ReporteProvider>();
+      for (final loc in visibles) {
+        try {
           if ((loc.departamentoNombre == null ||
                   loc.departamentoNombre!.isEmpty) &&
               loc.idDepartamento != null) {
@@ -139,25 +163,63 @@ class RespDashboardTabState extends State<RespDashboardTab>
             );
             if (match.isNotEmpty) loc.tipoLocalidad = match.first.nombre;
           }
+          // Resolver tipo de evento desde catálogo (evita "Sin evento").
+          if ((loc.tipoEventoNombre == null ||
+                  loc.tipoEventoNombre!.isEmpty) &&
+              loc.idTipoEvento != null) {
+            final nombre = rp.getTipoEventoNombre(loc.idTipoEvento!);
+            if (nombre != 'Desconocido') loc.tipoEventoNombre = nombre;
+          }
+        } catch (e) {
+          debugPrint('[RespDashboard] catálogo de ${loc.nombre} '
+              'omitido: $e');
         }
       }
-      visibles.sort((a, b) {
-        final fa = a.fechaModificacion ?? '';
-        final fb = b.fechaModificacion ?? '';
-        return fb.compareTo(fa);
+    }
+    visibles.sort((a, b) {
+      final fa = a.fechaModificacion ?? '';
+      final fb = b.fechaModificacion ?? '';
+      return fb.compareTo(fa);
+    });
+    if (mounted) {
+      setState(() {
+        _localidades = visibles;
+        _errorCarga = errorCarga;
       });
-      if (mounted) {
-        setState(() {
-          _localidades = visibles.take(15).toList();
-        });
-      }
-    } catch (_) {}
+    }
+    await _cargarIndicadores();
+  }
+
+  /// Indicadores calculados SOLO de SQLite (offline-first): los 6 estados
+  /// disgregados + total. Sin API y sin memo: coinciden con la lista y
+  /// cambian al instante (guardar/borrar/sync vía `datosVersion`).
+  Future<void> _cargarIndicadores() async {
+    final userId = AuthService.instance.userId;
+    if (userId == null) return;
+    try {
+      final resumen = await EdanStoreV2.instance.resumenLocal(usuarioId: userId);
+      if (!mounted) return;
+      setState(() {
+        _conteosEstado = resumen.porEstado;
+        _totalRemoto = resumen.total;
+      });
+    } catch (e) {
+      debugPrint('[RespDashboard] resumenLocal falló: $e');
+    }
+  }
+
+  /// Los datos mutaron (guardar/borrar/pull/push): recargar contadores.
+  void _onDatos() {
+    _cargarIndicadores();
   }
 
   Future<void> _editarLocalidad(EdanLocalidad localidad) async {
     final result = await Navigator.of(context).push<bool>(
       ugrRoute(
-        EdanFormWizard(edanAEditar: Edan.desdeLocalidad(localidad)),
+        EdanFormWizard(
+          edanAEditar: Edan.desdeLocalidad(localidad),
+          storeV2: EdanStoreV2.instance,
+        ),
         palette: Palettes.rea,
       ),
     );
@@ -169,12 +231,16 @@ class RespDashboardTabState extends State<RespDashboardTab>
   Future<void> _eliminarLocalidad(EdanLocalidad localidad) async {
     final idLocal = localidad.idLocal;
     if (idLocal == null) return;
+    final uuidV2 = localidad.uuidEdanLocalidad;
+    final esV2 = uuidV2 != null && uuidV2.isNotEmpty;
+    final fueSincronizada =
+        localidad.idServer != null || localidad.sincronizado;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Eliminar Localidad'),
         content: Text(
-          localidad.sincronizado
+          fueSincronizada
               ? 'Esta localidad ya fue sincronizada con el servidor.\n\n'
                     'Se marcará como "pendiente de eliminación" y se eliminará '
                     'de forma definitiva al sincronizar.'
@@ -196,7 +262,11 @@ class RespDashboardTabState extends State<RespDashboardTab>
     );
     if (confirm != true || !mounted) return;
     try {
-      if (localidad.sincronizado) {
+      if (esV2) {
+        // Camino V2: borrado total local (+ `D` al servidor solo si estaba
+        // sincronizada; si nunca se sincronizó no hay nada que informar).
+        await EdanStoreV2.instance.eliminarLocalidad(uuidV2);
+      } else if (fueSincronizada) {
         await DatabaseHelper.instance.markLocalidadAsPendingDeletion(idLocal);
       } else {
         await DatabaseHelper.instance.deleteLocalidad(idLocal);
@@ -205,7 +275,7 @@ class RespDashboardTabState extends State<RespDashboardTab>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              localidad.sincronizado
+              fueSincronizada
                   ? 'Localidad marcada para eliminación. Se borrará al sincronizar.'
                   : 'Localidad eliminada',
             ),
@@ -230,8 +300,11 @@ class RespDashboardTabState extends State<RespDashboardTab>
     EdanLocalidad localidad, {
     UgrLocalidadEstado estadoDestino = UgrLocalidadEstado.enviadoUgr,
   }) async {
-    localidad.estadoLocalidad = estadoDestino;
-    localidad.idEdanLocalidadEstado = estadoDestino.id;
+    // Igual que la pestaña: la intención se registra, el estado NO se
+    // anticipa. El badge `enviado` solo aparece con el 200 del servidor; si
+    // falla u offline, se restaura el previo (antes mentía offline).
+    final estadoPrevio = localidad.estadoLocalidad;
+    final idEstadoPrevio = localidad.idEdanLocalidadEstado;
     localidad.pendienteActualizacion = true;
     localidad.sincronizado = false;
     await DatabaseHelper.instance.updateLocalidad(localidad);
@@ -252,8 +325,9 @@ class RespDashboardTabState extends State<RespDashboardTab>
       }
       localidad.idEdanLocalidadEstado = estadoDestino.id;
 
-      sincronizada = await EdanDocumentoSyncService().enviarLocalidadDocumento(
+      sincronizada = await EdanEnvioV2.enviar(
         localidad,
+        idEdanLocalidadEstado: estadoDestino.id,
       );
 
       if (sincronizada) {
@@ -262,6 +336,12 @@ class RespDashboardTabState extends State<RespDashboardTab>
         localidad.sincronizado = true;
         localidad.pendienteActualizacion = false;
         localidad.editado = false;
+        await DatabaseHelper.instance.updateLocalidad(localidad);
+      } else {
+        // Sin confirmación no hay enviado: se restaura el estado previo en
+        // el espejo legacy (el motor ya dejó pendiente_push=1 + intención).
+        localidad.estadoLocalidad = estadoPrevio;
+        localidad.idEdanLocalidadEstado = idEstadoPrevio;
         await DatabaseHelper.instance.updateLocalidad(localidad);
       }
     } catch (e) {
@@ -301,18 +381,64 @@ class RespDashboardTabState extends State<RespDashboardTab>
         padding: const EdgeInsets.all(16),
         children: [
           _buildWelcomeHeader(),
+          if (_errorCarga != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 16),
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.rechazado.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.rechazado.withValues(alpha: 0.4),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'No se pudo cargar la lista local',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.rechazado,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _errorCarga!,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => _cargarLocalidades(),
+                        icon: const Icon(Icons.refresh, size: 16),
+                        label: const Text('Reintentar'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ValueListenableBuilder<int>(
-            valueListenable: EdanSyncRespoService.instance.pendientes,
+            valueListenable: EdanStoreV2.instance.pendientesNotifier,
             builder: (context, pendientes, _) {
               return ValueListenableBuilder<bool>(
-                valueListenable: EdanSyncRespoService.instance.sincronizando,
+                valueListenable:
+                    EdanStoreV2.instance.sincronizandoNotifier,
                 builder: (context, sincronizando, _) {
                   if (pendientes == 0 && !sincronizando) {
                     return const SizedBox.shrink();
                   }
                   return Padding(
                     padding: const EdgeInsets.only(top: 16),
-                    child: _buildSyncBanner(primary, pendientes, sincronizando),
+                    child:
+                        _buildSyncBanner(primary, pendientes, sincronizando),
                   );
                 },
               );
@@ -454,66 +580,19 @@ class RespDashboardTabState extends State<RespDashboardTab>
   }
 
   Widget _buildIndicadores(Color primary) {
-    final ind = _indicadores;
-    final cards = <_IndicatorCard>[
-      _IndicatorCard(
-        value: ind['total'] ?? 0,
-        label: 'Total localidades',
-        icon: Icons.folder,
-        color: primary,
-        onTap: () => widget.onVerEnReportes?.call(null),
-      ),
-      _IndicatorCard(
-        value: ind['huerfanas'] ?? 0,
-        label: 'Sin consolidar',
-        icon: Icons.location_on_outlined,
-        color: AppColors.pending,
-        onTap: () => widget.onVerEnReportes?.call(null),
-      ),
-      _IndicatorCard(
-        value: ind['enviadas'] ?? 0,
-        label: 'Enviadas UGR',
-        icon: Icons.send,
-        color: AppColors.inProgress,
-        onTap: () =>
-            widget.onVerEnReportes?.call(UgrLocalidadEstado.enviadoUgr),
-      ),
-      _IndicatorCard(
-        value: ind['aprobadas'] ?? 0,
-        label: 'Aprobadas',
-        icon: Icons.check_circle,
-        color: AppColors.aprobado,
-        onTap: () =>
-            widget.onVerEnReportes?.call(UgrLocalidadEstado.aprobadoUgr),
-      ),
-      _IndicatorCard(
-        value: ind['rechazadas'] ?? 0,
-        label: 'Rechazadas',
-        icon: Icons.feedback,
-        color: AppColors.rechazado,
-        onTap: () =>
-            widget.onVerEnReportes?.call(UgrLocalidadEstado.rechazadoUgr),
-      ),
-    ];
-
+    // Un contador por estado (disgregado, sin agrupar) + total. Cada uno
+    // filtra en Reportes al tocarlo.
+    const estados = UgrLocalidadEstado.values;
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            Expanded(child: cards[0]),
-            const SizedBox(width: 8),
-            Expanded(child: cards[1]),
-            const SizedBox(width: 8),
-            Expanded(child: cards[2]),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(child: cards[3]),
-            const SizedBox(width: 8),
-            Expanded(child: cards[4]),
-          ],
+        _IndicadoresResumenCard(
+          total: _totalRemoto,
+          primary: primary,
+          estados: estados,
+          conteos: _conteosEstado,
+          onTapTotal: () => widget.onVerEnReportes?.call(null),
+          onTapEstado: (e) => widget.onVerEnReportes?.call(e),
         ),
         const SizedBox(height: 16),
       ],
@@ -596,66 +675,142 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _IndicatorCard extends StatelessWidget {
-  final int value;
+class _BucketIndicador {
   final String label;
-  final IconData icon;
+  final int cantidad;
   final Color color;
-  final VoidCallback? onTap;
+  final VoidCallback onTap;
 
-  const _IndicatorCard({
-    required this.value,
+  const _BucketIndicador({
     required this.label,
-    required this.icon,
+    required this.cantidad,
     required this.color,
-    this.onTap,
+    required this.onTap,
+  });
+}
+
+/// Tarjeta de Indicadores: total + un contador por estado (disgregado).
+/// Cada estado filtra en Reportes al tocarlo.
+class _IndicadoresResumenCard extends StatelessWidget {
+  final int total;
+  final Color primary;
+  final List<UgrLocalidadEstado> estados;
+  final Map<int, int> conteos;
+  final VoidCallback onTapTotal;
+  final void Function(UgrLocalidadEstado) onTapEstado;
+
+  const _IndicadoresResumenCard({
+    required this.total,
+    required this.primary,
+    required this.estados,
+    required this.conteos,
+    required this.onTapTotal,
+    required this.onTapEstado,
   });
 
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: color.withValues(alpha: 0.08),
-      borderRadius: BorderRadius.circular(14),
+      color: primary.withValues(alpha: 0.06),
+      borderRadius: BorderRadius.circular(18),
       child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(14),
+        onTap: onTapTotal,
+        borderRadius: BorderRadius.circular(18),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: color.withValues(alpha: 0.15)),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: primary.withValues(alpha: 0.15)),
           ),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(icon, size: 18, color: color),
-                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Total localidades',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: primary,
+                      ),
+                    ),
+                  ),
                   Text(
-                    '$value',
+                    '$total',
                     style: TextStyle(
-                      fontSize: 18,
+                      fontSize: 24,
+                      height: 1,
                       fontWeight: FontWeight.bold,
-                      color: color,
+                      color: primary,
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: color.withValues(alpha: 0.85),
-                ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 16,
+                runSpacing: 8,
+                children: [
+                  for (final e in estados)
+                    _LeyendaIndicador(
+                      bucket: _BucketIndicador(
+                        label: e.label,
+                        cantidad: conteos[e.id] ?? 0,
+                        color: e.color,
+                        onTap: () => onTapEstado(e),
+                      ),
+                    ),
+                ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _LeyendaIndicador extends StatelessWidget {
+  final _BucketIndicador bucket;
+
+  const _LeyendaIndicador({required this.bucket});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: bucket.onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: bucket.color,
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            '${bucket.label} ',
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textSecondary,
+            ),
+          ),
+          Text(
+            '${bucket.cantidad}',
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: bucket.color,
+            ),
+          ),
+        ],
       ),
     );
   }

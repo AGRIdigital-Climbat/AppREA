@@ -48,15 +48,15 @@ EdanLocalidad _localidadBase({
     totalPoblacionAfectada: 200,
     totalFamiliasAfectadas: 40,
     totalFamiliasDamnificadas: 15,
-    impPoblacion: flags['impPoblacion'] ?? false,
-    impSalud: flags['impSalud'] ?? false,
-    impInfraestructura: flags['impInfraestructura'] ?? false,
-    impServicios: flags['impServicios'] ?? false,
-    impEducacion: flags['impEducacion'] ?? false,
-    impVivienda: flags['impVivienda'] ?? false,
-    impAgropecuario: flags['impAgropecuario'] ?? false,
+    grupPoblacion: flags['grupPoblacion'] ?? false,
+    grupSalud: flags['grupSalud'] ?? false,
+    grupInfraestructura: flags['grupInfraestructura'] ?? false,
+    grupServicios: flags['grupServicios'] ?? false,
+    grupEducacion: flags['grupEducacion'] ?? false,
+    grupVivienda: flags['grupVivienda'] ?? false,
+    grupAgropecuario: flags['grupAgropecuario'] ?? false,
     impProteccion: flags['impProteccion'] ?? false,
-    impNecesidades: flags['impNecesidades'] ?? false,
+    grupNecesidades: flags['grupNecesidades'] ?? false,
     editado: true,
     impactoPoblacion: impactoPoblacion ?? [],
     establecimientosSalud: establecimientos ?? [],
@@ -80,15 +80,15 @@ void main() {
 
     setUp(() {
       rondaFlags = {
-        'impPoblacion': true,
-        'impSalud': true,
-        'impInfraestructura': true,
-        'impServicios': false,
-        'impEducacion': false,
-        'impVivienda': false,
-        'impAgropecuario': false,
+        'grupPoblacion': true,
+        'grupSalud': true,
+        'grupInfraestructura': true,
+        'grupServicios': false,
+        'grupEducacion': false,
+        'grupVivienda': false,
+        'grupAgropecuario': false,
         'impProteccion': true,
-        'impNecesidades': true,
+        'grupNecesidades': true,
       };
 
       loc = _localidadBase(
@@ -164,20 +164,20 @@ void main() {
     test('toApiJson incluye todos los flags de cabecera', () {
       final apiJson = loc.toApiJson();
 
-      expect(apiJson['imp_poblacion'], isTrue);
-      expect(apiJson['imp_salud'], isTrue);
-      expect(apiJson['imp_infraestructura'], isTrue);
-      expect(apiJson['imp_servicios'], isFalse);
+      expect(apiJson['grup_poblacion'], isTrue);
+      expect(apiJson['grup_salud'], isTrue);
+      expect(apiJson['grup_infraestructura'], isTrue);
+      expect(apiJson['grup_servicios'], isFalse);
       expect(apiJson['imp_proteccion'], isTrue);
-      expect(apiJson['imp_necesidades'], isTrue);
+      expect(apiJson['grup_necesidades'], isTrue);
 
       print('\n=== CABECERA toApiJson ===');
-      print('  imp_poblacion=${apiJson['imp_poblacion']}, '
-          'imp_salud=${apiJson['imp_salud']}, '
-          'imp_infraestructura=${apiJson['imp_infraestructura']}, '
-          'imp_servicios=${apiJson['imp_servicios']}, '
+      print('  grup_poblacion=${apiJson['grup_poblacion']}, '
+          'grup_salud=${apiJson['grup_salud']}, '
+          'grup_infraestructura=${apiJson['grup_infraestructura']}, '
+          'grup_servicios=${apiJson['grup_servicios']}, '
           'imp_proteccion=${apiJson['imp_proteccion']}, '
-          'imp_necesidades=${apiJson['imp_necesidades']}');
+          'grup_necesidades=${apiJson['grup_necesidades']}');
     });
 
     test('impacto-poblacion (1:N) genera payload correcto', () {
@@ -305,7 +305,7 @@ void main() {
         nombre: 'Prueba Ronda 2 - Mínimo',
         idLocal: 'ronda2-001',
         flags: {
-          'impPoblacion': true,
+          'grupPoblacion': true,
           'impProteccion': true,
         },
         impactoPoblacion: [
@@ -395,9 +395,9 @@ void main() {
         nombre: 'TEST-SIMULACION-${DateTime.now().millisecondsSinceEpoch}',
         idLocal: 'sim-${DateTime.now().millisecondsSinceEpoch}',
         flags: {
-          'impPoblacion': true,
-          'impSalud': true,
-          'impInfraestructura': true,
+          'grupPoblacion': true,
+          'grupSalud': true,
+          'grupInfraestructura': true,
         },
         impactoPoblacion: [
           EdanImpactoPoblacion(

@@ -5,19 +5,36 @@ import '../../../../models/edan.dart';
 import '../../../../providers/reporte_provider.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/database_helper.dart';
+import '../../../../services/edan/edan_store.dart';
 import '../../../../services/edan_secciones_registry.dart';
 import '../../../../widgets/custom_text_field.dart';
 
 /// Página 01: Datos generales de la localidad.
 ///
-/// Extraída del formulario original `resp_edan_form_screen.dart`.
 /// Incluye: ubicación geográfica (cascada), tipo de lugar, nombre,
 /// fecha/hora del evento, tipo de evento e impactos.
 class EdanPage01 extends StatefulWidget {
   final EdanLocalidad localidad;
   final VoidCallback? onImpactosCambio;
 
-  const EdanPage01({super.key, required this.localidad, this.onImpactosCambio});
+  /// Avisa al wizard que el modelo cambió sin reconstruir la lista de
+  /// páginas (gate del botón Siguiente): lo llaman los listeners de texto y
+  /// los selectores que escriben en `localidad` y que [onImpactosCambio] no
+  /// cubre (checkboxes ya van por su propio canal hacia `rebuild`).
+  final VoidCallback? onCambio;
+
+  /// Store V2 inyectado (solo RESP). Cuando está presente, los checkboxes de
+  /// impacto escriben en la tabla auxiliar v31 `secciones_grupos_local`; sin
+  /// store se cae al camino legacy `localidad_secciones_activas`.
+  final EdanStore? store;
+
+  const EdanPage01({
+    super.key,
+    required this.localidad,
+    this.onImpactosCambio,
+    this.onCambio,
+    this.store,
+  });
 
   @override
   State<EdanPage01> createState() => _EdanPage01State();
@@ -56,12 +73,18 @@ class _EdanPage01State extends State<EdanPage01> {
       _ampm = _extractAmPm(l.horaEvento!);
     }
 
-    _nombreController.addListener(() => l.nombre = _nombreController.text);
+    _nombreController.addListener(() {
+      l.nombre = _nombreController.text;
+      widget.onCambio?.call();
+    });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final rp = context.read<ReporteProvider>();
-      if (rp.tiposEvento.isEmpty) rp.fetchAndCacheCatalogsEdan();
-      if (rp.tiposLocalidad.isEmpty) rp.fetchAndCacheCatalogsEdan();
+      // Catálogos generales (mismos para ambos roles, una vez por dispositivo):
+      // si falta cualquiera de los que usa esta página, se baja el set completo.
+      if (rp.tiposEvento.isEmpty || rp.tiposLocalidad.isEmpty) {
+        rp.fetchAndCacheCatalogs();
+      }
     });
   }
 
@@ -307,6 +330,7 @@ class _EdanPage01State extends State<EdanPage01> {
         if (v == null) return;
         setState(() => widget.localidad.tipoLocalidad = v);
         widget.localidad.idTipoLocalidad = tipoLocalidadIdPorNombre(v);
+        widget.onCambio?.call();
       },
     );
   }
@@ -412,6 +436,7 @@ class _EdanPage01State extends State<EdanPage01> {
   void _syncHora() {
     if (_hora12 == null || _ampm.isEmpty) return;
     widget.localidad.horaEvento = _horaIso();
+    widget.onCambio?.call();
   }
 
   String _horaIso() {
@@ -433,6 +458,17 @@ class _EdanPage01State extends State<EdanPage01> {
 
     const placeholder = 'Seleccione';
 
+    final nombres = (eventos.toList()
+          ..sort((a, b) => a.nombre.compareTo(b.nombre)))
+        .map((e) => e.nombre)
+        .toList();
+    // Un valor sin item correspondiente (catálogo aún no descargado, o id
+    // obsoleto en un borrador reabierto) crasheaba el DropdownButtonFormField
+    // — exige exactamente un item con ese value. Se agrega como item propio.
+    if (nombreActual != null && !nombres.contains(nombreActual)) {
+      nombres.add(nombreActual);
+    }
+
     return _labeledDropdown(
       label: 'Evento extremo *',
       hint: 'Seleccione el tipo de evento',
@@ -443,16 +479,18 @@ class _EdanPage01State extends State<EdanPage01> {
           enabled: false,
           child: Text('Seleccione el tipo de evento'),
         ),
-        ...((eventos.toList()..sort((a, b) => a.nombre.compareTo(b.nombre)))
-            .map((e) => DropdownMenuItem(value: e.nombre, child: Text(e.nombre)))
-            .toList()),
+        ...nombres
+            .map((n) => DropdownMenuItem<String>(value: n, child: Text(n))),
       ],
       onChanged: (v) {
         if (v == null || v == placeholder) return;
-        final match = eventos.firstWhere((e) => e.nombre == v);
+        final matches = eventos.where((e) => e.nombre == v);
+        if (matches.isEmpty) return; // valor huérfano: no escribe
+        final match = matches.first;
         setState(() => _idTipoEvento = match.idTipoEvento);
         widget.localidad.idTipoEvento = match.idTipoEvento;
         widget.localidad.tipoEventoNombre = v;
+        widget.onCambio?.call();
       },
     );
   }
@@ -472,6 +510,7 @@ class _EdanPage01State extends State<EdanPage01> {
           '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
       setState(() => _fechaController.text = _fmtDate(iso));
       widget.localidad.fechaEvento = iso;
+      widget.onCambio?.call();
     }
   }
 
@@ -525,57 +564,91 @@ class _EdanPage01State extends State<EdanPage01> {
 
     Future<void> _syncSecciones(String checkboxKey, bool activar) async {
       final secciones = EdanSeccionesRegistry.checkboxSecciones[checkboxKey];
-      if (secciones == null || l.idLocal == null) return;
+      if (secciones == null || secciones.isEmpty) return;
+
+      // Al destildar, el modelo se vacía EN EL ACTO (display + snapshot
+      // coherentes de inmediato): el grupo manda y sus filas ya no van.
+      if (!activar) {
+        try {
+          widget.localidad.vaciarSecciones(secciones);
+        } catch (_) {}
+      }
+
+      // ── Camino V2 (RESP): tabla auxiliar v31 ──
+      // `secciones_grupos_local` es la fuente de verdad de "qué secciones
+      // existen"; `formularios.secciones_activas_json` solo queda como vista
+      // derivada para el sync engine.
+      final store = widget.store;
+      if (store != null) {
+        final uuid = widget.localidad.uuidEdanLocalidad ??
+            (widget.localidad.idLocal?.isNotEmpty == true
+                ? widget.localidad.idLocal
+                : null);
+        if (uuid == null) return;
+        if (activar) {
+          await store.activarSecciones(uuid, secciones);
+        } else {
+          await store.desactivarSecciones(uuid, secciones);
+          // Purga de filas huérfanas (DB + D si estaban confirmadas + fotos):
+          // lo destildado no viaja al servidor, así que tampoco queda local.
+          // El guardado completo lo reintenta (purgarInactivas) por si esta
+          // llamada pierde la carrera contra un Guardar inmediato.
+          try {
+            await store.purgarSecciones(uuid, secciones);
+          } catch (e) {
+            debugPrint('[page01] purga al destildar omitida: $e');
+          }
+        }
+        return;
+      }
+
+      // ── Camino Legacy (UGR/IA): localidad_secciones_activas ──
+      final idLocal = widget.localidad.idLocal;
+      if (idLocal == null || idLocal.isEmpty) return;
       final db = DatabaseHelper.instance;
       if (activar) {
-        await db.activarSecciones(l.idLocal!, secciones);
+        await db.activarSecciones(idLocal, secciones);
       } else {
-        await db.desactivarSecciones(l.idLocal!, secciones);
+        await db.desactivarSecciones(idLocal, secciones);
       }
     }
 
-    add('En población', Icons.groups_outlined, l.impPoblacion, (v) {
-      l.impPoblacion = v;
-      _syncSecciones('impPoblacion', v);
-      if (v) {
-        l.impProteccion = true;
-        _syncSecciones('impProteccion', true);
-        if (l.impactoPoblacion.isEmpty) {
-          final rp = context.read<ReporteProvider>();
-          l.impactoPoblacion.add(EdanImpactoPoblacion(
-            gruposEtarios: EdanImpactoPoblacion.gruposDesdeCatalogo(
-                rp.gruposEtarios
-                    .map((g) => {
-                          'id_grupo_etario': g.idGrupoEtario,
-                          'nombre': g.nombre,
-                        })
-                    .toList()),
-          ));
-        }
-        if (l.proteccion.isEmpty) {
-          final rp = context.read<ReporteProvider>();
-          if (rp.gruposVulnerables.isNotEmpty) {
-            l.proteccion =
-                EdanLocalidad.proteccionDesdeCatalogo(rp.gruposVulnerables);
-          }
-        }
-      } else {
-        l.impProteccion = false;
-        _syncSecciones('impProteccion', false);
+    // NOTA: `grupPoblacion` y `'grupProteccion'` son grupos INDEPENDIENTES en la
+    // matriz. Antes desmarcar uno forzaba a apagar al otro, lo que destruía la
+    // sección hermana y sus datos al volver a guardar. Ahora cada checkbox solo
+    // siembra las filas vacías de SU sección y no toca al otro.
+    add('En población', Icons.groups_outlined, l.grupPoblacion, (v) {
+      l.grupPoblacion = v;
+      _syncSecciones('grupPoblacion', v);
+      if (v && l.impactoPoblacion.isEmpty) {
+        // Semilla para page03 (grupos etarios). Si el usuario no llena nada,
+        // el registro vacío no se envía: `toApiJson` filtra los no marcados.
+        final rp = context.read<ReporteProvider>();
+        l.impactoPoblacion.add(EdanImpactoPoblacion(
+          gruposEtarios: EdanImpactoPoblacion.gruposDesdeCatalogo(
+              rp.gruposEtarios
+                  .map((g) => {
+                        'id_grupo_etario': g.idGrupoEtario,
+                        'nombre': g.nombre,
+                      })
+                  .toList()),
+        ));
       }
+      // Al desmarcar NO se toca `'grupProteccion'`. Si protección ya tiene filas,
+      // la sección sigue visible al reabrir vía `rutasConDatos` (auxiliar v31).
     });
-    add('En salud', Icons.local_hospital_outlined, l.impSalud, (v) {
-      l.impSalud = v;
-      _syncSecciones('impSalud', v);
+    add('En salud', Icons.local_hospital_outlined, l.grupSalud, (v) {
+      l.grupSalud = v;
+      _syncSecciones('grupSalud', v);
     });
     add('En infraestructuras', Icons.location_city_outlined,
-        l.impInfraestructura, (v) {
-      l.impInfraestructura = v;
-      _syncSecciones('impInfraestructura', v);
+        l.grupInfraestructura, (v) {
+      l.grupInfraestructura = v;
+      _syncSecciones('grupInfraestructura', v);
     });
-    add('En servicios básicos', Icons.home_work_outlined, l.impServicios, (v) {
-      l.impServicios = v;
-      _syncSecciones('impServicios', v);
+    add('En servicios básicos', Icons.home_work_outlined, l.grupServicios, (v) {
+      l.grupServicios = v;
+      _syncSecciones('grupServicios', v);
       if (v && l.serviciosBasicos.isEmpty) {
         l.serviciosBasicos.addAll([
           EdanServicioBasicoDetalle(tipo: 'energia_electrica'),
@@ -586,53 +659,36 @@ class _EdanPage01State extends State<EdanPage01> {
         ]);
       }
     });
-    add('En educación', Icons.school_outlined, l.impEducacion, (v) {
-      l.impEducacion = v;
-      _syncSecciones('impEducacion', v);
+    add('En educación', Icons.school_outlined, l.grupEducacion, (v) {
+      l.grupEducacion = v;
+      _syncSecciones('grupEducacion', v);
     });
-    add('En viviendas', Icons.home_outlined, l.impVivienda, (v) {
-      l.impVivienda = v;
-      _syncSecciones('impVivienda', v);
+    add('En viviendas', Icons.home_outlined, l.grupVivienda, (v) {
+      l.grupVivienda = v;
+      _syncSecciones('grupVivienda', v);
     });
-    add('En agropecuaria', Icons.agriculture_outlined, l.impAgropecuario, (v) {
-      l.impAgropecuario = v;
-      _syncSecciones('impAgropecuario', v);
+    add('En agropecuaria', Icons.agriculture_outlined, l.grupAgropecuario, (v) {
+      l.grupAgropecuario = v;
+      _syncSecciones('grupAgropecuario', v);
     });
-    add('Necesidades en protección', Icons.shield_outlined, l.impProteccion,
+    add('Necesidades en protección', Icons.shield_outlined, l.grupProteccion,
         (v) {
-      l.impProteccion = v;
-      _syncSecciones('impProteccion', v);
-      if (v) {
-        l.impPoblacion = true;
-        _syncSecciones('impPoblacion', true);
-        if (l.impactoPoblacion.isEmpty) {
-          final rp = context.read<ReporteProvider>();
-          l.impactoPoblacion.add(EdanImpactoPoblacion(
-            gruposEtarios: EdanImpactoPoblacion.gruposDesdeCatalogo(
-                rp.gruposEtarios
-                    .map((g) => {
-                          'id_grupo_etario': g.idGrupoEtario,
-                          'nombre': g.nombre,
-                        })
-                    .toList()),
-          ));
+      l.grupProteccion = v;
+      _syncSecciones('grupProteccion', v);
+      if (v && l.proteccion.isEmpty) {
+        // Semilla para page10 (grupos vulnerables).
+        final rp = context.read<ReporteProvider>();
+        if (rp.gruposVulnerables.isNotEmpty) {
+          l.proteccion =
+              EdanLocalidad.proteccionDesdeCatalogo(rp.gruposVulnerables);
         }
-        if (l.proteccion.isEmpty) {
-          final rp = context.read<ReporteProvider>();
-          if (rp.gruposVulnerables.isNotEmpty) {
-            l.proteccion =
-                EdanLocalidad.proteccionDesdeCatalogo(rp.gruposVulnerables);
-          }
-        }
-      } else {
-        l.impPoblacion = false;
-        _syncSecciones('impPoblacion', false);
       }
+      // Al desmarcar NO se toca `grupPoblacion` (ver comentario arriba).
     });
     add('Necesidades humanitarias', Icons.volunteer_activism_outlined,
-        l.impNecesidades, (v) {
-      l.impNecesidades = v;
-      _syncSecciones('impNecesidades', v);
+        l.grupNecesidades, (v) {
+      l.grupNecesidades = v;
+      _syncSecciones('grupNecesidades', v);
     });
     return items;
   }

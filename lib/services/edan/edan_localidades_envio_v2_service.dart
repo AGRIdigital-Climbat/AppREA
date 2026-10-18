@@ -1,10 +1,11 @@
-﻿import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../models/edan.dart';
 import '../../models/id_seccion_helper.dart';
 import '../database_helper.dart';
 import '../edan_secciones_registry.dart';
 import 'edan_secciones_envio_factory.dart';
+import 'edan_store_v2.dart';
 
 /// Utilidades de persistencia a SQLite (Modelo A, tablas normalizadas por
 /// sección) para el flujo "documento todo-en-uno".
@@ -24,7 +25,7 @@ class EdanLocalidadesEnvioV2Service {
   /// Fuente de verdad única para los flags `imp_*` de un modelo: la tabla
   /// `localidad_secciones_activas` en SQLite. Sobreescribe los flags del
   /// [localidad] con el estado actual de las secciones activas (misma lógica
-  /// que [EdanDocumentoService.construirDocumento], el wizard y la vista previa
+  /// que el payload /completo, el wizard y la vista previa
   /// RESP). Si no hay idLocal o no hay secciones activas, recalcula los flags
   /// desde los datos ya cargados en el modelo.
   ///
@@ -43,15 +44,15 @@ class EdanLocalidadesEnvioV2Service {
   }) async {
     final base = unionConGuardados
         ? {
-            'imp_poblacion': localidad.impPoblacion,
-            'imp_salud': localidad.impSalud,
-            'imp_infraestructura': localidad.impInfraestructura,
-            'imp_servicios': localidad.impServicios,
-            'imp_educacion': localidad.impEducacion,
-            'imp_vivienda': localidad.impVivienda,
-            'imp_agropecuario': localidad.impAgropecuario,
-            'imp_proteccion': localidad.impProteccion,
-            'imp_necesidades': localidad.impNecesidades,
+            'grup_poblacion': localidad.grupPoblacion,
+            'grup_salud': localidad.grupSalud,
+            'grup_infraestructura': localidad.grupInfraestructura,
+            'grup_servicios': localidad.grupServicios,
+            'grup_educacion': localidad.grupEducacion,
+            'grup_vivienda': localidad.grupVivienda,
+            'grup_agropecuario': localidad.grupAgropecuario,
+            'grup_proteccion': localidad.grupProteccion,
+            'grup_necesidades': localidad.grupNecesidades,
           }
         : const <String, bool>{};
 
@@ -60,7 +61,7 @@ class EdanLocalidadesEnvioV2Service {
       _aplicarUnionDesdeDatos(localidad, base);
       return;
     }
-    final activas = await _db.leerSeccionesActivas(idLocal);
+    final activas = await leerActivas(idLocal);
     if (activas.isEmpty) {
       _aplicarUnionDesdeDatos(localidad, base);
       return;
@@ -81,24 +82,53 @@ class EdanLocalidadesEnvioV2Service {
       ..impInfraProductiva = flags['imp_infra_productiva'] ?? false
       ..impProteccion = flags['imp_proteccion'] ?? false
       ..impNecesidadHumanitaria = flags['imp_necesidad_humanitaria'] ?? false
-      ..impPoblacion =
-          (flags['imp_poblacion'] ?? false) || (base['imp_poblacion'] ?? false)
-      ..impSalud =
-          (flags['imp_salud'] ?? false) || (base['imp_salud'] ?? false)
-      ..impInfraestructura = (flags['imp_infraestructura'] ?? false) ||
-          (base['imp_infraestructura'] ?? false)
-      ..impServicios = (flags['imp_servicios'] ?? false) ||
-          (base['imp_servicios'] ?? false)
-      ..impEducacion = (flags['imp_educacion'] ?? false) ||
-          (base['imp_educacion'] ?? false)
-      ..impVivienda = (flags['imp_vivienda'] ?? false) ||
-          (base['imp_vivienda'] ?? false)
-      ..impAgropecuario = (flags['imp_agropecuario'] ?? false) ||
-          (base['imp_agropecuario'] ?? false)
-      ..impProteccion = (flags['imp_proteccion'] ?? false) ||
-          (base['imp_proteccion'] ?? false)
-      ..impNecesidades = (flags['imp_necesidades'] ?? false) ||
-          (base['imp_necesidades'] ?? false);
+      ..grupPoblacion =
+          (flags['grup_poblacion'] ?? false) || (base['grup_poblacion'] ?? false)
+      ..grupSalud =
+          (flags['grup_salud'] ?? false) || (base['grup_salud'] ?? false)
+      ..grupInfraestructura = (flags['grup_infraestructura'] ?? false) ||
+          (base['grup_infraestructura'] ?? false)
+      ..grupServicios = (flags['grup_servicios'] ?? false) ||
+          (base['grup_servicios'] ?? false)
+      ..grupEducacion = (flags['grup_educacion'] ?? false) ||
+          (base['grup_educacion'] ?? false)
+      ..grupVivienda = (flags['grup_vivienda'] ?? false) ||
+          (base['grup_vivienda'] ?? false)
+      ..grupAgropecuario = (flags['grup_agropecuario'] ?? false) ||
+          (base['grup_agropecuario'] ?? false)
+      ..grupProteccion = (flags['grup_proteccion'] ?? false) ||
+          (base['grup_proteccion'] ?? false)
+      ..grupNecesidades = (flags['grup_necesidades'] ?? false) ||
+          (base['grup_necesidades'] ?? false);
+  }
+
+  /// Lee las secciones activas de [idLocal], **priorizando las tablas V2**.
+  ///
+  /// El wizard V2 persiste la verdad en `secciones_grupos_local` (lo que el
+  /// usuario tildó en page01) y en `filas_seccion` (verdad en los datos). La
+  /// tabla legacy `localidad_secciones_activas` solo se llena desde el camino
+  /// legacy (UGR/IA) o desde el espejo de `_sincronizarVistaSeccionesActivas`.
+  ///
+  /// Sin esta prioridad, la vista previa RESP **ocultaba secciones** (p.ej.
+  /// agropecuario): `aplicarFlagsDesdeSeccionesActivas` leía la tabla legacy,
+  /// que estaba vacía para un reporte V2 guardado solo en `filas_seccion`, y
+  /// los flags gruesos (`grupAgropecuario`) quedaban en false. El badge del
+  /// listado sí se veía porque usaba `unionConGuardados`, ocultando el bug.
+  Future<List<String>> leerActivas(String idLocal) async {
+    final db = await _db.database;
+    final form = await db.query(
+      'formularios',
+      columns: ['uuid_edan_localidad'],
+      where: 'uuid_edan_localidad = ?',
+      whereArgs: [idLocal],
+      limit: 1,
+    );
+    if (form.isNotEmpty) {
+      // Reporte V2: la fuente es `secciones_grupos_local` ? `filas_seccion`.
+      return EdanStoreV2.instance.leerSeccionesActivas(idLocal);
+    }
+    // Camino legacy (UGR/IA o migración sin fila en `formularios`).
+    return _db.leerSeccionesActivas(idLocal);
   }
 
   /// Fallback de [aplicarFlagsDesdeSeccionesActivas] cuando no hay idLocal o
@@ -112,23 +142,23 @@ class EdanLocalidadesEnvioV2Service {
     localidad.recalcularFlagsImpacto();
     if (base.isEmpty) return;
     localidad
-      ..impPoblacion =
-          localidad.impPoblacion || (base['imp_poblacion'] ?? false)
-      ..impSalud = localidad.impSalud || (base['imp_salud'] ?? false)
-      ..impInfraestructura = localidad.impInfraestructura ||
-          (base['imp_infraestructura'] ?? false)
-      ..impServicios =
-          localidad.impServicios || (base['imp_servicios'] ?? false)
-      ..impEducacion =
-          localidad.impEducacion || (base['imp_educacion'] ?? false)
-      ..impVivienda =
-          localidad.impVivienda || (base['imp_vivienda'] ?? false)
-      ..impAgropecuario =
-          localidad.impAgropecuario || (base['imp_agropecuario'] ?? false)
-      ..impProteccion =
-          localidad.impProteccion || (base['imp_proteccion'] ?? false)
-      ..impNecesidades =
-          localidad.impNecesidades || (base['imp_necesidades'] ?? false);
+      ..grupPoblacion =
+          localidad.grupPoblacion || (base['grup_poblacion'] ?? false)
+      ..grupSalud = localidad.grupSalud || (base['grup_salud'] ?? false)
+      ..grupInfraestructura = localidad.grupInfraestructura ||
+          (base['grup_infraestructura'] ?? false)
+      ..grupServicios =
+          localidad.grupServicios || (base['grup_servicios'] ?? false)
+      ..grupEducacion =
+          localidad.grupEducacion || (base['grup_educacion'] ?? false)
+      ..grupVivienda =
+          localidad.grupVivienda || (base['grup_vivienda'] ?? false)
+      ..grupAgropecuario =
+          localidad.grupAgropecuario || (base['grup_agropecuario'] ?? false)
+      ..grupProteccion =
+          localidad.grupProteccion || (base['grup_proteccion'] ?? false)
+      ..grupNecesidades =
+          localidad.grupNecesidades || (base['grup_necesidades'] ?? false);
   }
 
   /// Persiste a sus tablas (Modelo A) las secciones indicadas por [rutas].
@@ -313,10 +343,11 @@ class EdanLocalidadesEnvioV2Service {
     }
   }
 
-  /// Carga las secciones desde las tablas normalizadas SQLite y puebla
-  /// los arrays del modelo. Se llama ANTES de `construirDocumento` para
-  /// que `recalcularFlagsImpacto()` tenga los datos reales y los flags
-  /// `imp_*` se calculen correctamente.
+  /// Carga las secciones desde las tablas normalizadas SQLite (legacy
+  /// `seccion_*`) y puebla los arrays del modelo, para que
+  /// `recalcularFlagsImpacto()` tenga los datos reales y los flags de sección
+  /// `imp_*` se calculen correctamente. Camino UGR/IA; el V2 lee
+  /// `filas_seccion` a través de `EdanSeccionesFuente`.
   ///
   /// Los flags `imp_*` vienen de `datos_json` (cabecera); este método
   /// rellena los arrays (ej. `danosViales`, `impactoPoblacion`) desde
@@ -583,7 +614,7 @@ class EdanLocalidadesEnvioV2Service {
   }
 
   /// Captura los `id_seccion` que ya existen en SQLite para las 3 secciones
-  /// 1:1 de la localidad (ruta → id). Devuelve un mapa ruta->id; las rutas
+  /// 1:1 de la localidad (ruta ? id). Devuelve un mapa ruta->id; las rutas
   /// sin fila no se incluyen. NO genera ids.
   Future<Map<String, String>> _capturarIds11Existentes(String idLocal) async {
     final mapa = <String, String>{};
