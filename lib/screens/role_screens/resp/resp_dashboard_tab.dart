@@ -14,11 +14,34 @@ import 'edan/edan_form_wizard.dart';
 import 'edan/edan_preview_resp_screen.dart';
 import '../ugr/ugr_route.dart';
 
+/// Listado visible de la pestaña Reportes: filtro por estado (los indicadores)
+/// + búsqueda por nombre/tipo, aplicados EN EL SITIO sobre `origen`.
+/// `estado == null` y `query` vacío = lista completa. Función pura para que
+/// sea verificable sin widget-test.
+List<EdanLocalidad> filtrarReportesResp(
+  List<EdanLocalidad> origen, {
+  UgrLocalidadEstado? estado,
+  String query = '',
+}) {
+  var lista = origen;
+  if (estado != null) {
+    lista = lista.where((l) => l.estadoLocalidad == estado).toList();
+  }
+  final q = query.trim().toLowerCase();
+  if (q.isNotEmpty) {
+    lista = lista
+        .where((l) =>
+            l.nombre.toLowerCase().contains(q) ||
+            l.tipoLocalidad.toLowerCase().contains(q))
+        .toList();
+  }
+  return lista;
+}
+
 class RespDashboardTab extends StatefulWidget {
-  final void Function(UgrLocalidadEstado? estado)? onVerEnReportes;
   final VoidCallback? onSync;
 
-  const RespDashboardTab({super.key, this.onVerEnReportes, this.onSync});
+  const RespDashboardTab({super.key, this.onSync});
 
   @override
   State<RespDashboardTab> createState() => RespDashboardTabState();
@@ -29,14 +52,27 @@ class RespDashboardTabState extends State<RespDashboardTab>
   List<EdanLocalidad> _localidades = [];
   bool _wasSyncing = false;
 
-  /// Indicadores del Inicio calculados SOLO de SQLite (offline-first):
+  /// Indicadores de Reportes calculados SOLO de SQLite (offline-first):
   /// `_conteosEstado` trae los 6 estados disgregados (id 1-6) y `_totalRemoto`
   /// su suma. Ya no se consultan al servidor: coinciden con la lista.
   Map<int, int> _conteosEstado = {};
   int _totalRemoto = 0;
 
+  /// Filtro activo desde los indicadores: tap en un estado filtra el listado
+  /// de ESTA pestaña; repetir el tap (o tocar Total) lo quita.
+  UgrLocalidadEstado? _filtro;
+
+  /// Búsqueda por nombre/tipo sobre el listado (el antiguo tab Reportes vivía
+  /// de esto; ahora «todo» está aquí).
+  String _query = '';
+
+  /// Controlador del buscador: permite vaciar el campo junto con `_query`
+  /// (sin él, «Quitar filtros» limpiaría el estado pero el texto seguiría
+  /// visible en el TextField).
+  final TextEditingController _ctrlBusqueda = TextEditingController();
+
   /// Motivo del fallo de la carga base (lectura local); `null` = sin error.
-  /// Visible en el Inicio para que "lista vacía" nunca sea silenciosa.
+  /// Visible en Reportes para que "lista vacía" nunca sea silenciosa.
   String? _errorCarga;
 
   @override
@@ -62,6 +98,7 @@ class RespDashboardTabState extends State<RespDashboardTab>
     EdanStoreV2.instance.catalogosVersion.removeListener(_onCatalogos);
     EdanStoreV2.instance.datosVersion.removeListener(_onDatos);
     WidgetsBinding.instance.removeObserver(this);
+    _ctrlBusqueda.dispose();
     super.dispose();
   }
 
@@ -176,11 +213,8 @@ class RespDashboardTabState extends State<RespDashboardTab>
         }
       }
     }
-    visibles.sort((a, b) {
-      final fa = a.fechaModificacion ?? '';
-      final fb = b.fechaModificacion ?? '';
-      return fb.compareTo(fa);
-    });
+    // Más reciente arriba por FECHA DE LLENADO (sin llenado: por modificación).
+    visibles.sort(compararRecientePrimero);
     if (mounted) {
       setState(() {
         _localidades = visibles;
@@ -380,7 +414,6 @@ class RespDashboardTabState extends State<RespDashboardTab>
         physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         children: [
-          _buildWelcomeHeader(),
           if (_errorCarga != null)
             Padding(
               padding: const EdgeInsets.only(top: 16),
@@ -444,74 +477,16 @@ class RespDashboardTabState extends State<RespDashboardTab>
               );
             },
           ),
-          const SizedBox(height: 20),
-          const _SectionTitle('Indicadores'),
-          const SizedBox(height: 8),
+          // Los indicadores arrancan directo arriba: sin cabecera de
+          // bienvenida ni rótulo de sección (a pedido del usuario,
+          // 2026-11-02).
           _buildIndicadores(primary),
-          const SizedBox(height: 20),
-          const _SectionTitle('Actividad reciente'),
+          const SizedBox(height: 4),
+          _buildEncabezadoLista(),
           const SizedBox(height: 8),
-          _buildActividad(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWelcomeHeader() {
-    final token = AuthService.instance.currentToken;
-    final primary = PaletteScope.of(context).primary;
-    final light = Color.lerp(primary, Colors.white, 0.18)!;
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [primary, light],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: primary.withValues(alpha: 0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 8),
-          ),
-        ],
-      ),
-      child: Row(
-        children: [
-          Image.asset('assets/images/SINAGER.png', width: 62, height: 62),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Bienvenido,',
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: Colors.white.withValues(alpha: 0.8),
-                  ),
-                ),
-                Text(
-                  token?.nombre ?? 'Usuario',
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Responsable Local',
-                  style: TextStyle(
-                    fontSize: 11,
-                    color: Colors.white.withValues(alpha: 0.7),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          _buildBusqueda(primary),
+          const SizedBox(height: 12),
+          _buildListado(),
         ],
       ),
     );
@@ -581,7 +556,7 @@ class RespDashboardTabState extends State<RespDashboardTab>
 
   Widget _buildIndicadores(Color primary) {
     // Un contador por estado (disgregado, sin agrupar) + total. Cada uno
-    // filtra en Reportes al tocarlo.
+    // filtra el listado de ESTa pestaña al tocarlo (tap repetido limpia).
     const estados = UgrLocalidadEstado.values;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -591,36 +566,129 @@ class RespDashboardTabState extends State<RespDashboardTab>
           primary: primary,
           estados: estados,
           conteos: _conteosEstado,
-          onTapTotal: () => widget.onVerEnReportes?.call(null),
-          onTapEstado: (e) => widget.onVerEnReportes?.call(e),
+          seleccionado: _filtro,
+          onTapTotal: () => setState(() => _filtro = null),
+          onTapEstado: (e) => setState(
+            () => _filtro = _filtro == e ? null : e,
+          ),
         ),
         const SizedBox(height: 16),
       ],
     );
   }
 
-  Widget _buildActividad() {
-    final recientes = _localidades.take(5).toList();
+  /// Listado visible: indicadores (estado) + búsqueda aplicada en el sitio.
+  List<EdanLocalidad> get _listado =>
+      filtrarReportesResp(_localidades, estado: _filtro, query: _query);
 
+  Widget _buildEncabezadoLista() {
+    final filtrando = _filtro != null || _query.trim().isNotEmpty;
+    return Row(
+      children: [
+        const _SectionTitle('Reportes'),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            filtrando
+                ? '${_listado.length} de ${_localidades.length}'
+                : '${_localidades.length} '
+                    'localidad${_localidades.length == 1 ? '' : 'es'}',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+                fontSize: 12, color: AppColors.textSecondary),
+          ),
+        ),
+        if (_filtro != null)
+          InputChip(
+            visualDensity: VisualDensity.compact,
+            label: Text(_filtro!.label,
+                style: const TextStyle(fontSize: 11)),
+            avatar: Icon(Icons.filter_alt,
+                size: 14, color: _filtro!.color),
+            deleteIcon: const Icon(Icons.close, size: 16),
+            onDeleted: () => setState(() => _filtro = null),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildBusqueda(Color primary) {
+    return TextField(
+      controller: _ctrlBusqueda,
+      onChanged: (v) => setState(() => _query = v),
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'Buscar por nombre o tipo de localidad...',
+        hintStyle: const TextStyle(
+          fontSize: 12.5,
+          color: AppColors.textSecondary,
+        ),
+        prefixIcon: const Icon(Icons.search, size: 20),
+        suffixIcon: _query.isNotEmpty
+            ? IconButton(
+                icon: const Icon(Icons.close, size: 18),
+                onPressed: () {
+                  _ctrlBusqueda.clear();
+                  setState(() => _query = '');
+                },
+              )
+            : null,
+        isDense: true,
+        filled: true,
+        fillColor: primary.withValues(alpha: 0.05),
+        contentPadding: const EdgeInsets.symmetric(vertical: 10),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: const BorderSide(color: AppColors.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(10),
+          borderSide: BorderSide(color: primary, width: 1.5),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildListado() {
+    final list = _listado;
+    if (list.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 24),
+        child: Column(
+          children: [
+            Text(
+              _localidades.isEmpty
+                  ? 'Aún no hay localidades registradas'
+                  : 'Sin resultados para el filtro o la búsqueda',
+              style:
+                  const TextStyle(fontSize: 13, color: AppColors.textSecondary),
+            ),
+            if (_localidades.isNotEmpty)
+              TextButton.icon(
+                onPressed: () {
+                  _ctrlBusqueda.clear();
+                  setState(() {
+                    _filtro = null;
+                    _query = '';
+                  });
+                },
+                icon: const Icon(Icons.filter_alt_off, size: 16),
+                label: const Text('Quitar filtros'),
+              ),
+          ],
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (recientes.isEmpty)
-          const Padding(
-            padding: EdgeInsets.symmetric(vertical: 24),
-            child: Center(
-              child: Text(
-                'Aún no hay localidades registradas',
-                style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
-              ),
-            ),
-          ),
-        for (var i = 0; i < recientes.length; i++) ...[
+        for (var i = 0; i < list.length; i++) ...[
           if (i > 0) const SizedBox(height: 8),
           Builder(
             builder: (ctx) {
-              final loc = recientes[i];
-              final estado = loc.estadoLocalidad ?? UgrLocalidadEstado.borrador;
+              final loc = list[i];
+              final estado =
+                  loc.estadoLocalidad ?? UgrLocalidadEstado.borrador;
               final edanTmp = Edan.desdeLocalidad(loc);
               edanTmp.completarResponsableDesdeCache();
               final completo = edanTmp
@@ -680,17 +748,20 @@ class _BucketIndicador {
   final int cantidad;
   final Color color;
   final VoidCallback onTap;
+  final bool seleccionado;
 
   const _BucketIndicador({
     required this.label,
     required this.cantidad,
     required this.color,
     required this.onTap,
+    this.seleccionado = false,
   });
 }
 
 /// Tarjeta de Indicadores: total + un contador por estado (disgregado).
-/// Cada estado filtra en Reportes al tocarlo.
+/// Cada estado filtra el listado de la pestaña al tocarlo; el estado
+/// seleccionado queda resaltado (otro tap lo quita).
 class _IndicadoresResumenCard extends StatelessWidget {
   final int total;
   final Color primary;
@@ -698,6 +769,7 @@ class _IndicadoresResumenCard extends StatelessWidget {
   final Map<int, int> conteos;
   final VoidCallback onTapTotal;
   final void Function(UgrLocalidadEstado) onTapEstado;
+  final UgrLocalidadEstado? seleccionado;
 
   const _IndicadoresResumenCard({
     required this.total,
@@ -706,6 +778,7 @@ class _IndicadoresResumenCard extends StatelessWidget {
     required this.conteos,
     required this.onTapTotal,
     required this.onTapEstado,
+    this.seleccionado,
   });
 
   @override
@@ -760,6 +833,7 @@ class _IndicadoresResumenCard extends StatelessWidget {
                         label: e.label,
                         cantidad: conteos[e.id] ?? 0,
                         color: e.color,
+                        seleccionado: seleccionado == e,
                         onTap: () => onTapEstado(e),
                       ),
                     ),
@@ -783,34 +857,48 @@ class _LeyendaIndicador extends StatelessWidget {
     return GestureDetector(
       onTap: bucket.onTap,
       behavior: HitTestBehavior.opaque,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(
-              color: bucket.color,
-              borderRadius: BorderRadius.circular(3),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: bucket.seleccionado
+            ? BoxDecoration(
+                color: bucket.color.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: bucket.color),
+              )
+            : null,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: bucket.color,
+                borderRadius: BorderRadius.circular(3),
+              ),
             ),
-          ),
-          const SizedBox(width: 6),
-          Text(
-            '${bucket.label} ',
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.textSecondary,
+            const SizedBox(width: 6),
+            Text(
+              '${bucket.label} ',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight:
+                    bucket.seleccionado ? FontWeight.w700 : FontWeight.w400,
+                color: bucket.seleccionado
+                    ? bucket.color
+                    : AppColors.textSecondary,
+              ),
             ),
-          ),
-          Text(
-            '${bucket.cantidad}',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: bucket.color,
+            Text(
+              '${bucket.cantidad}',
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: bucket.color,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

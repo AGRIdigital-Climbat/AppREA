@@ -92,6 +92,10 @@ class _EdanPage03State extends State<EdanPage03> {
       l.impactoPoblacion[0].gruposEtarios
           .addAll(EdanImpactoPoblacion.gruposDesdeCatalogo(catalogo));
     }
+    // Idempotente: nunca más de los 4 del catálogo (fusiona duplicados por
+    // id y rellena huecos en 0), espejo de la hidratación de `filas_seccion`.
+    final ip = l.impactoPoblacion.first;
+    ip.gruposEtarios = EdanGrupoEtario.completarSet4(ip.gruposEtarios);
   }
 
   _GrupoControllers _ctrl(EdanGrupoEtario g) {
@@ -256,12 +260,16 @@ class _EdanPage03State extends State<EdanPage03> {
     final marcado = g.marcado;
     final applied = _ctrl(g);
 
-    return Container(
+    // Card (Material) en lugar de Container decorado: el `CheckboxListTile`
+    // pinta su fondo y su ripple sobre el Material más cercano; con un
+    // BoxDecoration en medio quedaban invisibles (aviso del framework).
+    return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+      elevation: 0,
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       child: Column(
         children: [

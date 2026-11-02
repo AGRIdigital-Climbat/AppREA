@@ -40,16 +40,9 @@ class _ReporteStub extends ReporteProvider {
   Future<Map<String, int>> fetchAndCacheCatalogs() async => const {};
 }
 
-/// `CheckboxListTile` dentro de un `Container` con color propio hace una
-/// queja cosmética de Flutter; no debe tumbar estos tests.
-void _silenciarAvisoListTile() {
-  final prev = FlutterError.onError;
-  FlutterError.onError = (details) {
-    if (details.toString().contains('ListTile background color')) return;
-    prev?.call(details);
-  };
-  addTearDown(() => FlutterError.onError = prev);
-}
+// Sin silenciador de la queja del `CheckboxListTile`: las páginas del wizard
+// montan sus bloques sobre `Card` (Material), así que el aviso cosmético del
+// framework ya no se emite. Si volviera, estos tests fallan por sí solos.
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -62,7 +55,6 @@ void main() {
       )..grupNecesidades = true;
 
   Future<EdanFormWizard> _montar(WidgetTester tester) async {
-    _silenciarAvisoListTile();
     final wizard = EdanFormWizard(
       edanAEditar: Edan(localidades: [_localidadNecesidades()]),
     );

@@ -613,17 +613,27 @@ class _EdanPage01State extends State<EdanPage01> {
       }
     }
 
-    // NOTA: `grupPoblacion` y `'grupProteccion'` son grupos INDEPENDIENTES en la
-    // matriz. Antes desmarcar uno forzaba a apagar al otro, lo que destruía la
-    // sección hermana y sus datos al volver a guardar. Ahora cada checkbox solo
-    // siembra las filas vacías de SU sección y no toca al otro.
-    add('En población', Icons.groups_outlined, l.grupPoblacion, (v) {
+    // REGLA (2026-10-18, producto): 'En población' y 'Necesidades en
+    // protección' forman una unidad en esta pantalla — se marcan y se
+    // desmarcan JUNTOS. Al desmarcar, `vaciarSecciones`/purga (con su `D`
+    // si ya estaban sincronizadas) destruye también los datos de la sección
+    // hermana: así el JSON del POST sigue fiel a `grup* true ⇒ manda datos`
+    // (un grupo desactivado no puede quedar con filas vivas por el otro).
+    // En la matriz, la auxiliar `secciones_grupos_local` y el wire siguen
+    // siendo grupos separados: un borrador restaurado del servidor con una
+    // sola sección activa se muestra tal cual hasta que el usuario toque un
+    // checkbox, que acopla ambos estados.
+    void _toggleDemograficos(bool v) {
       l.grupPoblacion = v;
+      l.grupProteccion = v;
       _syncSecciones('grupPoblacion', v);
-      if (v && l.impactoPoblacion.isEmpty) {
+      _syncSecciones('grupProteccion', v);
+      if (!v) return;
+      final rp = context.read<ReporteProvider>();
+      if (l.impactoPoblacion.isEmpty) {
         // Semilla para page03 (grupos etarios). Si el usuario no llena nada,
-        // el registro vacío no se envía: `toApiJson` filtra los no marcados.
-        final rp = context.read<ReporteProvider>();
+        // el registro vacío no se envía: el filtro de filas vacías lo deja
+        // fuera del payload y `toApiJson` no emite grupos sin marcar.
         l.impactoPoblacion.add(EdanImpactoPoblacion(
           gruposEtarios: EdanImpactoPoblacion.gruposDesdeCatalogo(
               rp.gruposEtarios
@@ -634,9 +644,17 @@ class _EdanPage01State extends State<EdanPage01> {
                   .toList()),
         ));
       }
-      // Al desmarcar NO se toca `'grupProteccion'`. Si protección ya tiene filas,
-      // la sección sigue visible al reabrir vía `rutasConDatos` (auxiliar v31).
-    });
+      if (l.proteccion.isEmpty) {
+        // Semilla para page10: con catálogo aún no descargado,
+        // `proteccionDesdeCatalogo([])` devuelve los 8 defaults — una
+        // sección activa jamás debe quedar sin filas que marcar.
+        l.proteccion =
+            EdanLocalidad.proteccionDesdeCatalogo(rp.gruposVulnerables);
+      }
+    }
+
+    add('En población', Icons.groups_outlined, l.grupPoblacion,
+        (v) => _toggleDemograficos(v));
     add('En salud', Icons.local_hospital_outlined, l.grupSalud, (v) {
       l.grupSalud = v;
       _syncSecciones('grupSalud', v);
@@ -672,19 +690,7 @@ class _EdanPage01State extends State<EdanPage01> {
       _syncSecciones('grupAgropecuario', v);
     });
     add('Necesidades en protección', Icons.shield_outlined, l.grupProteccion,
-        (v) {
-      l.grupProteccion = v;
-      _syncSecciones('grupProteccion', v);
-      if (v && l.proteccion.isEmpty) {
-        // Semilla para page10 (grupos vulnerables).
-        final rp = context.read<ReporteProvider>();
-        if (rp.gruposVulnerables.isNotEmpty) {
-          l.proteccion =
-              EdanLocalidad.proteccionDesdeCatalogo(rp.gruposVulnerables);
-        }
-      }
-      // Al desmarcar NO se toca `grupPoblacion` (ver comentario arriba).
-    });
+        (v) => _toggleDemograficos(v));
     add('Necesidades humanitarias', Icons.volunteer_activism_outlined,
         l.grupNecesidades, (v) {
       l.grupNecesidades = v;

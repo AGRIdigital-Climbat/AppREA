@@ -200,21 +200,11 @@ void main() {
   });
 
   group('Bug 1: la página notifica al wizard (onCambio)', () {
-    /// `CheckboxListTile` vive dentro de un `Container` con color propio (el
-    /// card de la página): Flutter lo avisa como "el splash puede no verse".
-    /// Es una queja cosmética pre-existente de la UI, no de este flujo, así
-    /// que no debe tumbar el test.
-    void silenciarAvisoListTile() {
-      final prev = FlutterError.onError;
-      FlutterError.onError = (details) {
-        if (details.toString().contains('ListTile background color')) return;
-        prev?.call(details);
-      };
-      addTearDown(() => FlutterError.onError = prev);
-    }
+    // Sin silenciadores: `EdanPage11` mete sus bloques en `Card` (Material),
+    // así que la queja cosmética del `CheckboxListTile` ya no se produce. Si
+    // reapareciera, estos tests fallan (el binding la registra como error).
 
     testWidgets('marcar una necesidad dispara onCambio', (tester) async {
-      silenciarAvisoListTile();
       final loc = EdanLocalidad(nombre: 'L', idTipoEvento: 1)..grupNecesidades = true;
       var avisos = 0;
 
@@ -238,7 +228,6 @@ void main() {
     });
 
     testWidgets('sin onCambio la página sigue funcionando', (tester) async {
-      silenciarAvisoListTile();
       final loc = EdanLocalidad(nombre: 'L', idTipoEvento: 1)..grupNecesidades = true;
       await tester.pumpWidget(
         MaterialApp(

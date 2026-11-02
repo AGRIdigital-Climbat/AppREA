@@ -29,7 +29,7 @@ class RespMapaTabState extends State<RespMapaTab>
   final List<_PuntoMapa> _puntos = [];
 
   bool _cargando = true;
-  bool _isSatellite = false;
+  bool _isTerrain = false;
   bool _isPreparingGeojson = false;
   bool _geojsonError = false;
   bool _legendAbierto = false;
@@ -579,9 +579,20 @@ class RespMapaTabState extends State<RespMapaTab>
         : null;
     final hasPolygon = polygonBounds != null;
 
+    // Endurecimiento de la cámara (log 2026-11-02): con bounds DEGENERADOS
+    // (un solo punto, o todos en el mismo lugar) flutter_map calcula la escala
+    // como 0/0 → zoom NaN → cada frame revienta con
+    // "north latitude can't be bigger than 90.0: NaN" y
+    // "Infinity or NaN toInt" (lo reconoce su propio camera_fit.dart). En ese
+    // caso se usa centro+zoom explícitos y NO se hace CameraFit.
+    final polygonOk = polygonBounds != null &&
+        polygonBounds.center.latitude.isFinite &&
+        polygonBounds.center.longitude.isFinite;
+    LatLngBounds? fitBounds;
     LatLng center;
-    if (polygonBounds != null) {
+    if (polygonOk) {
       center = polygonBounds.center;
+      fitBounds = polygonBounds;
     } else if (hasPoints) {
       final lats = filtered.map((p) => p.lat);
       final lons = filtered.map((p) => p.lon);
@@ -589,59 +600,74 @@ class RespMapaTabState extends State<RespMapaTab>
         lats.reduce((a, b) => a + b) / lats.length,
         lons.reduce((a, b) => a + b) / lons.length,
       );
+      if (filtered.length > 1) {
+        final b = LatLngBounds.fromPoints(
+          filtered.map((p) => LatLng(p.lat, p.lon)).toList(),
+        );
+        final span = (b.north - b.south).abs() + (b.east - b.west).abs();
+        if (b.center.latitude.isFinite && span > 0.0000001) {
+          fitBounds = b;
+        }
+      }
     } else {
       center = const LatLng(-16.5, -68.1);
     }
 
-    final satelliteTileLayer = TileLayer(
-      urlTemplate:
-          'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    // Teselas 100 % gratuitas y SIN clave (2026-11-02): Esri empezó a exigir
+    // API key y responde con un placeholder que dice «api key required»; CARTO
+    // devuelve el mismo bloque fijo sin clave. Quedan los servidores
+    // comunitarios: OSM estándar (callejero) y OpenTopoMap (relieve y curvas
+    // de nivel). Ambos exigen atribución: se muestra sobre el mapa.
+    final streetTileLayer = TileLayer(
+      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'com.climbat.edan',
       keepBuffer: 4,
       tileDimension: 256,
-      maxZoom: 18,
+      maxZoom: 19,
     );
 
-    final streetTileLayer = TileLayer(
-      urlTemplate:
-          'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png',
-      subdomains: const ['a', 'b', 'c', 'd'],
+    final terrainTileLayer = TileLayer(
+      urlTemplate: 'https://tile.opentopomap.org/{z}/{x}/{y}.png',
       userAgentPackageName: 'com.climbat.edan',
       keepBuffer: 4,
       tileDimension: 256,
-      maxZoom: 18,
+      maxZoom: 17,
     );
 
     return Stack(
       children: [
         RepaintBoundary(
           child: FlutterMap(
-            key: ValueKey('resp_mapa_$_isSatellite'),
+            key: ValueKey('resp_mapa_$_isTerrain'),
             mapController: _mapController,
             options: MapOptions(
               initialCenter: center,
-              initialZoom: hasPolygon ? 13 : (hasPoints ? 14 : 10),
-              initialCameraFit: polygonBounds != null
-                  ? CameraFit.bounds(
-                      bounds: polygonBounds,
-                      padding: const EdgeInsets.all(40),
-                    )
-                  : hasPoints
-                  ? CameraFit.bounds(
-                      bounds: LatLngBounds.fromPoints(
-                        filtered.map((p) => LatLng(p.lat, p.lon)).toList(),
-                      ),
-                      padding: const EdgeInsets.all(50),
-                    )
-                  : null,
+              initialZoom: polygonOk ? 13 : (hasPoints ? 14 : 10),
+              initialCameraFit: fitBounds == null
+                  ? null
+                  : CameraFit.bounds(
+                      bounds: fitBounds,
+                      padding: EdgeInsets.all(polygonOk ? 40 : 50),
+                    ),
               minZoom: 5,
               maxZoom: 18,
+              onMapReady: () {
+                // Red de seguridad: si la cámara llegara no-finita (cualquier
+                // NaN), el TileLayer revienta en CADA frame; se re-centra una
+                // vez y el mapa vuelve a ser util.
+                final cam = _mapController.camera;
+                if (!cam.center.latitude.isFinite ||
+                    !cam.center.longitude.isFinite ||
+                    !cam.zoom.isFinite) {
+                  _mapController.move(center, 10);
+                }
+              },
               interactionOptions: const InteractionOptions(
                 flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
               ),
             ),
             children: [
-              if (_isSatellite) satelliteTileLayer else streetTileLayer,
+              if (_isTerrain) terrainTileLayer else streetTileLayer,
               if (hasPolygon && geojson != null)
                 PolygonLayer(
                   polygons: [
@@ -761,6 +787,24 @@ class RespMapaTabState extends State<RespMapaTab>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Atribución obligatoria de los servidores comunitarios de
+              // teselas (regla de uso de OSM/OpenTopoMap, 2026-11-02).
+              Padding(
+                padding: const EdgeInsets.only(right: 6, bottom: 2),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    _isTerrain
+                        ? '© OpenStreetMap · © OpenTopoMap (CC-BY-SA)'
+                        : '© OpenStreetMap contributors',
+                    style: TextStyle(
+                      fontSize: 8.5,
+                      color:
+                          AppColors.textSecondary.withValues(alpha: 0.9),
+                    ),
+                  ),
+                ),
+              ),
               if (_puntosFiltrados.any((p) => p.fotos.isNotEmpty))
                 _buildFotoStrip(primary),
               _buildDateSelector(),
@@ -992,14 +1036,14 @@ class RespMapaTabState extends State<RespMapaTab>
           _buildLayerBtn(
             icon: Icons.map_outlined,
             tooltip: 'Mapa callejero',
-            selected: !_isSatellite,
-            onTap: () => setState(() => _isSatellite = false),
+            selected: !_isTerrain,
+            onTap: () => setState(() => _isTerrain = false),
           ),
           _buildLayerBtn(
-            icon: Icons.satellite_alt_outlined,
-            tooltip: 'Vista satelital',
-            selected: _isSatellite,
-            onTap: () => setState(() => _isSatellite = true),
+            icon: Icons.terrain_outlined,
+            tooltip: 'Relieve y curvas de nivel',
+            selected: _isTerrain,
+            onTap: () => setState(() => _isTerrain = true),
           ),
         ],
       ),

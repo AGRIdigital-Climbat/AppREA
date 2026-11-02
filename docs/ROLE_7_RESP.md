@@ -1,5 +1,11 @@
 # Rol 7 — Responsable Local (RESP)
 
+> **Nota de vigencia (2026-10-19).** El envío ya no usa
+> `/edan/localidades/{id}/documento` ni `/edan/localidades/sync/pull` (rutas
+> eliminadas). Usa `POST/PUT /edan/formularios/completo`, `POST /edan/fotografias`
+> y `GET /edan/sync/pull`. El mapa actualizado pantalla → API está en
+> [`MAPA_APIS_WEB_EDAN.md`](./MAPA_APIS_WEB_EDAN.md).
+
 ## 1. Resumen del Rol
 
 El **Responsable Local (RESP)** es el rol base de la aplicación SINAGER-SAT. Sus responsabilidades principales son:
@@ -572,7 +578,7 @@ final sincronizandoMunicipio = ValueNotifier<bool>(false);
 sincronizar()
 │
 ├─ 1. _pullLocalidades(userId, result)
-│   ├─ GET /edan/localidades/sync/pull?fecha_desde={lastSync}
+│   ├─ GET /edan/sync/pull?desde={watermark}
 │   ├─ Para cada localidad remota:
 │   │   ├─ Existe localmente y está sincronizado → merge
 │   │   └─ Es nueva → insertar y marcar sincronizado
@@ -728,8 +734,9 @@ List<T> _fusionarSeccion<T>(
 |--------|------|-----------|
 | GET | `/edan/localidades/mis-resumen?id_usuario=` | Resumen del usuario |
 | GET | `/edan/localidades/mis-reportes?id_usuario=&solo_huerfanas=` | Mis reportes |
-| GET | `/edan/localidades/sync/pull?id_usuario=&fecha_desde=` | Pull de sync |
-| POST | `/edan/localidades/sync` | Batch sync (push) |
+| GET | `/edan/sync/pull?desde=&limit=` | Pull de sync (V2) |
+| POST | `/edan/sync/ack` | Confirmar watermark |
+| POST/PUT | `/edan/formularios/completo` | Push del documento completo |
 | GET | `/edan/localidades/{id}` | Detalle de localidad |
 | DELETE | `/edan/localidades/{id}` | Eliminar localidad |
 | PUT | `/edan/localidades/{id}/estado` | Cambiar estado |

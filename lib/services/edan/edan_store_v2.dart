@@ -913,6 +913,15 @@ class EdanStoreV2 implements EdanStore {
         ids: const [1, 2, 3, 4, 5, 6, 7, 8],
         rutaTipo: 'proteccion',
         defaults: const {'mujeres': 0, 'hombres': 0},
+        // Slots ya cubiertos por una fila con datos del modelo (posible
+        // huérfana legacy fusionada con la sintética del padding): no se
+        // blindan, Gap-2 purga la perdedora y el id queda con una sola fila.
+        claimedIds: {
+          for (final g in loc.proteccion)
+            if (filaSeccionConDatos('proteccion', g) &&
+                g.idGrupoVulnerable != null)
+              g.idGrupoVulnerable!,
+        },
       ).then(uuidsActuales.addAll);
 
       // Gap 2 (reconciliación de bajas): eliminar las filas de ESTE tipo que
@@ -1110,7 +1119,7 @@ class EdanStoreV2 implements EdanStore {
           // Inverso de la expansión de `_guardarFilasTx`: las filas son una
           // por grupo etario; page03 y `recalcularImpDesdeListas` consumen UN
           // wrapper con los grupos anidados y los totales sumados.
-          final wrapper = _colapsarImpactoDesdeFilas(rows);
+          final wrapper = await _colapsarImpactoDesdeFilas(rows);
           if (wrapper != null) loc.impactoPoblacion = [wrapper];
           continue;
         }
@@ -1130,6 +1139,23 @@ class EdanStoreV2 implements EdanStore {
         // borrado (`D`) de las viviendas del servidor.
         if (tipo == 'danos-vivienda') {
           await _hidratarViviendas(lista.cast<EdanDanoVivienda>());
+        }
+        // `proteccion`: el `datos_json` sale de `toApiJson`, que NUNCA llevó
+        // `nombre_grupo` (el servidor rechaza campos extra); al reabrir, la
+        // fila hidratada llega sin enunciado y page10 pintaba checks sin
+        // texto. El nombre se surte por id desde el catálogo cacheado en
+        // SQLite (`catalogo_grupo_vulnerable`, bajado por login/Perfil).
+        if (tipo == 'proteccion') {
+          await _surtirNombresCatalogoVulnerable(
+              lista.cast<EdanGrupoVulnerable>());
+          // Borradores contaminados por guardados previos al contrato pueden
+          // tener más de 8 filas en `filas_seccion` (defaults legacy sin id
+          // + sintéticas de padding, o duplicadas por pull). Fusionar por id
+          // deja la lista de edición en exactamente 8 (más extras con datos
+          // no catalogables); las ganadas por cero quedan fuera de
+          // `uuidsActuales` en el próximo guardado y Gap-2 las purga.
+          loc.proteccion = EdanGrupoVulnerable.completarSet8(
+              lista.cast<EdanGrupoVulnerable>());
         }
       } else if (rows.isNotEmpty) {
         final dec = decodificarSeguro(rows.first['datos_json']);
@@ -1189,10 +1215,32 @@ class EdanStoreV2 implements EdanStore {
   /// `marcado` por totales. El `id_seccion` de cada grupo queda el del JSON
   /// (= uuid sintético del catálogo al expandir), así un re-guardar repone
   /// las mismas filas sin duplicar.
-  EdanImpactoPoblacion? _colapsarImpactoDesdeFilas(
-      List<Map<String, Object?>> rows) {
+  ///
+  /// Las filas de padding (defaults sin nombre) toman su enunciado del
+  /// catálogo cacheado en SQLite (`catalogo_grupo_etario`); el mapa canónico
+  /// [_rangoEtarioPorId] queda como último respaldo si el catálogo aún no
+  /// fue descargado en este dispositivo.
+  Future<EdanImpactoPoblacion?> _colapsarImpactoDesdeFilas(
+      List<Map<String, Object?>> rows) async {
+    Map<int, String>? nombrePorId;
+    Future<Map<int, String>> catalogoNombres() async {
+      if (nombrePorId != null) return nombrePorId!;
+      try {
+        final filas = await _db.getGruposEtariosLocal();
+        nombrePorId = <int, String>{
+          for (final c in filas)
+            if (c['id_grupo_etario'] is num &&
+                (c['nombre']?.toString().trim().isNotEmpty ?? false))
+              (c['id_grupo_etario'] as num).toInt(): c['nombre'].toString(),
+        };
+      } catch (e) {
+        debugPrint('[EdanStoreV2] catálogo grupos etarios no disponible: $e');
+        nombrePorId = const {};
+      }
+      return nombrePorId!;
+    }
+
     final grupos = <EdanGrupoEtario>[];
-    var f = 0, h = 0, d = 0;
     for (final r in rows) {
       final dec = decodificarSeguro(r['datos_json']);
       if (dec == null) continue;
@@ -1202,24 +1250,68 @@ class EdanStoreV2 implements EdanStore {
       }
       final g = EdanGrupoEtario.fromJson(dec);
       if (g.rango.isEmpty && g.idGrupoEtario != null) {
-        // Fila de padding ( defaults sin nombre): se repone el rango canónico
-        // para que page01 pinte la etiqueta correcta del catálogo.
-        g.rango = _rangoEtarioPorId(g.idGrupoEtario!) ?? '';
+        final nombres = await catalogoNombres();
+        g.rango = nombres[g.idGrupoEtario!] ??
+            _rangoEtarioPorId(g.idGrupoEtario!) ??
+            '';
       }
       if (g.rango.isEmpty && g.idGrupoEtario == null) continue;
       grupos.add(g);
-      f += g.fallecidos;
-      h += g.heridos;
-      d += g.desaparecidos;
     }
     if (grupos.isEmpty) return null;
+    // Contaminación de guardados previos: puede convivir el wrapper 'Total'
+    // sin id con las filas reales por id. Habiendo filas con id, un 'Total'
+    // vacío es basura y se descarta; si trae números se conserva como extra
+    // para no esconder datos. Luego: set EXACTO de 4 (huecos en 0), igual
+    // que el POST (§20.10.E).
+    final hayConId = grupos.any((g) => g.idGrupoEtario != null);
+    grupos.removeWhere((g) =>
+        g.idGrupoEtario == null &&
+        !g.tieneDatos &&
+        (hayConId || g.rango.trim() == 'Total'));
+    final completos = EdanGrupoEtario.completarSet4(grupos);
+    var tf = 0, th = 0, td = 0;
+    for (final g in completos) {
+      tf += g.fallecidos;
+      th += g.heridos;
+      td += g.desaparecidos;
+    }
     return EdanImpactoPoblacion(
       grupoEtario: 'Total',
-      fallecidos: f,
-      heridos: h,
-      desaparecidos: d,
-      gruposEtarios: grupos,
+      fallecidos: tf,
+      heridos: th,
+      desaparecidos: td,
+      gruposEtarios: completos,
     );
+  }
+
+  /// Completa `nombreGrupo` de las filas de protección hidratadas desde el
+  /// catálogo local (`catalogo_grupo_vulnerable`). No inventa nombres si el
+  /// catálogo todavía no fue bajado: page10 los asienta en su post-frame con
+  /// `fetchGruposVulnerablesIfNeeded`.
+  Future<void> _surtirNombresCatalogoVulnerable(
+      List<EdanGrupoVulnerable> grupos) async {
+    final faltaAlguno = grupos.any((g) =>
+        (g.nombreGrupo?.trim().isNotEmpty ?? false) == false &&
+        g.idGrupoVulnerableCatalogo != null);
+    if (!faltaAlguno) return;
+    try {
+      final catalogo = await _db.getGruposVulnerablesLocal();
+      final nombrePorId = <int, String>{
+        for (final c in catalogo)
+          if (c['id_grupo_vulnerable'] is num &&
+              (c['nombre']?.toString().trim().isNotEmpty ?? false))
+            (c['id_grupo_vulnerable'] as num).toInt(): c['nombre'].toString(),
+      };
+      for (final g in grupos) {
+        if ((g.nombreGrupo?.trim().isNotEmpty ?? false) == false &&
+            g.idGrupoVulnerableCatalogo != null) {
+          g.nombreGrupo = nombrePorId[g.idGrupoVulnerableCatalogo!];
+        }
+      }
+    } catch (e) {
+      debugPrint('[EdanStoreV2] catálogo grupos vulnerables no disponible: $e');
+    }
   }
 
   /// Nombre canónico del catálogo `grupo_etario` (ids 1-4, misma semilla que
@@ -1924,8 +2016,9 @@ class EdanStoreV2 implements EdanStore {
       where: 'uuid_edan_localidad = ?',
       whereArgs: [uuid],
     );
-    // Espejo en `localidad_secciones_activas` (tabla legacy): el listado RESP
-    // (`resp_edan_localidad_tab.dart`) y la vista previa leen de ahí vía
+    // Espejo en `localidad_secciones_activas` (tabla legacy): el listado de
+    // la pestaña Reportes (`resp_dashboard_tab.dart`) y la vista previa leen
+    // de ahí vía
     // `EdanLocalidadesEnvioV2Service.aplicarFlagsDesdeSeccionesActivas`. Sin
     // este espejo, los badges del listado no reflejan lo marcado en page01.
     // (Se retira en Etapa 5, cuando el listado lea `formularios`.)
@@ -2214,6 +2307,11 @@ class EdanStoreV2 implements EdanStore {
     required List<int> ids,
     required String rutaTipo,
     required Map<String, dynamic> defaults,
+    // Ids cuyo slot ya fue cubierto en este guardado por una fila del modelo
+    // CON datos (fusión `completarSet8`/expansión por id al hidratar). Sus
+    // filas viejas en BD (p. ej. la sintética en ceros del mismo id, o legacy
+    // duplicada) NO se protegen: Gap-2 las purga y el slot queda único.
+    Set<int> claimedIds = const {},
   }) async {
     if (!flag) return {};
     final out = <String>{};
@@ -2232,12 +2330,13 @@ class EdanStoreV2 implements EdanStore {
         if (id == null || !ids.contains(id) || porId.containsKey(id)) continue;
         porId[id] = dec;
         final u = f['uuid_registro'] as String?;
-        if (u != null) out.add(u);
+        // Un id reclamado por una fila con datos no se blinda: su fila
+        // perdedora debe ser purgada por Gap-2.
+        if (u != null && !claimedIds.contains(id)) out.add(u);
       }
-      if (porId.length == ids.length) return out;
       final now = DateTime.now().toIso8601String();
       for (final id in ids) {
-        if (porId.containsKey(id)) continue;
+        if (porId.containsKey(id) || claimedIds.contains(id)) continue;
         final datos =
             Map<String, dynamic>.from(defaults)..[idCampo] = id;
         final uuid = EdanSeccionesFuente.uuidFilaSintetica(
@@ -3154,11 +3253,21 @@ class EdanStoreV2 implements EdanStore {
   // ── Firma de contenido (dirty derivado, §20.15 + robustez) ──
 
   /// Claves que NUNCA entran a la firma: espejo de foto (lo llena el
-  /// servidor) y timestamps (los mueve el servidor/la BD, no el usuario).
+  /// servidor), timestamps (los mueve el servidor/la BD, no el usuario) y
+  /// los checks locales `afectado`/`impactado`/`marcado` (se persisten en
+  /// `datos_json` para sobrevivir el round-trip pero el wire los BORRA —
+  /// el servidor no tiene esas columnas: `prepararPayloadCompleto` los
+  /// remueve). Sin excluirlos aquí, `firmaDePayload(payload)` y
+  /// `firmaContenido(DB)` divergían para cualquier fila con check →
+  /// `limpio=false` eterno → `pendiente_push` nunca se limpiaba (badge
+  /// pegado en 1 + re-PUT en cada sync, reportado 2026-10-18).
   static const _clavesFueraDeFirma = {
     'fotografia',
     'fecha_modificacion',
     'fecha_modificacion_local',
+    'afectado',
+    'impactado',
+    'marcado',
   };
 
   /// Canónico estable para firmar: claves ordenadas, listas de mapas
@@ -3257,6 +3366,10 @@ class EdanStoreV2 implements EdanStore {
     final out = <String, dynamic>{};
     fila.forEach((k, v) {
       if (_clavesFueraDeFirma.contains(k)) return;
+      // `rango` es contenido wire SOLO como resolver legacy (sin id): el
+      // payload lo borra cuando la fila trae `id_grupo_etario` (motor
+      // 2414-2416). Misma regla aquí para que las dos firmas coincidan.
+      if (k == 'rango' && fila['id_grupo_etario'] != null) return;
       if (k == 'viviendas') return;
       if (v is Map) {
         out[k] = _filaParaFirma(Map<String, dynamic>.from(v));
@@ -3641,6 +3754,163 @@ class EdanStoreV2 implements EdanStore {
     );
   }
 
+  // ── Galería (rol 7) ───────────────────────────────────────────────────────
+
+  /// Fotos de las localidades del usuario (tabla `fotografias` + cabecera de
+  /// su localidad desde `formularios`), para la pestaña Galería del rol 7.
+  ///
+  /// Solo fotos vivas (`borrado_logico = 0` e `is_deleted = 0`) del usuario
+  /// pedido — coherente con el alcance de `listarFormularios`. Orden:
+  /// localidad alfabética, fotos más recientes primero dentro de cada una.
+  Future<List<EdanFotoGaleria>> listarFotosGaleria({
+    required int usuarioId,
+  }) {
+    // El autor no se selecciona: todas las fotos son del propio usuario.
+    return _fotosGaleria(
+      filtroLocalidad: 'fo.id_usuario = ?',
+      valor: usuarioId,
+      conAutor: false,
+    );
+  }
+
+  /// Igual que [listarFotosGaleria] pero con alcance de MUNICIPIO (Galería
+  /// del UGR rol 6): fotos de todos los responsables del municipio, con el
+  /// nombre del autor (`usuario_nombre`, fallback `usuario_login`) para
+  /// distinguirlas.
+  Future<List<EdanFotoGaleria>> listarFotosGaleriaPorMunicipio({
+    required int idMunicipio,
+  }) {
+    return _fotosGaleria(
+      filtroLocalidad: 'fo.id_municipio = ?',
+      valor: idMunicipio,
+      conAutor: true,
+    );
+  }
+
+  Future<List<EdanFotoGaleria>> _fotosGaleria({
+    required String filtroLocalidad,
+    required Object? valor,
+    required bool conAutor,
+  }) async {
+    final db = await _db.database;
+    final filas = conAutor
+        ? '''
+             te.nombre                   AS tipo_evento_nombre,
+             COALESCE(fo.usuario_nombre, fo.usuario_login) AS nombre_autor,
+             fs.datos_json               AS fila_datos_json,
+             v.coordenada_lat            AS vivienda_lat,
+             v.coordenada_lon            AS vivienda_lon'''
+        : '''
+             te.nombre                   AS tipo_evento_nombre,
+             fs.datos_json               AS fila_datos_json,
+             v.coordenada_lat            AS vivienda_lat,
+             v.coordenada_lon            AS vivienda_lon''';
+    final rows = await db.rawQuery(
+      '''
+      SELECT f.uuid_fotografia,
+             f.uuid_edan_localidad,
+             f.tipo_entidad,
+             f.uuid_registro,
+             f.ruta_local,
+             f.ruta_servidor,
+             f.fecha_modificacion,
+             fo.localidad                AS nombre_localidad,
+             fo.id_edan_localidad_estado AS id_estado_localidad,
+$filas
+      FROM fotografias f
+      JOIN formularios fo
+        ON fo.uuid_edan_localidad = f.uuid_edan_localidad
+      LEFT JOIN filas_seccion fs
+        ON fs.uuid_registro = f.uuid_registro
+      LEFT JOIN viviendas v
+        ON v.uuid_registro = f.uuid_registro
+      LEFT JOIN catalogo_tipos_evento te
+        ON te.id_tipo_evento = fo.id_tipo_evento
+      WHERE f.borrado_logico = 0
+        AND f.is_deleted = 0
+        AND $filtroLocalidad
+      ORDER BY fo.localidad COLLATE NOCASE ASC, f.fecha_modificacion DESC
+      ''',
+      [valor],
+    );
+    return rows.map((r) {
+      final coord = _coordenadasFoto(
+        r['fila_datos_json'],
+        r['vivienda_lat'],
+        r['vivienda_lon'],
+      );
+      return EdanFotoGaleria(
+        uuidFotografia: r['uuid_fotografia'] as String,
+        uuidEdanLocalidad: r['uuid_edan_localidad'] as String,
+        nombreLocalidad: (r['nombre_localidad'] as String?) ?? '',
+        idEstadoLocalidad: (r['id_estado_localidad'] as int?) ?? 1,
+        tipoEntidad: r['tipo_entidad'] as String?,
+        uuidRegistro: r['uuid_registro'] as String?,
+        rutaLocal: r['ruta_local'] as String?,
+        rutaServidor: r['ruta_servidor'] as String?,
+        fechaModificacion: r['fecha_modificacion'] as String?,
+        coordenadaLat: coord[0],
+        coordenadaLon: coord[1],
+        tipoEventoNombre: r['tipo_evento_nombre'] as String?,
+        nombreAutor: conAutor ? r['nombre_autor'] as String? : null,
+      );
+    }).toList();
+  }
+
+  /// Coordenadas de la foto = coordenadas de su fila dueña.
+  ///
+  /// Fuente 1: `filas_seccion.datos_json` (`coordenada_lat/lon`, donde el
+  /// wizard deja la captura GPS de la foto — `toFotoData`). Fuente 2 (fallback
+  /// y foto de vivienda): columnas `coordenada_lat/lon` de `viviendas`.
+  /// Parsing en Dart (no `json_extract` de SQLite) para no depender de JSON1
+  /// en Android 8/9. Acepta variantes snake y camel; null si no hay par.
+  static List<double?> _coordenadasFoto(
+    Object? filaDatosJson,
+    Object? viviendaLat,
+    Object? viviendaLon,
+  ) {
+    if (filaDatosJson is String && filaDatosJson.trim().isNotEmpty) {
+      try {
+        final j = jsonDecode(filaDatosJson);
+        if (j is Map) {
+          final lat = _aDouble(j['coordenada_lat'] ?? j['coordenadaLat']);
+          final lon = _aDouble(j['coordenada_lon'] ?? j['coordenadaLon']);
+          if (lat != null && lon != null) return [lat, lon];
+        }
+      } catch (_) {}
+    }
+    final vlat = _aDouble(viviendaLat);
+    final vlon = _aDouble(viviendaLon);
+    if (vlat != null && vlon != null) return [vlat, vlon];
+    return [null, null];
+  }
+
+  static double? _aDouble(Object? v) {
+    if (v is num) return v.toDouble();
+    if (v is String && v.isNotEmpty) return double.tryParse(v);
+    return null;
+  }
+
+  /// Guarda la ruta local de una foto ya descargada (botón «Descargar» de la
+  /// Galería). Mismos campos que limpia el motor al descargar en sync.
+  Future<void> setFotoRutaLocal(
+    String uuidFotografia,
+    String rutaLocal,
+  ) async {
+    final db = await _db.database;
+    await db.update(
+      'fotografias',
+      {
+        'ruta_local': rutaLocal,
+        'last_error': null,
+        'intentos_descarga': 0,
+        'fecha_proximo_intento': null,
+      },
+      where: 'uuid_fotografia = ?',
+      whereArgs: [uuidFotografia],
+    );
+  }
+
   Future<void> _notifyPendientes() async {
     try {
       final p = await contarLocalidadesPendientes();
@@ -3651,4 +3921,84 @@ class EdanStoreV2 implements EdanStore {
       pendientesNotifier.value = 0;
     }
   }
+}
+
+/// Una foto de la pestaña Galería del rol 7: fila viva de `fotografias` con
+/// los datos de su localidad (nombre + estado) traídos por JOIN.
+class EdanFotoGaleria {
+  final String uuidFotografia;
+  final String uuidEdanLocalidad;
+  final String nombreLocalidad;
+
+  /// `id_edan_localidad_estado` de la localidad (1-6).
+  final int idEstadoLocalidad;
+
+  /// Tabla corta dueña de la foto (`danos_viales`, `vivienda`, `cabecera`…).
+  final String? tipoEntidad;
+
+  /// Fila/sección a la que pertenece (para el pie del visor).
+  final String? uuidRegistro;
+
+  /// Archivo local en `report_photos/` (null si aún no se bajó).
+  final String? rutaLocal;
+
+  /// Path del servidor (`/uploads/reports/…`); permite ver/bajar en remoto.
+  final String? rutaServidor;
+
+  final String? fechaModificacion;
+
+  /// Coordenadas de la fila DUEÑA de la foto: el wizard escribe la captura
+  /// GPS de la foto en la fila como `coordenada_lat/lon` (`toFotoData`) — o
+  /// en las columnas de la vivienda cuando la foto cuelga de una (`viviendas.
+  /// coordenada_lat/lon`). Foto y coordenada van siempre juntas.
+  final double? coordenadaLat;
+  final double? coordenadaLon;
+
+  /// Nombre del tipo de evento de la localidad (catálogo local, por JOIN con
+  /// `catalogo_tipos_evento`). Null si el catálogo aún no bajó.
+  final String? tipoEventoNombre;
+
+  /// Responsable de la localidad (`usuario_nombre`, con fallback a
+  /// `usuario_login`). Solo lo trae la variante por municipio (Galería del
+  /// UGR, que ve fotos de TODOS los responsables); la del propio usuario es
+  /// null porque el autor siempre es él mismo.
+  final String? nombreAutor;
+
+  const EdanFotoGaleria({
+    required this.uuidFotografia,
+    required this.uuidEdanLocalidad,
+    required this.nombreLocalidad,
+    required this.idEstadoLocalidad,
+    this.tipoEntidad,
+    this.uuidRegistro,
+    this.rutaLocal,
+    this.rutaServidor,
+    this.fechaModificacion,
+    this.coordenadaLat,
+    this.coordenadaLon,
+    this.tipoEventoNombre,
+    this.nombreAutor,
+  });
+
+  /// '−17.78352, −63.18214' con 5 decimales (~1 m) o null si no hay par.
+  String? get coordenadaTexto {
+    final la = coordenadaLat;
+    final lo = coordenadaLon;
+    if (la == null || lo == null) return null;
+    return '${la.toStringAsFixed(5)}, ${lo.toStringAsFixed(5)}';
+  }
+
+  /// True si el archivo local existe de verdad (no basta con la ruta: iOS
+  /// reubica el contenedor entre versiones y la ruta absoluta envejece).
+  bool get tieneArchivoLocal {
+    final r = rutaLocal;
+    if (r == null || r.isEmpty) return false;
+    try {
+      return File(r).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool get tieneRemoto => (rutaServidor ?? '').isNotEmpty;
 }

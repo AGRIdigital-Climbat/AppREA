@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 
 import 'sync_debug_config.dart';
 
+import 'app_logger.dart';
+
 /// Singleton que acumula entradas de depuración de cada llamada API
 /// durante el proceso de sincronización.
 ///
@@ -45,11 +47,41 @@ class SyncDebugCollector {
   }
 
   /// Agrega una entrada de API. No-op si [kSyncDebugMode] es `false`.
+  ///
+  /// Las entradas que NO son HTTP (fases y `DIAGNÓSTICO`) se espejan además en
+  /// [AppLogger] con categoría SYNC, con el JSON completo de datos, para que
+  /// queden persistentes junto al resto del registro de la app. Las entradas
+  /// HTTP reales ya se espejan solas desde la capa de red (`LogHttp` /
+  /// `_instrumented`), así que aquí no se duplican.
   void add(SyncApiEntry entry) {
     if (!kSyncDebugMode) return;
     final current = List<SyncApiEntry>.from(entries.value);
     current.add(entry);
     entries.value = current;
+    if (entry.metodo.isEmpty || entry.metodo == 'DIAGNÓSTICO') {
+      String? json;
+      try {
+        if (entry.detalleDiagnostico != null) {
+          json = const JsonEncoder.withIndent('  ')
+              .convert(entry.detalleDiagnostico);
+        } else if (entry.requestBody != null) {
+          json =
+              const JsonEncoder.withIndent('  ').convert(entry.requestBody);
+        }
+      } catch (_) {
+        json = entry.requestBody?.toString() ??
+            entry.detalleDiagnostico?.toString();
+      }
+      AppLogger.instance.sync(
+        titulo: entry.metodo.isEmpty
+            ? entry.endpoint
+            : 'Diagnóstico: ${entry.endpoint}',
+        detalle: entry.localidadId != null
+            ? 'localidad=${entry.localidadId}'
+            : null,
+        response: json,
+      );
+    }
   }
 
   /// Agrega una entrada de fase (marcador visual, no es una API).

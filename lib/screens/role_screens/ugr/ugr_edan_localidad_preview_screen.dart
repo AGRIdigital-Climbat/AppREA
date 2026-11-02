@@ -385,7 +385,29 @@ class _UgrEdanLocalidadPreviewScreenState
   }
 
   Widget _seccion03() {
-    final ip = localidad.impactoPoblacion.isNotEmpty ? localidad.impactoPoblacion[0] : null;
+    final ip =
+        localidad.impactoPoblacion.isNotEmpty ? localidad.impactoPoblacion[0] : null;
+    // Set EXACTO de 4 grupos del catálogo (§20.10.E): siempre se ven los 4,
+    // los vacíos en 0. Sin grupos anidados (documento legacy plano) cada
+    // fila con datos aporta su rango.
+    final grupos = EdanGrupoEtario.completarSet4([
+      if (ip != null)
+        if (ip.gruposEtarios.isNotEmpty)
+          ...ip.gruposEtarios
+        else
+          for (final p in localidad.impactoPoblacion
+              .where((p) => p.tieneDatosGlobales))
+            EdanGrupoEtario(
+              rango: p.grupoEtario,
+              fallecidos: p.fallecidos,
+              heridos: p.heridos,
+              desaparecidos: p.desaparecidos,
+              observaciones: p.observaciones,
+              marcado: true,
+              idGrupoEtarioCatalogo:
+                  EdanGrupoEtario.resolverIdGrupoEtario(p.grupoEtario),
+            ),
+    ]);
     return _DocSeccion(
       numero: '03',
       titulo: 'Impacto en la población',
@@ -398,7 +420,7 @@ class _UgrEdanLocalidadPreviewScreenState
               _df('Heridos', '${ip.heridos}'),
               _df('Desaparecidos', '${ip.desaparecidos}'),
             ]),
-            ...ip.gruposEtarios.map((g) => _tb([
+            ...grupos.map((g) => _tb([
                   _tbRow('Grupo etario', _v(g.rango)),
                   _tbRow('Fallecidos', '${g.fallecidos}'),
                   _tbRow('Heridos', '${g.heridos}'),
@@ -712,26 +734,34 @@ class _UgrEdanLocalidadPreviewScreenState
     );
   }
 
+  /// Set EXACTO de 8 grupos vulnerables del catálogo (§20.11): se muestran
+  /// siempre los 8, los vacíos en 0 y los apoyos como Sí/No/—.
   List<Widget> _filasProteccion(List<EdanGrupoVulnerable> grupos) {
-    final conDatos = grupos.where((g) => g.tieneDatos).toList();
-    if (conDatos.isEmpty) return [_vacio()];
+    String siNo(bool? v) => v == null ? '—' : (v ? 'Sí' : 'No');
+    final completos = EdanGrupoVulnerable.completarSet8(grupos);
     return [
-      for (var i = 0; i < conDatos.length; i++)
+      for (var i = 0; i < completos.length; i++)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),
           child: _tb([
-            _tbRow('Grupo', conDatos[i].nombreGrupo ?? 'Grupo ${i + 1}'),
+            _tbRow(
+                'Grupo',
+                (completos[i].nombreGrupo?.trim().isNotEmpty ?? false)
+                    ? completos[i].nombreGrupo!
+                    : 'Grupo ${i + 1}'),
             _dg([
-              _df('Mujeres', '${conDatos[i].mujeres}'),
-              _df('Hombres', '${conDatos[i].hombres}'),
-              _df('Total', '${conDatos[i].total}'),
+              _df('Mujeres', '${completos[i].mujeres}'),
+              _df('Hombres', '${completos[i].hombres}'),
+              _df('Total', '${completos[i].total}'),
             ]),
-            _tags([
-              if (conDatos[i].apoyoPsicologico == true) 'Apoyo psicológico',
-              if (conDatos[i].reposicionDocumentos == true) 'Reposición de documento',
+            _dg([
+              _df('¿Apoyo psicológico?', siNo(completos[i].apoyoPsicologico)),
+              _df(
+                  '¿Reposición de documento?',
+                  siNo(completos[i].reposicionDocumentos)),
             ]),
-            if (conDatos[i].observaciones.trim().isNotEmpty)
-              _tbRow('Observaciones', conDatos[i].observaciones),
+            if (completos[i].observaciones.trim().isNotEmpty)
+              _tbRow('Observaciones', completos[i].observaciones),
           ]),
         ),
     ];

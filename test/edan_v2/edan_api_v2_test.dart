@@ -63,6 +63,25 @@ void main() {
       expect(res.total, 2);
     });
 
+    test('listarFormularios envía modo solo cuando se pide (contrato '
+        'modo=completo para descarga municipal)', () async {
+      late Uri visto;
+      final client = MockClient((req) async {
+        visto = req.url;
+        return _json(_env(data: <Map<String, dynamic>>[], total: 0));
+      });
+      await api(client)
+          .listarFormularios(idMunicipio: 70101, modo: 'completo');
+      expect(visto.path, endsWith('/formularios'));
+      expect(visto.queryParameters['modo'], 'completo');
+      expect(visto.queryParameters['id_municipio'], '70101');
+      expect(visto.queryParameters['todos'], 'false');
+
+      await api(client).listarFormularios();
+      expect(visto.queryParameters.containsKey('modo'), isFalse,
+          reason: 'sin modo el servidor aplica su default (comprimido)');
+    });
+
     test('obtenerFormulario usa path /formularios/{uuid o id} (contrato §19.3)',
         () async {
       late Uri visto;

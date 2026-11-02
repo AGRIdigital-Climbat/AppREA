@@ -23,9 +23,11 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:rea/models/edan.dart';
 import 'package:rea/screens/role_screens/resp/edan/edan_boton_sacar_foto.dart';
+import 'package:rea/services/api/edan_api_v2.dart';
 import 'package:rea/services/database_helper.dart';
 import 'package:rea/services/edan/edan_secciones_fuente.dart';
 import 'package:rea/services/edan/edan_store_v2.dart';
@@ -225,7 +227,8 @@ void main() {
       final payload = await payloadDe('u-1');
       expect(payload['imp_impacto_poblacion'], isTrue);
       final lista = payload['impacto_poblacion'] as List;
-      expect(lista, hasLength(4));
+      expect(lista, hasLength(4),
+          reason: 'set EXACTO 1-4 exigido por el servidor');
       final porId = {
         for (final f in lista)
           (f['id_grupo_etario'] as num).toInt(): f as Map
@@ -233,6 +236,62 @@ void main() {
       expect(porId[1]!['fallecidos'], 2,
           reason: 'los grupos llenos NO se anulan por el re-lleno de ceros');
       expect(porId[3]!['fallecidos'], 1);
+      for (final f in lista) {
+        expect(f.containsKey('rango'), isFalse,
+            reason: 'con `id_grupo_etario` el servidor rechaza `rango` '
+                '(400 por fila: "campo desconocido o no escribible")');
+      }
+    });
+
+    test('grupo marcado SIN números sobrevive el round-trip y `marcado` no '
+        'viaja en el POST', () async {
+      final loc = _loc()..grupPoblacion = true;
+      loc.impactoPoblacion = [
+        EdanImpactoPoblacion(
+          grupoEtario: 'Total',
+          fallecidos: 2,
+          gruposEtarios: [
+            EdanGrupoEtario(
+                rango: 'Niño (a) 0-5 años',
+                idGrupoEtarioCatalogo: 1,
+                fallecidos: 2,
+                marcado: true),
+            EdanGrupoEtario(
+                rango: 'Escolar de 6-18 años',
+                idGrupoEtarioCatalogo: 2,
+                marcado: true), // marcado, sin números
+            EdanGrupoEtario(rango: 'Adulto de 19-60 años', idGrupoEtarioCatalogo: 3),
+            EdanGrupoEtario(
+                rango: 'Adulto mayor de 60 años adelante',
+                idGrupoEtarioCatalogo: 4),
+          ],
+        ),
+      ];
+      loc.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        loc,
+        usuarioId: 1,
+        seccionesActivas: const ['impacto-poblacion'],
+        tipos: const ['impacto-poblacion'],
+      );
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['impacto-poblacion']);
+      final w = rec.impactoPoblacion.first;
+      expect(w.gruposEtarios, hasLength(4));
+      expect(w.gruposEtarios.firstWhere((g) => g.idGrupoEtario == 2).marcado,
+          isTrue,
+          reason: 'el check del grupo sobrevive reabrir (bug servicios, '
+              'misma clase acá)');
+      expect(w.gruposEtarios.firstWhere((g) => g.idGrupoEtario == 4).marcado,
+          isFalse);
+
+      final payload = await payloadDe('u-1');
+      for (final f in payload['impacto_poblacion'] as List) {
+        expect((f as Map).containsKey('marcado'), isFalse,
+            reason: 'la tabla del servidor no tiene `marcado`: el motor lo '
+                'quita (400 "campo desconocido" si viajara)');
+      }
     });
 
     test('hidratar colapsa al wrapper de page03 y re-guardar no duplica',
@@ -280,6 +339,35 @@ void main() {
       );
     });
 
+    test('la fila de padding toma el rango del catálogo cacheado '
+        '(`catalogo_grupo_etario`, no del mapa canónico)', () async {
+      await db.saveGruposEtarios([
+        for (var i = 1; i <= 4; i++)
+          {
+            'id_grupo_etario': i,
+            'codigo': 'GE$i',
+            'nombre': 'CATALOGO $i',
+            'orden': i,
+            'activo': 1,
+          },
+      ]);
+      await store.guardarTodo(
+        _locImpacto(),
+        usuarioId: 1,
+        seccionesActivas: const ['impacto-poblacion'],
+        tipos: const ['impacto-poblacion'],
+      );
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['impacto-poblacion']);
+      final w = rec.impactoPoblacion.first;
+      final g2 = w.gruposEtarios.firstWhere((g) => g.idGrupoEtario == 2);
+      expect(g2.rango, 'CATALOGO 2',
+          reason: 'el catálogo manda sobre el mapa de respaldo');
+      final g1 = w.gruposEtarios.firstWhere((g) => g.idGrupoEtario == 1);
+      expect(g1.rango, 'Niño (a) 0-5 años',
+          reason: 'la fila con datos conserva el rango propio persistido');
+    });
+
     test('envoltura legacy (totales globales sin grupos marcados) sigue '
         'guardando su fila resuelta por nombre', () async {
       final loc = _loc()
@@ -307,6 +395,69 @@ void main() {
   });
 
   group('protección: set EXACTO 8 con 0 rellenos', () {
+    test('hidratar trae el enunciado del catálogo cacheado (no hardcodeado)',
+        () async {
+      await db.saveGruposVulnerables([
+        for (var i = 1; i <= 8; i++)
+          {
+            'id_grupo_vulnerable': i,
+            'codigo': 'GV$i',
+            'nombre': 'GRUPO OFICIAL $i',
+            'orden': i,
+            'activo': 1,
+          },
+      ]);
+      final loc = _loc()..grupProteccion = true;
+      loc.proteccion[2].mujeres = 4; // 'Adolescentes' resuelve id 3
+      loc.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        loc,
+        usuarioId: 1,
+        seccionesActivas: const ['proteccion'],
+        tipos: const ['proteccion'],
+      );
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['proteccion']);
+      final g3 = rec.proteccion
+          .firstWhere((g) => g.idGrupoVulnerableCatalogo == 3);
+      expect(g3.mujeres, 4);
+      expect(g3.nombreGrupo, 'GRUPO OFICIAL 3',
+          reason: 'el texto sale de `catalogo_grupo_vulnerable`, no de '
+              'constantes de la app');
+    });
+
+    test('sin catálogo cacheado, la normalización pone los nombres canónicos '
+        '(y page10 los corrige con el real cuando baja)', () async {
+      final loc = _loc()..grupProteccion = true;
+      loc.proteccion[0].mujeres = 1;
+      loc.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        loc,
+        usuarioId: 1,
+        seccionesActivas: const ['proteccion'],
+        tipos: const ['proteccion'],
+      );
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['proteccion']);
+      expect(rec.proteccion, hasLength(8),
+          reason: 'el guardado normaliza solo lo lleno + padding, e hidratar '
+              'completa el set con su enunciado canónico');
+      expect(
+          rec.proteccion.map((g) => g.nombreGrupo).toList(),
+          [
+            'Niñas y niños 0-5 años',
+            'Niñas y niños 6-12 años',
+            'Adolescentes',
+            'Mujeres lactantes',
+            'Mujeres embarazadas',
+            'Adultos mayores',
+            'Personas con discapacidad',
+            'Personas con enfermedad crónica',
+          ],
+          reason: 'los 8 slots nunca quedan sin enunciado, con o sin catálogo');
+    });
+
     test('defaults vacíos no persisten; 2 llenos → 8 filas exactas', () async {
       final locVacia = _loc();
       await store.guardarTodo(
@@ -492,7 +643,303 @@ void main() {
       expect(rescatadas(segundo).single['uuid_registro'],
           rescatadas(primero).single['uuid_registro'],
           reason: 'identidad por catálogo, no por posición: reordenar la '
-              'lista no cambia de dueño el uuid del servidor');
+              'lista no cambia de dueño el uuid_registro');
+    });
+  });
+
+  group('normalización de borrador contaminado (protección duplicada)', () {
+    const nombres = [
+      'Niñas y niños 0-5 años',
+      'Niñas y niños 6-12 años',
+      'Adolescentes',
+      'Mujeres lactantes',
+      'Mujeres embarazadas',
+      'Adultos mayores',
+      'Personas con discapacidad',
+      'Personas con enfermedad crónica',
+    ];
+
+    test('16 filas locales (8 legacy sin id + 8 sintéticas) → hidratar 8, '
+        'guardar deja 8 únicos y encola el D de la sintética perdida',
+        () async {
+      final database = await db.database;
+      // Cabecera (para el formulario); sin filas todavía.
+      await store.guardarTodo(_loc(),
+          usuarioId: 1, seccionesActivas: const [], tipos: const []);
+      // 8 filas LEGACY como las que dejaban los guardados viejos: sin
+      // `id_grupo_vulnerable_catalogo`, con nombre canónico. Una con datos
+      // (Adolescentes → id 3).
+      for (var i = 0; i < 8; i++) {
+        final u = '1000000${i + 1}-0000-4000-8000-000000000000';
+        await database.insert('filas_seccion', {
+          'uuid_registro': u,
+          'uuid_edan_localidad': 'u-1',
+          'tipo': 'proteccion',
+          'datos_json': jsonEncode({
+            'id_seccion': u,
+            'nombre_grupo': nombres[i],
+            'mujeres': i == 2 ? 4 : 0,
+            'hombres': 0,
+          }),
+          'fecha_modificacion_local': DateTime.now().toIso8601String(),
+          'estado_sync': 'pendiente',
+        });
+      }
+      // 8 filas SINTÉTICAS del padding, con id, en ceros, ya confirmadas.
+      for (var id = 1; id <= 8; id++) {
+        final u =
+            EdanSeccionesFuente.uuidFilaSintetica('u-1', 'proteccion', id);
+        await database.insert(
+          'filas_seccion',
+          {
+            'uuid_registro': u,
+            'uuid_edan_localidad': 'u-1',
+            'tipo': 'proteccion',
+            'datos_json': jsonEncode({
+              'id_grupo_vulnerable_catalogo': id,
+              'mujeres': 0,
+              'hombres': 0,
+            }),
+            'fecha_modificacion_local': DateTime.now().toIso8601String(),
+            'estado_sync': 'confirmado',
+            'remote_id': 1160 + id,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['proteccion']);
+      expect(rec.proteccion, hasLength(8),
+          reason: 'la edición muestra 8 exactos, no los 16 crudos');
+      expect(rec.proteccion.firstWhere((g) => g.idGrupoVulnerable == 3).mujeres,
+          4,
+          reason: 'en el choque de id 3 gana la fila con datos');
+
+      rec.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        rec,
+        usuarioId: 1,
+        seccionesActivas: const ['proteccion'],
+        tipos: const ['proteccion'],
+      );
+      final filas = await filasDe('u-1', 'proteccion');
+      expect(filas, hasLength(8),
+          reason: 'gap-2 purga las huérfanas: un slot = una fila');
+      final ids = filas
+          .map((f) => ((jsonDecode(f['datos_json'] as String)
+                  as Map<String, dynamic>)['id_grupo_vulnerable_catalogo']
+              as num)
+          .toInt())
+          .toList();
+      expect(ids.toSet(), {1, 2, 3, 4, 5, 6, 7, 8});
+      final d = await database.query('cola_sincronizacion',
+          where: "tabla = 'filas_seccion' AND accion = 'D'");
+      expect(d, hasLength(1),
+          reason: 'solo la sintética confirmada de id 3 (perdedora) encola D');
+      expect(
+        d.single['uuid_registro'],
+        EdanSeccionesFuente.uuidFilaSintetica('u-1', 'proteccion', 3),
+      );
+    });
+
+    test('impacto: el wrapper "Total" vacío del guardado viejo se descarta '
+        'al hidratar; si trae números se conserva como extra', () async {
+      final database = await db.database;
+      await store.guardarTodo(_loc(),
+          usuarioId: 1, seccionesActivas: const [], tipos: const []);
+      Future<void> insertar(String u, Map<String, dynamic> dec,
+          {String estado = 'pendiente'}) async {
+        await database.insert(
+          'filas_seccion',
+          {
+            'uuid_registro': u,
+            'uuid_edan_localidad': 'u-1',
+            'tipo': 'impacto-poblacion',
+            'datos_json': jsonEncode(dec),
+            'fecha_modificacion_local': DateTime.now().toIso8601String(),
+            'estado_sync': estado,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+
+      await insertar('a0000000-0000-4000-8000-000000000001',
+          {'grupo_etario': 'Total', 'fallecidos': 0, 'heridos': 0, 'desaparecidos': 0});
+      for (var id = 1; id <= 4; id++) {
+        await insertar(
+            EdanSeccionesFuente.uuidFilaSintetica(
+                'u-1', 'impacto-poblacion', id),
+            {
+              'id_grupo_etario': id,
+              'fallecidos': 0,
+              'heridos': 0,
+              'desaparecidos': 0,
+            });
+      }
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['impacto-poblacion']);
+      expect(rec.impactoPoblacion.first.gruposEtarios, hasLength(4),
+          reason: 'el wrapper "Total" sin datos es basura de la expansión '
+              'anterior y no debe aparecer como quinto grupo');
+
+      // Ahora con el wrapper TRAE datos: se conserva (no se esconden números).
+      await insertar('a0000000-0000-4000-8000-000000000001',
+          {'grupo_etario': 'Total', 'fallecidos': 7, 'heridos': 0, 'desaparecidos': 0});
+      final rec2 = _loc();
+      await store.cargarSecciones(rec2, tipos: const ['impacto-poblacion']);
+      expect(rec2.impactoPoblacion.first.gruposEtarios, hasLength(5),
+          reason: '4 del catálogo + el extra con datos, visible no perdido');
+    });
+  });
+
+  group('servicios-basicos: el check "afectado" sobrevive el round-trip', () {
+    test('marcado SIN más datos: persiste en datos_json, hidrata marcado, '
+        'sobrevive el segundo guardado y NO viaja en el POST', () async {
+      final loc = _loc()..grupServicios = true;
+      loc.serviciosBasicos = [
+        EdanServicioBasicoDetalle(tipo: 'energia_electrica', afectado: true),
+      ];
+      loc.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        loc,
+        usuarioId: 1,
+        seccionesActivas: const ['servicios-basicos'],
+        tipos: const ['servicios-basicos'],
+      );
+
+      var filas = await filasDe('u-1', 'servicios-basicos');
+      expect(filas, hasLength(1));
+      final dec = jsonDecode(filas.single['datos_json'] as String) as Map;
+      expect(dec['afectado'], isTrue,
+          reason: 'el check se guarda en local (datos_json)');
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['servicios-basicos']);
+      expect(rec.serviciosBasicos.single.afectado, isTrue,
+          reason: 'reabrir muestra el check marcado (el bug reportado)');
+
+      rec.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        rec,
+        usuarioId: 1,
+        seccionesActivas: const ['servicios-basicos'],
+        tipos: const ['servicios-basicos'],
+      );
+      filas = await filasDe('u-1', 'servicios-basicos');
+      expect(filas, hasLength(1),
+          reason: 'la fila check-only no la purga el filtro de filas vacías');
+
+      final payload = await payloadDe('u-1');
+      final row = (payload['servicios_basicos'] as List).single as Map;
+      expect(row.containsKey('afectado'), isFalse,
+          reason: 'el servidor no tiene la columna: el motor la quita '
+              '(400 "campo desconocido" si viajara)');
+      expect(row['tipo'], 'energia_electrica');
+      expect(row['dano_parcial'], false);
+    });
+
+    test('BD guardada antes del fix (sin la clave, con datos): el check se '
+        'deriva del contenido', () async {
+      await store.guardarTodo(_loc(),
+          usuarioId: 1, seccionesActivas: const [], tipos: const []);
+      const u = 'd552945f-3384-4485-bab6-95220943b8d0';
+      final database = await db.database;
+      await database.insert('filas_seccion', {
+        'uuid_registro': u,
+        'uuid_edan_localidad': 'u-1',
+        'tipo': 'servicios-basicos',
+        'datos_json': jsonEncode({
+          'id_seccion': u,
+          'tipo': 'energia_electrica',
+          'dano_parcial': true,
+          'dano_total': false,
+          'necesidades_inmediatas': 'Afectación de energía ',
+          'observaciones': '',
+        }),
+        'fecha_modificacion_local': DateTime.now().toIso8601String(),
+        'estado_sync': 'pendiente',
+      });
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['servicios-basicos']);
+      final s = rec.serviciosBasicos.single;
+      expect(s.afectado, isTrue,
+          reason: 'caso reportado: daño/necesidades presentes ⇒ afectado');
+      expect(s.danoParcial, isTrue);
+    });
+
+    test('fila legacy en ceros absolutos (contaminación de la siembra): '
+        'sigue desmarcada y se purga al guardar', () async {
+      await store.guardarTodo(_loc(),
+          usuarioId: 1, seccionesActivas: const [], tipos: const []);
+      const u = 'e552945f-3384-4485-bab6-95220943b8d1';
+      final database = await db.database;
+      await database.insert('filas_seccion', {
+        'uuid_registro': u,
+        'uuid_edan_localidad': 'u-1',
+        'tipo': 'servicios-basicos',
+        'datos_json': jsonEncode({
+          'id_seccion': u,
+          'tipo': 'agua_potable',
+          'dano_parcial': false,
+          'dano_total': false,
+          'necesidades_inmediatas': '',
+          'observaciones': '',
+        }),
+        'fecha_modificacion_local': DateTime.now().toIso8601String(),
+        'estado_sync': 'pendiente',
+      });
+
+      final rec = _loc();
+      await store.cargarSecciones(rec, tipos: const ['servicios-basicos']);
+      expect(rec.serviciosBasicos.single.afectado, isFalse,
+          reason: 'sin clave y sin contenido no se revive la duplicidad');
+      rec.recalcularImpDesdeListas();
+      await store.guardarTodo(
+        rec,
+        usuarioId: 1,
+        seccionesActivas: const ['servicios-basicos'],
+        tipos: const ['servicios-basicos'],
+      );
+      expect(await filasDe('u-1', 'servicios-basicos'), isEmpty,
+          reason: 'Gap-2 la purga en el primer guardado');
+    });
+
+    test('download por /completo: una fila que existe en el servidor vuelve '
+        'marcada (allí la existencia ES el marcado)', () async {
+      await EdanSyncEngineV2(
+        api: EdanApiV2(
+          httpClient: MockClient((_) async =>
+              throw StateError('aplicarDocumentoCompleto no toca la red')),
+          baseUrl: 'https://api.test/api/v2/edan',
+        ),
+        db: db,
+      ).aplicarDocumentoCompleto({
+        'uuid_edan_localidad': 'u-2',
+        'id_edan_localidad': 55,
+        'localidad': 'Las Lomas',
+        'grupos': {'grup_servicios': true},
+        'imp_servicios_basicos': true,
+        'servicios_basicos': [
+          {
+            'uuid_registro': 'f0000000-0000-4000-8000-000000000001',
+            'id_edan_localidad': 55,
+            'tipo': 'gas_domiciliario',
+            'dano_parcial': false,
+            'dano_total': false,
+            'necesidades_inmediatas': '',
+            'observaciones': '',
+          },
+        ],
+      });
+
+      final rec = EdanLocalidad(
+          nombre: 'L', idTipoEvento: 1, uuidEdanLocalidad: 'u-2');
+      await store.cargarSecciones(rec, tipos: const ['servicios-basicos']);
+      expect(rec.serviciosBasicos.single.afectado, isTrue,
+          reason: 'servicio traido del servidor ⇒ el checkbox nace marcado');
     });
   });
 }

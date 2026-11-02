@@ -1,7 +1,7 @@
-﻿name: rea
+name: rea
 description: "Sistema de Reporte de Eventos Adversos - VIDECI"
 publish_to: 'none'
-version: 1.1.4+15
+version: 1.1.9+20
 
 environment:
   sdk: ^3.12.2
@@ -77,6 +77,8 @@ dependencies:
   
   # Markdown rendering
   flutter_markdown: ^0.7.7+1
+  share_plus: ^13.3.1
+  sqflite_common: ^2.5.14
 
 dev_dependencies:
   flutter_test:
@@ -88,9 +90,9 @@ flutter_launcher_icons:
   android: true
   ios: true
   remove_alpha_ios: true
-  image_path: "assets/images/REA_ICO.png"
+  image_path: "assets/images/LOGO_VIDECI_1024.png"
   adaptive_icon_background: "#FFFFFF"
-  adaptive_icon_foreground: "assets/images/REA_ICO_padded.png"
+  adaptive_icon_foreground: "assets/images/LOGO_VIDECI_foreground.png"
 
 flutter:
   uses-material-design: true

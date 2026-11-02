@@ -16,9 +16,10 @@ import 'ugr_evento.dart';
 import 'ugr_route.dart';
 import '../resp/edan/edan_form_wizard.dart';
 import '../resp/edan/edan_preview_resp_screen.dart';
+import '../../../widgets/edan_galeria_view.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 
-enum _VistaLocalidades { todos, sinConsolidar, consolidadas }
+enum _VistaLocalidades { todos, sinConsolidar, consolidadas, galeria }
 
 class UgrLocalidadesTab extends StatefulWidget {
   final VoidCallback? onVistaChanged;
@@ -61,12 +62,30 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
   final Set<int> _seleccionadas = {};
   _VistaLocalidades _vistaActual = _VistaLocalidades.todos;
 
-  void refresh() => _cargarDatos();
+  /// La galería es un widget propio con su estado/carga; esta clave permite
+  /// refrescarla cuando `ugr_screen` llama a `refresh()` (cambio de pestaña,
+  /// tras consolidar, etc.).
+  final GlobalKey<EdanGaleriaViewState> _galeriaKey =
+      GlobalKey<EdanGaleriaViewState>();
+
+  void refresh() {
+    _cargarDatos();
+    _galeriaKey.currentState?.refresh();
+  }
 
   bool get mostrarFabConsolidar =>
       !_modoConsolidacion &&
+      _vistaActual != _VistaLocalidades.galeria &&
       (_vistaActual == _VistaLocalidades.sinConsolidar || _vistaActual == _VistaLocalidades.todos) &&
       _localidades.where((l) => l.idEdan == null || l.idEdan == 0).isNotEmpty;
+
+  /// La vista actual es la Galería de fotos del municipio: `ugr_screen` usa
+  /// esto para ocultar sus FABs (consolidar/crear no aplican a las fotos).
+  bool get vistaGaleria => _vistaActual == _VistaLocalidades.galeria;
+
+  /// Modo consolidación activo (con checks): `ugr_screen` oculta el FAB de
+  /// crear mientras dura, y `PopScope` usa el estado para el botón atrás.
+  bool get modoConsolidacion => _modoConsolidacion;
 
   void activarConsolidacion() => _activarModoConsolidacion();
 
@@ -143,11 +162,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
       await _resincronizarBadges(localidades);
 
-      localidades.sort((a, b) {
-        final fa = a.fechaModificacion ?? '';
-        final fb = b.fechaModificacion ?? '';
-        return fb.compareTo(fa);
-      });
+      // Más reciente arriba por FECHA DE LLENADO (sin llenado: por modificación).
+      localidades.sort(compararRecientePrimero);
       if (mounted) {
         setState(() {
           _localidades = localidades;
@@ -166,10 +182,27 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     }
   }
 
+  /// Consolidable = entra en la dinámica del checkbox: aprobado por el UGR,
+  /// aún sin EDAN y (si ya hay algo seleccionado) del MISMO tipo de evento
+  /// que la selección — el servidor solo consolida un EDAN por evento.
+  bool _esConsolidable(EdanLocalidad l) {
+    if (l.estadoLocalidad != UgrLocalidadEstado.aprobadoUgr) return false;
+    if (l.idEdan != null && l.idEdan != 0) return false;
+    final tipo = _tipoEventoSeleccionado;
+    if (tipo != null && l.idTipoEvento != null && l.idTipoEvento != tipo) {
+      return false;
+    }
+    return true;
+  }
+
   List<EdanLocalidad> get _filtradas {
     var list = _localidades;
 
-    if (_vistaActual == _VistaLocalidades.sinConsolidar) {
+    if (_modoConsolidacion) {
+      // En modo consolidación SOLO se muestran las localidades que pueden
+      // marcarse con el check: el resto es ruido y confunde.
+      list = list.where(_esConsolidable).toList();
+    } else if (_vistaActual == _VistaLocalidades.sinConsolidar) {
       list = list.where((l) => l.idEdan == null || l.idEdan == 0).toList();
     } else if (_vistaActual == _VistaLocalidades.consolidadas) {
       list = list.where((l) => l.idEdan != null && l.idEdan! > 0).toList();
@@ -185,11 +218,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       }).toList();
     }
 
-    list.sort((a, b) {
-      final fa = a.fechaModificacion ?? '';
-      final fb = b.fechaModificacion ?? '';
-      return fb.compareTo(fa);
-    });
+    // Más reciente arriba por FECHA DE LLENADO (sin llenado: por modificación).
+    list.sort(compararRecientePrimero);
 
     return list;
   }
@@ -251,6 +281,9 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       _modoConsolidacion = true;
       _seleccionadas.clear();
     });
+    // El padre (ugr_screen) debe reconstruirse: oculta el FAB de crear y
+    // re-evalua su PopScope del boton atras.
+    widget.onVistaChanged?.call();
   }
 
   void _cancelarModoConsolidacion() {
@@ -258,6 +291,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       _modoConsolidacion = false;
       _seleccionadas.clear();
     });
+    widget.onVistaChanged?.call();
   }
 
   Future<void> _vistaPreviaConsolidacion() async {
@@ -466,15 +500,56 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
   @override
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
-    return Column(
-      children: [
-        if (_resumen != null) _buildResumen(primary),
-        if (_modoConsolidacion) _buildConsolidacionBar(primary),
-        if (!_modoConsolidacion && _error == null) _buildSearchField(primary),
-        Expanded(child: _error != null && _localidades.isEmpty
-            ? _buildErrorState(primary)
-            : _buildGroupedList(primary)),
-      ],
+    return PopScope(
+      // Botón atrás físico: si hay modo consolidación activo, lo primero que
+      // hace es salir de los checks (sin irse de la pantalla); solo cuando ya
+      // no se está consolidando deja pasar el pop normal.
+      canPop: !_modoConsolidacion,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _cancelarModoConsolidacion();
+      },
+      child: Column(
+        children: [
+          if (_resumen != null) _buildResumen(primary),
+          if (_modoConsolidacion) _buildConsolidacionBar(primary),
+          if (!_modoConsolidacion &&
+              _error == null &&
+              _vistaActual != _VistaLocalidades.galeria)
+            _buildSearchField(primary),
+          Expanded(
+            child: _vistaActual == _VistaLocalidades.galeria
+                ? _buildGaleria()
+                : _error != null && _localidades.isEmpty
+                    ? _buildErrorState(primary)
+                    : _buildGroupedList(primary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Galería de fotos del municipio (widget compartido con el rol 7): todas
+  /// las localidades del UGR, con el responsable de cada una, coordenadas de
+  /// la fila dueña sobre cada miniatura y visor con zoom + compartir.
+  Widget _buildGaleria() {
+    final muni = _idMunicipio;
+    if (muni == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'El usuario no tiene municipio asignado',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: AppColors.textSecondary),
+          ),
+        ),
+      );
+    }
+    return EdanGaleriaView(
+      key: _galeriaKey,
+      showAutor: true,
+      carga: () => EdanStoreV2.instance
+          .listarFotosGaleriaPorMunicipio(idMunicipio: muni),
     );
   }
 
@@ -536,6 +611,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
                   onTap: () {
                     setState(() {
                       _vistaActual = _VistaLocalidades.todos;
+                      _modoConsolidacion = false;
+                      _seleccionadas.clear();
                     });
                     widget.onVistaChanged?.call();
                   },
@@ -553,6 +630,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
                   onTap: () {
                     setState(() {
                       _vistaActual = _VistaLocalidades.sinConsolidar;
+                      _modoConsolidacion = false;
+                      _seleccionadas.clear();
                     });
                     widget.onVistaChanged?.call();
                   },
@@ -570,6 +649,8 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
                   onTap: () {
                     setState(() {
                       _vistaActual = _VistaLocalidades.consolidadas;
+                      _modoConsolidacion = false;
+                      _seleccionadas.clear();
                     });
                     widget.onVistaChanged?.call();
                   },
@@ -578,6 +659,27 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
                     value: '$consolidadas',
                     color: AppColors.aprobado,
                     highlighted: _vistaActual == _VistaLocalidades.consolidadas,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // No es un filtro: es la OTRA vista del tab (fotos del
+              // municipio con su responsable). Mismo gesto de cambio de vista.
+              Expanded(
+                child: GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _vistaActual = _VistaLocalidades.galeria;
+                      _modoConsolidacion = false;
+                    });
+                    widget.onVistaChanged?.call();
+                  },
+                  child: _ResumenChip(
+                    label: 'Galería',
+                    value: '📷',
+                    color: Colors.teal,
+                    highlighted:
+                        _vistaActual == _VistaLocalidades.galeria,
                   ),
                 ),
               ),
@@ -630,13 +732,15 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
             const Icon(Icons.location_on_outlined, size: 64, color: AppColors.textSecondary),
             const SizedBox(height: 12),
             Text(
-              _query.isNotEmpty
-                  ? 'Sin resultados'
-                  : _vistaActual == _VistaLocalidades.sinConsolidar
-                      ? 'No hay localidades sin consolidar'
-                      : _vistaActual == _VistaLocalidades.consolidadas
-                          ? 'No hay localidades consolidadas'
-                          : 'No hay localidades',
+              _modoConsolidacion
+                  ? 'No hay más localidades consolidables con la selección actual'
+                  : _query.isNotEmpty
+                      ? 'Sin resultados'
+                      : _vistaActual == _VistaLocalidades.sinConsolidar
+                          ? 'No hay localidades sin consolidar'
+                          : _vistaActual == _VistaLocalidades.consolidadas
+                              ? 'No hay localidades consolidadas'
+                              : 'No hay localidades',
               style: const TextStyle(fontSize: 14, color: AppColors.textSecondary),
             ),
           ],
@@ -1051,31 +1155,95 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     }
   }
 
+  /// Barra del modo consolidación: tarjeta compacta.
+  ///
+  /// Cabecera con icono + título 'Modo consolidación' + subtítulo de estado
+  /// (dos líneas propias con todo el ancho: 'Seleccione localidades
+  /// aprobadas' ya no se parte palabra por palabra) y ✕ de salida. Cuerpo: la
+  /// única acción ('Vista previa EDAN') alineada a la derecha — sin caja
+  /// 'Cancelar' que recortaba la palabra; para salir están el ✕, el botón
+  /// atrás del sistema y los chips de vista.
   Widget _buildConsolidacionBar(Color primary) {
     final count = _seleccionadas.length;
     return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
       width: double.infinity,
-      color: primary.withValues(alpha: 0.08),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      child: Row(
+      decoration: BoxDecoration(
+        color: primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: primary.withValues(alpha: 0.35)),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 10, 8, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Icon(Icons.check_circle, size: 18, color: primary),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              count > 0 ? '$count seleccionada(s)' : 'Seleccione localidades aprobadas',
-              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: primary),
-            ),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.14),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.layers, size: 16, color: primary),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Modo consolidación',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: primary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      count == 0
+                          ? 'Toca las localidades aprobadas'
+                          : '$count seleccionada${count == 1 ? '' : 's'} · '
+                              'mismo evento',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Salir del modo consolidar',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close,
+                    size: 20, color: AppColors.textSecondary),
+                onPressed: _cancelarModoConsolidacion,
+              ),
+            ],
           ),
-          FilledButton.icon(
-            onPressed: count >= 1 ? _vistaPreviaConsolidacion : null,
-            icon: const Icon(Icons.preview, size: 18),
-            label: const Text('Vista previa EDAN'),
-            style: FilledButton.styleFrom(
-              backgroundColor: primary,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: AppColors.divider,
-              disabledForegroundColor: AppColors.textSecondary,
+          const SizedBox(height: 4),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.icon(
+              onPressed: count >= 1 ? _vistaPreviaConsolidacion : null,
+              icon: const Icon(Icons.preview, size: 16),
+              label: const Text('Vista previa EDAN',
+                  style: TextStyle(fontSize: 12.5)),
+              style: FilledButton.styleFrom(
+                backgroundColor: primary,
+                foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.divider,
+                disabledForegroundColor: AppColors.textSecondary,
+                visualDensity: VisualDensity.compact,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
             ),
           ),
         ],
@@ -1108,7 +1276,19 @@ class _ResumenChip extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(value, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: color)),
-          Text(label, style: TextStyle(fontSize: 10, color: color.withValues(alpha: 0.7))),
+          // Con 4 chips el ancho por chip es ~80dp: sin FittedBox, etiquetas
+          // largas ('Sin consolidar') partían en dos líneas y la fila de
+          // contadores quedaba desalineada.
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                  fontSize: 10, color: color.withValues(alpha: 0.7)),
+            ),
+          ),
         ],
       ),
     );

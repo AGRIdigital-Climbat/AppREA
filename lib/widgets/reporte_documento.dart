@@ -237,6 +237,36 @@ class ReporteDocMapa extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final primary = PaletteScope.of(context).primary;
+    // Coordenadas no-finitas (NaN/Infinity o fuera de rango) harían que
+    // flutter_map reviente en CADA frame ("north latitude ... NaN"): si el
+    // dato viene malo, se pinta un placeholder en vez del mapa.
+    final coordsOk = lat.isFinite &&
+        lon.isFinite &&
+        lat.abs() <= 90 &&
+        lon.abs() <= 180;
+    if (!coordsOk) {
+      return Container(
+        height: height,
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.all(Radius.circular(8)),
+        ),
+        child: const Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.location_off_outlined,
+                  color: AppColors.textSecondary, size: 28),
+              SizedBox(height: 4),
+              Text(
+                'Coordenadas no disponibles',
+                style: TextStyle(fontSize: 11, color: AppColors.textSecondary),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return ClipRRect(
       borderRadius: BorderRadius.circular(8),
       child: SizedBox(
@@ -251,8 +281,9 @@ class ReporteDocMapa extends StatelessWidget {
           ),
           children: [
             TileLayer(
-              urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-              userAgentPackageName: 'rea',
+              // Sin clave (2026-11-02): ArcGIS exigía API key; OSM es libre.
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.climbat.edan',
             ),
             MarkerLayer(
               markers: [

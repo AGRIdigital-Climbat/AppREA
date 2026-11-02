@@ -1,5 +1,10 @@
 # Rol 6 — Unidad de Gestión de Recurso (UGR)
 
+> **Nota de vigencia (2026-10-19).** El envío de localidades ya no usa
+> `/edan/localidades/{id}/documento` (ruta eliminada). Usa
+> `POST/PUT /edan/formularios/completo`. El mapa actualizado pantalla → API
+> está en [`MAPA_APIS_WEB_EDAN.md`](./MAPA_APIS_WEB_EDAN.md).
+
 ## 1. Resumen del Rol
 
 La **Unidad de Gestión de Recurso (UGR)** es el rol intermedio en la cadena EDAN. Sus responsabilidades principales son:

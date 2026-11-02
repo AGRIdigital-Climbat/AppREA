@@ -169,8 +169,8 @@ void main() {
     expect(fila.coordenadaLat, closeTo(-16.5024179, 1e-6));
   });
 
-  // Cadena EXACTA de la pantalla rol 7 RESP (`resp_dashboard_tab` +
-  // `resp_edan_localidad_tab`): pull vivo textual (2 formularios con
+  // Cadena EXACTA de la pantalla rol 7 RESP (pestaña Reportes de
+  // `resp_dashboard_tab`): pull vivo textual (2 formularios con
   // `id_usuario: 30`, 4 tombstones ajenos) → `listarReportes(usuarioId: 30)`
   // → `aplicarFlagsDesdeSeccionesActivas` + `aplicarGruposServidorAlModelo` →
   // badges. Fija que el filtro por usuario encuentra las filas del pull y que

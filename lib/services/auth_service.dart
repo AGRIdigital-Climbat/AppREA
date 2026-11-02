@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_roles.dart';
+import 'app_logger.dart';
 import '../models/usuario.dart';
 import '../services/api_service.dart';
 
@@ -44,6 +46,27 @@ class AuthService {
 
   Future<void> initialize() async {
     _prefs = await SharedPreferences.getInstance();
+    // Cambio de esquema (DatabaseHelper._onUpgrade escribe db_migrated=true
+    // al hacer DROP+CREATE): la BD local queda vacia, pero la SESION no
+    // depende de ella. Antes se forzaba logout y por eso cada actualizacion
+    // con migracion devolvia la app al login. Ahora solo se reinician los
+    // flags informativos de sync: AuthProvider.initialize() detecta la
+    // sesion restaurada y dispara el sync completo, rellenando la BD vacia.
+    final migrado = _prefs!.getBool('db_migrated') ?? false;
+    if (migrado) {
+      debugPrint('DB migrada: sesion conservada, flags de sync reiniciados');
+      AppLogger.instance.auth(
+        titulo: 'Migración BD: sesión conservada',
+        detalle: 'first_sync_done_* reiniciados; la recarga completa la '
+            'dispara AuthProvider.initialize() con la sesion activa',
+      );
+      for (final key in _prefs!.getKeys().toList()) {
+        if (key.startsWith('first_sync_done_')) {
+          _prefs!.remove(key);
+        }
+      }
+      await _prefs!.remove('db_migrated');
+    }
     await _autoLogin();
   }
 
@@ -63,21 +86,40 @@ class AuthService {
 
       if (token != null && token.isNotEmpty) {
         final idRol = idRolStr != null ? int.tryParse(idRolStr) : null;
+        if (!AppRoles.puedeIngresar(idRol)) {
+          debugPrint('Sesion de rol $idRol sin acceso a la app, cerrando');
+          await logout();
+          return;
+        }
+
         DateTime? lastLogin;
         if (lastLoginStr != null) {
           lastLogin = DateTime.tryParse(lastLoginStr);
         }
 
-        final tokenVigente = await _verificarToken(token, idRol, lastLogin);
-        if (tokenVigente) {
-          if (!AppRoles.puedeIngresar(idRol)) {
-            debugPrint('Sesion de rol $idRol sin acceso a la app, cerrando');
-            await logout();
-            return;
-          }
-          await _loadUserProfile();
-          return;
+        // Con token guardado la sesion SIEMPRE se restaura: el JWT del
+        // servidor no expira, y una ventana de vigencia vencida o un
+        // arranque sin red no deben obligar a escribir la contrasena de
+        // nuevo tras una actualizacion.
+        await _loadUserProfile();
+        AppLogger.instance.auth(
+          titulo: 'Sesión restaurada (auto-login)',
+          detalle: 'usuario=${_currentToken?.usuario ?? usuario ?? '?'} '
+              'rol=$_idRol',
+        );
+
+        final vigente = await _verificarToken(token, idRol, lastLogin);
+        if (!vigente &&
+            usuario != null &&
+            usuario.isNotEmpty &&
+            contrasena != null &&
+            contrasena.isNotEmpty) {
+          // Ventana vencida (p. ej. rol 6 con mas de 3 dias): re-login
+          // silencioso en segundo plano para refrescar token y last_login.
+          // Si falla (offline), la sesion restaurada sigue viva.
+          unawaited(_reloginSilencioso(usuario, contrasena));
         }
+        return;
       }
 
       if (usuario != null && usuario.isNotEmpty && 
@@ -89,11 +131,62 @@ class AuthService {
         }
       }
 
+      final hayCredenciales = (usuario != null && usuario.isNotEmpty) &&
+          (contrasena != null && contrasena.isNotEmpty);
+      if (!hayCredenciales) {
+        // Nada recuperable guardado: arranque limpio (pantalla de login).
+        await logout();
+        return;
+      }
+      if (_ultimoErrorRolNoPermitido) {
+        // El servidor revoco el rol: unica razon para borrar lo guardado.
+        await logout();
+        return;
+      }
+      // El login con credenciales fallo por otra causa (sin red, servidor
+      // caido): se CONSERVAN credenciales y has_logged_in para reintentar
+      // en el proximo arranque. Antes terminaba en logout() y borraba todo,
+      // dejando la app en login permanente tras actualizar sin cobertura.
       _currentToken = null;
-      await logout();
-    } catch (e) {
+      AppLogger.instance.auth(
+        titulo: 'Auto-login fallido: credenciales conservadas',
+        detalle: 'se reintenta en el próximo arranque',
+        nivel: AppLogLevel.warn,
+      );
+    } catch (e, s) {
       debugPrint('Error en auto-login: $e');
       _currentToken = null;
+      AppLogger.instance.error(
+        titulo: 'Error en auto-login: $e',
+        exception: e,
+        stack: s,
+      );
+    }
+  }
+
+  /// Refresco silencioso del token cuando la ventana de vigencia vencio
+  /// (p. ej. rol 6 tras 3 dias): corre en segundo plano y NUNCA tumba la
+  /// sesion restaurada. Solo un "rol sin acceso" explicito del servidor la
+  /// cierra; cualquier otro fallo (offline incluido) se ignora y se
+  /// reintentara en el proximo arranque.
+  Future<void> _reloginSilencioso(String usuario, String contrasena) async {
+    final ok = await login(usuario, contrasena);
+    if (ok) {
+      AppLogger.instance.auth(
+        titulo: 'Re-login silencioso: ventana de vigencia renovada',
+      );
+    } else if (_ultimoErrorRolNoPermitido) {
+      AppLogger.instance.auth(
+        titulo: 'Re-login silencioso: rol revocado, sesión cerrada',
+        nivel: AppLogLevel.warn,
+      );
+      await logout();
+    } else {
+      AppLogger.instance.auth(
+        titulo: 'Re-login silencioso fallido: sesión conservada',
+        detalle: 'se reintenta en el próximo arranque',
+        nivel: AppLogLevel.warn,
+      );
     }
   }
 

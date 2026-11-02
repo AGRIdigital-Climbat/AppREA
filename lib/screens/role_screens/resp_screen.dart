@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../../config/theme.dart';
-import '../../models/edan.dart';
 import '../../providers/connectivity_provider.dart';
 import '../../providers/reporte_provider.dart';
 import '../../services/auth_service.dart';
@@ -14,12 +13,12 @@ import '../../services/api/edan_api_v2.dart';
 import '../../services/edan/edan_store_v2.dart';
 import '../../services/sync/edan_sync_engine_v2.dart';
 import '../../services/sync_debug_config.dart';
-import '../../screens/sync_debug_screen.dart';
+import '../../screens/app_debug_screen.dart';
 import '../../widgets/perfil_tab.dart';
 import '../../widgets/asistente_ia.dart';
 import 'resp/resp_dashboard_tab.dart';
 import 'resp/edan/edan_form_wizard.dart';
-import 'resp/resp_edan_localidad_tab.dart';
+import 'resp/resp_galeria_tab.dart';
 import 'resp/resp_guia_tab.dart';
 import 'resp/resp_mapa_tab.dart';
 import 'ugr/ugr_route.dart';
@@ -36,7 +35,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   bool _wasOnline = true;
   ConnectivityProvider? _connectivity;
   final _dashboardTabKey = GlobalKey<RespDashboardTabState>();
-  final _edanTabKey = GlobalKey<RespEdanLocalidadTabState>();
+  final _galeriaTabKey = GlobalKey<RespGaleriaTabState>();
   final _mapaTabKey = GlobalKey<RespMapaTabState>();
 
   /// Evita apilar auto-syncs si la red parpadea
@@ -85,7 +84,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   /// en SQLite listo para sincronizar).
   void _onPrimeraDescarga() {
     _dashboardTabKey.currentState?.refresh();
-    _edanTabKey.currentState?.refresh();
+    _galeriaTabKey.currentState?.refresh();
     _mapaTabKey.currentState?.refresh();
     _refrescarContadores();
     final error = EdanStoreV2.instance.ultimoErrorPrimeraDescarga;
@@ -283,11 +282,11 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
         actions: [
           if (kSyncDebugMode)
             IconButton(
-              tooltip: 'Depuración Sync',
+              tooltip: 'Debug · Registro de la app (24 h)',
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => const SyncDebugScreen(),
+                    builder: (_) => const AppDebugScreen(),
                   ),
                 );
               },
@@ -350,10 +349,9 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
                 children: [
                   RespDashboardTab(
                     key: _dashboardTabKey,
-                    onVerEnReportes: _verEnReportes,
                     onSync: () => _sincronizar(auto: false),
                   ),
-                  RespEdanLocalidadTab(key: _edanTabKey),
+                  RespGaleriaTab(key: _galeriaTabKey),
                   // Diseño limpio: el mapa RESP lee solo tablas V2 (inyectado; el
                   // fallback legacy del widget queda para UGR).
                   RespMapaTab(
@@ -382,7 +380,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
             case 0:
               _dashboardTabKey.currentState?.refresh();
             case 1:
-              _edanTabKey.currentState?.refresh();
+              _galeriaTabKey.currentState?.refresh();
             case 2:
               _mapaTabKey.currentState?.refresh();
           }
@@ -394,14 +392,14 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
         type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
-            label: 'Inicio',
+            icon: Icon(Icons.summarize_outlined),
+            activeIcon: Icon(Icons.summarize),
+            label: 'Reportes',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.assessment_outlined),
-            activeIcon: Icon(Icons.assessment),
-            label: 'Reportes',
+            icon: Icon(Icons.photo_library_outlined),
+            activeIcon: Icon(Icons.photo_library),
+            label: 'Galería',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.map_outlined),
@@ -523,7 +521,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     if (!mounted) return;
 
     _dashboardTabKey.currentState?.refresh();
-    _edanTabKey.currentState?.refresh();
+    _galeriaTabKey.currentState?.refresh();
     _refrescarContadores();
 
     if (auto &&
@@ -566,11 +564,6 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     );
   }
 
-  void _verEnReportes(UgrLocalidadEstado? estado) {
-    setState(() => _selectedIndex = 1);
-    _edanTabKey.currentState?.aplicarFiltro(estado);
-  }
-
   Widget _buildFabs() {
     final reporte = _buildReporteFab();
     return Column(
@@ -588,9 +581,9 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   Widget? _buildReporteFab() {
     switch (_selectedIndex) {
       case 0:
-      case 1:
-        // Inicio y Reportes: el `+` abre directo el wizard EDAN.
+        // Reportes: el `+` abre directo el wizard EDAN (Galería no crea).
         return FloatingActionButton(
+          heroTag: 'fab_nuevo_reporte',
           onPressed: () => _abrirWizardDirecto(),
           tooltip: 'Nuevo reporte',
           backgroundColor: PaletteScope.of(context).primary,
@@ -613,7 +606,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     if (creado != true || !mounted) return;
 
     _dashboardTabKey.currentState?.refresh();
-    _edanTabKey.currentState?.refresh();
+    _galeriaTabKey.currentState?.refresh();
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Reporte guardado correctamente.'),
@@ -625,9 +618,9 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   String _getTabTitle() {
     switch (_selectedIndex) {
       case 0:
-        return 'Inicio';
-      case 1:
         return 'Reportes';
+      case 1:
+        return 'Galería';
       case 2:
         return 'Mapa';
       case 3:
@@ -635,7 +628,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       case 4:
         return 'Perfil';
       default:
-        return 'Inicio';
+        return 'Reportes';
     }
   }
 }

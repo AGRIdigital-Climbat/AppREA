@@ -44,6 +44,13 @@ class _EdanPage10State extends State<EdanPage10> {
   @override
   void initState() {
     super.initState();
+    // A prueba de borradores contaminados por guardados previos al contrato
+    // (filas legacy sin id + sintéticas de padding conviviendo en
+    // `filas_seccion`): la edición SIEMPRE muestra los 8 grupos del catálogo,
+    // fusionados por id. Es el mismo `completarSet8` de la hidratación,
+    // idempotente cuando la lista ya viene limpia.
+    widget.localidad.proteccion =
+        EdanGrupoVulnerable.completarSet8(widget.localidad.proteccion);
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final rp = context.read<ReporteProvider>();
       await rp.fetchGruposVulnerablesIfNeeded();
@@ -59,12 +66,29 @@ class _EdanPage10State extends State<EdanPage10> {
         final idPorNombre = <String, int>{
           for (final c in catalogo) _normNombre(c.nombre): c.idGrupoVulnerable,
         };
+        final nombrePorId = <int, String>{
+          for (final c in catalogo)
+            if (c.nombre.trim().isNotEmpty) c.idGrupoVulnerable: c.nombre,
+        };
         for (final g in l.proteccion) {
-          if (g.idGrupoVulnerableCatalogo != null) continue;
+          // Sentido id→nombre: la hidratación desde `filas_seccion` llega sin
+          // `nombre_grupo` (el `toApiJson` no lo envía, el servidor rechaza
+          // campos extra) y el checkbox se pintaba sin enunciado. El catálogo
+          // es la fuente del texto; si ya trae nombre, el del catálogo manda
+          // (nombres oficiales).
+          final id = g.idGrupoVulnerableCatalogo;
+          if (id != null) {
+            final nombre = nombrePorId[id];
+            if (nombre != null && nombre != g.nombreGrupo) {
+              g.nombreGrupo = nombre;
+            }
+            continue;
+          }
+          // Sentido nombre→id (modelo sembrado por defaults sin catálogo).
           final nombre = g.nombreGrupo;
           if (nombre == null || nombre.isEmpty) continue;
-          final id = idPorNombre[_normNombre(nombre)];
-          if (id != null) g.idGrupoVulnerableCatalogo = id;
+          final idN = idPorNombre[_normNombre(nombre)];
+          if (idN != null) g.idGrupoVulnerableCatalogo = idN;
         }
       }
       if (mounted) setState(() {});
@@ -192,12 +216,16 @@ class _EdanPage10State extends State<EdanPage10> {
     final marcado = _marcado(g);
     final applied = _ctrl(g);
 
-    return Container(
+    // Card (Material) en lugar de Container decorado: el `CheckboxListTile`
+    // pinta su fondo y su ripple sobre el Material más cercano; con un
+    // BoxDecoration en medio quedaban invisibles (aviso del framework).
+    return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+      elevation: 0,
+      color: const Color(0xFFF8FAFC),
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        side: const BorderSide(color: Color(0xFFE2E8F0)),
       ),
       child: Column(
         children: [

@@ -12,6 +12,7 @@ import '../models/provincia.dart';
 import '../models/municipio.dart';
 import '../models/usuario.dart';
 import '../services/debug_log.dart';
+import 'app_logger_http.dart';
 import 'sync_debug_config.dart';
 import 'sync_debug_collector.dart';
 import 'auth_service.dart';
@@ -144,7 +145,7 @@ class ApiService {
 
   Future<TokenResponse> login(String usuario, String contrasena) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse('${ApiConfig.authEndpoint}/login'),
         headers: {
           'Content-Type': 'application/json',
@@ -173,7 +174,7 @@ class ApiService {
     int? idProvincia,
     int? idMunicipio,
   }) async {
-    final response = await http.post(
+    final response = await LogHttp.post(
       Uri.parse('${ApiConfig.authEndpoint}/register'),
       headers: {
         'Content-Type': 'application/json',
@@ -207,7 +208,7 @@ class ApiService {
     required String comunidad,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse('${ApiConfig.authEndpoint}/verificar-identidad'),
         headers: {
           'Content-Type': 'application/json',
@@ -233,7 +234,7 @@ class ApiService {
     required String nuevaContrasena,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse('${ApiConfig.authEndpoint}/cambiar-contrasena'),
         headers: {
           'Content-Type': 'application/json',
@@ -250,7 +251,7 @@ class ApiService {
 
   Future<List<Departamento>> getDepartamentos() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.sharedEndpoint}/departamentos'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -267,7 +268,7 @@ class ApiService {
             '${ApiConfig.sharedEndpoint}/provincias?id_departamento=$idDepartamento')
         : Uri.parse('${ApiConfig.sharedEndpoint}/provincias');
     final response = await _requestWithRetry(() =>
-      http.get(uri, headers: _headers)
+      LogHttp.get(uri, headers: _headers)
           .timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
@@ -285,7 +286,7 @@ class ApiService {
     if (idDepartamento != null) params.add('id_departamento=$idDepartamento');
     final queryString = params.isNotEmpty ? '?${params.join('&')}' : '';
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.sharedEndpoint}/municipios$queryString'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -298,7 +299,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getMunicipioGeojson(int idMunicipio) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.sharedEndpoint}/municipios/$idMunicipio/geojson'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -312,9 +313,13 @@ class ApiService {
       final url = '${ApiConfig.baseUrl}/upload/descargar/$encodedPath';
       debugPrint('[downloadImage] GET $url');
       final sw = Stopwatch()..start();
-      final response = await http.get(
+      final response = await LogHttp.get(
         Uri.parse(url),
         headers: _headers,
+        // Ruta legacy: muchos `fotografia` apuntan a archivos que ya no
+        // existen en el servidor. El 404 es un resultado previsto (se pinta el
+        // placeholder), no un fallo de la app.
+        esErrorEsperado: true,
       ).timeout(const Duration(seconds: 30));
       sw.stop();
       debugPrint('[downloadImage] status=${response.statusCode} '
@@ -411,7 +416,7 @@ class ApiService {
         contentType: MediaType.parse(contentType),
       ));
 
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 30));
+      final streamedResponse = await LogHttp.sendMultipart(request).timeout(const Duration(seconds: 30));
       return http.Response.fromStream(streamedResponse);
     }
 
@@ -470,7 +475,7 @@ class ApiService {
           contentType: MediaType.parse(contentType),
         ));
         final streamedResponse =
-            await request.send().timeout(const Duration(seconds: 60));
+            await LogHttp.sendMultipart(request).timeout(const Duration(seconds: 60));
         return http.Response.fromStream(streamedResponse);
       }
 
@@ -508,7 +513,7 @@ class ApiService {
 
   Future<List<TipoEvento>> getTiposEvento() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/tipo-evento'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -521,7 +526,7 @@ class ApiService {
 
   Future<List<Cultivo>> getCultivos() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.sharedEndpoint}/cultivos'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -534,7 +539,7 @@ class ApiService {
 
   Future<List<PecuarioGrupo>> getPecuarioGrupos() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.sharedEndpoint}/pecuario'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -547,7 +552,7 @@ class ApiService {
 
   Future<List<GrupoVulnerableCatalogo>> getGruposVulnerables() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/grupo-vulnerable'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -560,7 +565,7 @@ class ApiService {
 
   Future<List<GrupoEtarioCatalogo>> getGruposEtarios() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/grupo-etario'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -580,7 +585,7 @@ class ApiService {
     
     final uri = Uri.parse('${ApiConfig.usuariosEndpoint}?${queryParams.join('&')}');
     final response = await _requestWithRetry(() =>
-      http.get(uri, headers: _headers).timeout(const Duration(seconds: 10))
+      LogHttp.get(uri, headers: _headers).timeout(const Duration(seconds: 10))
     );
     final body = await _handleResponse(response);
     final data = body['data'];
@@ -613,7 +618,7 @@ class ApiService {
     int idRol = 8,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse(ApiConfig.usuariosEndpoint),
         headers: _headers,
         body: jsonEncode({
@@ -643,7 +648,7 @@ class ApiService {
 
   Future<Usuario> getUsuario(int id) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -673,7 +678,7 @@ class ApiService {
     if (idMunicipio != null) data['id_municipio'] = idMunicipio;
 
     final response = await _requestWithRetry(() =>
-      http.put(
+      LogHttp.put(
         Uri.parse('${ApiConfig.usuariosEndpoint}/$id'),
         headers: _headers,
         body: jsonEncode(data),
@@ -702,7 +707,7 @@ class ApiService {
     if (esBorrador != null) params.add('es_borrador=$esBorrador');
     
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/?${params.join('&')}'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -726,7 +731,7 @@ class ApiService {
       'id_municipio=$idMunicipio',
     ];
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/?${params.join('&')}'),
         headers: _headers,
       ).timeout(const Duration(seconds: 30))
@@ -737,7 +742,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getEdanById(int id) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/$id'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -748,7 +753,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> createEdan(Map<String, dynamic> edan) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse('${ApiConfig.edanEndpoint}/'),
         headers: _headers,
         body: jsonEncode(edan),
@@ -760,7 +765,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> updateEdan(int id, Map<String, dynamic> edan) async {
     final response = await _requestWithRetry(() =>
-      http.put(
+      LogHttp.put(
         Uri.parse('${ApiConfig.edanEndpoint}/$id'),
         headers: _headers,
         body: jsonEncode(edan),
@@ -772,7 +777,7 @@ class ApiService {
 
   Future<void> deleteEdan(int id, {bool permanente = false}) async {
     final response = await _requestWithRetry(() =>
-      http.delete(
+      LogHttp.delete(
         Uri.parse('${ApiConfig.edanEndpoint}/$id?permanente=$permanente'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -796,7 +801,7 @@ class ApiService {
     params.add('es_borrador=false');
 
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/?${params.join('&')}'),
         headers: _headers,
       ).timeout(const Duration(seconds: 30))
@@ -811,7 +816,7 @@ class ApiService {
     int limit = 50,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/reportes/mis-reportes?id_usuario=$idUsuario&skip=$skip&limit=$limit'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -822,7 +827,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getTipoEvento() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/tipo-evento'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -833,7 +838,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getEstadosEdan() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/estados'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -848,7 +853,7 @@ class ApiService {
     required int idUsuario,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/mis-resumen?id_usuario=$idUsuario'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -870,7 +875,7 @@ class ApiService {
     final url = '${ApiConfig.edanLocalidadesEndpoint}/mis-reportes?${params.join('&')}';
     final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -904,7 +909,7 @@ class ApiService {
     final url = '${ApiConfig.edanLocalidadesEndpoint}/mis-estados?${params.join('&')}';
     final sw = Stopwatch()..start();
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse(url),
         headers: _headers,
       ).timeout(const Duration(seconds: 30))
@@ -927,7 +932,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> cambiarEstadoLocalidad(int idLocalidad, int idEstado) async {
     final response = await _requestWithRetry(() =>
-      http.put(
+      LogHttp.put(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/estado'),
         headers: _headers,
         body: jsonEncode({'id_edan_localidad_estado': idEstado}),
@@ -942,7 +947,7 @@ class ApiService {
   Future<List<Map<String, dynamic>>> listarProteccion(int idLocalidad) async {
     try {
       final response = await _requestWithRetry(() =>
-        http.get(
+        LogHttp.get(
           Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion'),
           headers: _headers,
         ).timeout(const Duration(seconds: 15))
@@ -961,7 +966,7 @@ class ApiService {
   Future<Map<String, dynamic>> crearProteccion(int idLocalidad, Map<String, dynamic> json) async {
     try {
       final response = await _requestWithRetry(() =>
-        http.post(
+        LogHttp.post(
           Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion'),
           headers: _headers,
           body: jsonEncode(json),
@@ -984,7 +989,7 @@ class ApiService {
 
   Future<void> eliminarProteccion(int idLocalidad, int idGrupo) async {
     await _requestWithRetry(() =>
-      http.delete(
+      LogHttp.delete(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/proteccion/$idGrupo'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1004,7 +1009,7 @@ class ApiService {
     final sw = Stopwatch()..start();
     try {
       final response = await _requestWithRetry(() =>
-        http.delete(
+        LogHttp.delete(
           Uri.parse(url),
           headers: _headers,
         ).timeout(const Duration(seconds: 30))
@@ -1113,7 +1118,7 @@ class ApiService {
     String idLocal,
   ) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/por-id-local/$idLocal'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1131,7 +1136,7 @@ class ApiService {
   }) async {
     final encodedEstado = Uri.encodeComponent(estado);
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/consolidar/pendientes?id_municipio=$idMunicipio&estado=$encodedEstado'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1146,7 +1151,7 @@ class ApiService {
     required List<int> localidadIds,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse('${ApiConfig.edanEndpoint}/consolidar'),
         headers: _headers,
         body: jsonEncode({
@@ -1165,7 +1170,7 @@ class ApiService {
     required int idTipoEvento,
   }) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse('${ApiConfig.edanEndpoint}/consolidar/auto'),
         headers: _headers,
         body: jsonEncode({
@@ -1180,7 +1185,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> desconsolidar(int idLocalidad) async {
     final response = await _requestWithRetry(() =>
-      http.put(
+      LogHttp.put(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/desconsolidar'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1191,7 +1196,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> deshacerEdan(int idEdan) async {
     final response = await _requestWithRetry(() =>
-      http.put(
+      LogHttp.put(
         Uri.parse('${ApiConfig.edanEndpoint}/$idEdan/deshacer'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1210,7 +1215,7 @@ class ApiService {
     };
     if (observaciones != null) bodyMap['observaciones'] = observaciones;
     final response = await _requestWithRetry(() =>
-      http.put(
+      LogHttp.put(
         Uri.parse('${ApiConfig.edanEndpoint}/$idEdan/estado'),
         headers: _headers,
         body: jsonEncode(bodyMap),
@@ -1222,7 +1227,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> consolidarEdanConLocalidades(dynamic edan) async {
     final response = await _requestWithRetry(() =>
-      http.post(
+      LogHttp.post(
         Uri.parse(ApiConfig.edanEndpoint),
         headers: _headers,
         body: jsonEncode(edan.toJson()),
@@ -1234,7 +1239,7 @@ class ApiService {
 
   Future<List<TipoLocalidad>> getTipoLocalidad() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/tipo-localidad'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -1247,7 +1252,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getLocalidadesMunicipio(int idMunicipio) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/municipio/$idMunicipio'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1258,7 +1263,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getResumenLocalidades(int idMunicipio) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/municipio/$idMunicipio/resumen'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1269,7 +1274,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getLocalidadesEstado() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanEndpoint}/localidades-estado'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -1281,7 +1286,7 @@ class ApiService {
   // Secciones 1:N de localidad
   Future<List<Map<String, dynamic>>> getLocalidadSeccion(int idLocalidad, String seccion) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/$seccion'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1307,7 +1312,7 @@ class ApiService {
     data.forEach((key, value) {
       if (value != null) request.fields[key] = value.toString();
     });
-    final streamedResponse = await request.send().timeout(const Duration(seconds: 90));
+    final streamedResponse = await LogHttp.sendMultipart(request).timeout(const Duration(seconds: 90));
     final response = await http.Response.fromStream(streamedResponse);
     final body = await _handleResponse(response);
     final creado = body['data'];
@@ -1321,7 +1326,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> listarTiposRepositorio() async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.repositorioEndpoint}/tipos'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -1332,7 +1337,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> listarDocumentosEdan(int idEdan) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.repositorioEndpoint}/edan/$idEdan/documentos'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1374,7 +1379,7 @@ class ApiService {
       if (observaciones != null && observaciones.isNotEmpty) {
         request.fields['observaciones'] = observaciones;
       }
-      final streamedResponse = await request.send().timeout(const Duration(seconds: 60));
+      final streamedResponse = await LogHttp.sendMultipart(request).timeout(const Duration(seconds: 60));
       return http.Response.fromStream(streamedResponse);
     }
 
@@ -1399,7 +1404,7 @@ class ApiService {
   }
 
   Future<List<int>> descargarDocRepositorio(int idDocumento) async {
-    final response = await http.get(
+    final response = await LogHttp.get(
       Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento/descargar'),
       headers: _headers,
     ).timeout(const Duration(seconds: 60));
@@ -1428,7 +1433,7 @@ class ApiService {
     if (nombre != null && nombre.isNotEmpty) params.add('nombre_documento_like=$nombre');
     final queryString = params.isNotEmpty ? '?${params.join('&')}' : '';
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/filtrar$queryString'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1439,7 +1444,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> buscarDocumentos(String query) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/buscar?q=$query'),
         headers: _headers,
       ).timeout(const Duration(seconds: 15))
@@ -1450,7 +1455,7 @@ class ApiService {
 
   Future<void> eliminarDocRepositorio(int idDocumento) async {
     final response = await _requestWithRetry(() =>
-      http.delete(
+      LogHttp.delete(
         Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -1460,7 +1465,7 @@ class ApiService {
 
   Future<void> eliminarDocRepositorioHard(int idDocumento) async {
     final response = await _requestWithRetry(() =>
-      http.delete(
+      LogHttp.delete(
         Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento/hard'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))
@@ -1470,7 +1475,7 @@ class ApiService {
 
   Future<Map<String, dynamic>> getDocRepositorio(int idDocumento) async {
     final response = await _requestWithRetry(() =>
-      http.get(
+      LogHttp.get(
         Uri.parse('${ApiConfig.repositorioEndpoint}/documentos/$idDocumento'),
         headers: _headers,
       ).timeout(const Duration(seconds: 10))

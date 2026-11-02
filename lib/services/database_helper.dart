@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/edan.dart';
 import '../models/id_seccion_helper.dart';
 import 'edan_secciones_registry.dart';
@@ -538,6 +539,17 @@ class DatabaseHelper {
       await db.execute('DROP TABLE IF EXISTS fotografias');
       await db.execute('DROP TABLE IF EXISTS cola_fotos');
       await _crearTablasV2(db);
+      // AuthService.initialize() detecta este flag: limpia first_sync_done_*,
+      // lo borra y CONSERVA la sesión (ya no fuerza logout: eso devolvía la
+      // app al login en cada actualización con migración). La recarga
+      // completa de la BD vacía la dispara AuthProvider.initialize() al
+      // encontrar la sesión restaurada.
+      // try/catch: en tests sin mock de SharedPreferences no debe romper la
+      // migración; en producción siempre está disponible.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool('db_migrated', true);
+      } catch (_) {}
       return;
     }
   }

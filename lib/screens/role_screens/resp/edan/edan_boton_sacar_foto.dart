@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../../config/api_config.dart';
 import '../../../../config/theme.dart';
@@ -441,6 +442,9 @@ class EdanBotonSacarFoto {
     double coordenadaLat = 0,
     double coordenadaLon = 0,
     String? seccion,
+    /// Etiqueta del chip superior. En el wizard es `'Respaldo - $seccion'`;
+    /// la Galería pasa el contexto completo (localidad · sección).
+    String? titulo,
     VoidCallback? onEliminada,
     bool soloLectura = false,
     EdanStore? store,
@@ -449,6 +453,12 @@ class EdanBotonSacarFoto {
     final lat = foto != null && foto.latitud != 0 ? foto.latitud : coordenadaLat;
     final lon = foto != null && foto.longitud != 0 ? foto.longitud : coordenadaLon;
     final precision = foto?.precision ?? 0;
+    // Ruta LOCAL compartible: la de la foto recién capturada o la de una
+    // descarga previa (Galería). Si la imagen solo vive en el servidor no se
+    // ofrece compartir (la Galería la baja primero al abrirla).
+    final compartible = foto != null && _esArchivoLocal(foto.ruta)
+        ? foto.ruta
+        : (_esArchivoLocal(fotografia) ? fotografia! : null);
     showDialog<void>(
       context: context,
       builder: (dialogCtx) {
@@ -469,7 +479,7 @@ class EdanBotonSacarFoto {
                   ),
                 ),
               ),
-              if (seccion != null)
+              if (seccion != null || titulo != null)
                 SafeArea(
                   child: Align(
                     alignment: Alignment.topLeft,
@@ -484,7 +494,7 @@ class EdanBotonSacarFoto {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        'Respaldo - $seccion',
+                        titulo ?? 'Respaldo - $seccion',
                         style: const TextStyle(
                           fontSize: 14,
                           color: Colors.white,
@@ -502,13 +512,48 @@ class EdanBotonSacarFoto {
                     children: [
                       Align(
                         alignment: Alignment.centerRight,
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.close,
-                            color: Colors.white,
-                            size: 28,
-                          ),
-                          onPressed: () => Navigator.of(dialogCtx).pop(),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (compartible != null)
+                              IconButton(
+                                tooltip: 'Compartir foto',
+                                icon: const Icon(
+                                  Icons.ios_share,
+                                  color: Colors.white,
+                                  size: 24,
+                                ),
+                                onPressed: () async {
+                                  try {
+                                    await SharePlus.instance.share(
+                                      ShareParams(
+                                        files: [XFile(compartible)],
+                                      ),
+                                    );
+                                  } catch (e) {
+                                    // Desktop/sin selector de compartir:
+                                    // aviso, nunca rompe el visor.
+                                    if (!dialogCtx.mounted) return;
+                                    ScaffoldMessenger.of(dialogCtx)
+                                        .showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                            'No se pudo compartir: $e'),
+                                      ),
+                                    );
+                                  }
+                                },
+                              ),
+                            IconButton(
+                              icon: const Icon(
+                                Icons.close,
+                                color: Colors.white,
+                                size: 28,
+                              ),
+                              onPressed: () =>
+                                  Navigator.of(dialogCtx).pop(),
+                            ),
+                          ],
                         ),
                       ),
                       const Spacer(),

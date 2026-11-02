@@ -1,5 +1,10 @@
 # Sistema REA – Evaluación de Daños y Análisis de Necesidades (EDAN)
 
+> **APIs vigentes (2026-10-19):** el flujo "todo-en-uno" por
+> `/edan/localidades/{id}/documento` fue reemplazado por
+> `POST/PUT /edan/formularios/completo`. Ver
+> [`MAPA_APIS_WEB_EDAN.md`](./MAPA_APIS_WEB_EDAN.md).
+
 Aplicación móvil multiplataforma desarrollada en Flutter para el levantamiento,
 registro y sincronización de reportes de daños por eventos adversos (SINAGER-SAT / VIDECI).
 
@@ -314,7 +319,7 @@ CREATE TABLE catalogo_tipos_repositorio (
 |--------|-----------|---------|
 | Auth | `/auth/login`, `/auth/register`, `/auth/forgot-password` | Autenticación y gestión de usuarios |
 | EDAN | `/edan/`, `/edan/{id}`, `/edan/consolidar`, `/edan/estado` | CRUD de EDANs, consolidación y estados |
-| Localidades | `/edan/localidades`, `/localidades/documento` | CRUD de localidades (flujo "todo-en-uno") |
+| Localidades | `/edan/formularios/completo`, `/edan/formularios/{uuid}/completo` | CRUD del documento completo (flujo "todo-en-uno" V2) |
 | Repositorio | `/repositorio/` | Gestión de documentos PDF asociados a EDANs |
 | Firma Digital | `/firma-digital/validar-pdf` | Validación de firmas digitales en PDFs |
 | Upload | `/upload`, `/foto/subir` | Subida de fotos y archivos multimedia |

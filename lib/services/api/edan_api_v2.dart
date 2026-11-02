@@ -7,6 +7,7 @@ import 'package:http_parser/http_parser.dart';
 
 import '../../config/api_config.dart';
 import '../api_service.dart';
+import '../app_logger.dart';
 import '../sync_debug_collector.dart';
 import '../sync_debug_config.dart';
 
@@ -229,7 +230,12 @@ class EdanApiV2 {
     });
   }
 
-  /// `GET /formularios`
+  /// `GET /formularios` — documentos completos (`cabecera` + secciones),
+  /// paginados (`limit`/`skip`, `todos=false`) y con scope por geografía.
+  ///
+  /// `modo` (query `modo`): `comprimido` (default del servidor: omite
+  /// secciones sin filas) o `completo` (las 14 secciones siempre, igual que
+  /// `GET /formularios/{uuid}/completo` sin parámetros).
   Future<EdanApiResult<List<Map<String, dynamic>>>> listarFormularios({
     int skip = 0,
     int limit = 100,
@@ -238,6 +244,7 @@ class EdanApiV2 {
     int? idProvincia,
     int? idMunicipio,
     String? localidad,
+    String? modo,
   }) async {
     final query = <String, String>{
       'skip': '$skip',
@@ -250,6 +257,7 @@ class EdanApiV2 {
     if (localidad != null && localidad.isNotEmpty) {
       query['localidad'] = localidad;
     }
+    if (modo != null && modo.isNotEmpty) query['modo'] = modo;
     final uri = Uri.parse('$baseUrl/formularios').replace(queryParameters: query);
     final res = await _get(uri.toString());
     return _unpackList<Map<String, dynamic>>(res, (e) => e as Map<String, dynamic>);
@@ -373,9 +381,11 @@ class EdanApiV2 {
     bool comprimido = false,
   }) async {
     final path = '$baseUrl/formularios/$uuidOrId/completo';
-    final uri = Uri.parse(path).replace(queryParameters: {
-      if (comprimido) 'comprimido': 'true',
-    });
+    // Sin `comprimido` NO se agregan query params: `replace(queryParameters: {})
+    // emitiría un `?` colgado (`/completo?`), visible en el depurador de sync.
+    final uri = Uri.parse(path).replace(
+        queryParameters:
+            comprimido ? const {'comprimido': 'true'} : null);
     final res = await _get(uri.toString());
     return _unpack<Map<String, dynamic>>(res, (d) => d ?? {});
   }
@@ -600,7 +610,7 @@ class EdanApiV2 {
     final path = ruta.startsWith('/') ? ruta : '/$ruta';
     final url = '${base.scheme}://${base.host}$path';
     try {
-      final res = await _get(url).timeout(timeout);
+      final res = await _get(url, previsto404: true).timeout(timeout);
       onHttpStatus?.call(res.statusCode);
       if (res.statusCode >= 200 && res.statusCode < 300) {
         return res.bodyBytes;
@@ -647,7 +657,8 @@ class EdanApiV2 {
 
   // ── HTTP helpers ──
 
-  Future<http.Response> _get(String url) => _instrumented(
+  Future<http.Response> _get(String url, {bool previsto404 = false}) =>
+      _instrumented(
         'GET',
         url,
         null,
@@ -655,6 +666,7 @@ class EdanApiV2 {
               Uri.parse(url),
               headers: _headers(),
             )),
+        esperado: previsto404,
       );
 
   Future<http.Response> _post(String url, dynamic body,
@@ -697,17 +709,66 @@ class EdanApiV2 {
   /// [kSyncDebugMode] está activo. **No altera** el resultado ni los errores:
   /// re-lanza tal cual. Cubre toda la superficie V2 (formularios, secciones,
   /// viviendas, fotos JSON, sync pull/push/ack), porque todas pasan por aquí.
+  ///
+  /// SIEMPRE deja huella completa en [AppLogger] (request y response crudos,
+  /// sin recortes) — incluso con [kSyncDebugMode] apagado o en tests que
+  /// inyectan un cliente falso.
+  ///
+  /// [esperado] marca la llamada como "puede fallar con 404 sin que sea un
+  /// problema" (descarga de bytes de foto); el 404 se registra en nivel `info`
+  /// y fuera del filtro de errores. Cualquier otro >=400 sigue siendo error.
   Future<http.Response> _instrumented(
     String metodo,
     String url,
     dynamic body,
-    Future<http.Response> Function() ejecutar,
-  ) async {
-    if (!kSyncDebugMode) return ejecutar();
+    Future<http.Response> Function() ejecutar, {
+    bool esperado = false,
+  }) async {
     final sw = Stopwatch()..start();
+    final reqTexto =
+        body == null ? null : (body is String ? body : jsonEncode(body));
+    if (!kSyncDebugMode) {
+      try {
+        final res = await ejecutar();
+        sw.stop();
+        AppLogger.instance.api(
+          metodo: metodo,
+          url: url,
+          estado: res.statusCode,
+          duracion: sw.elapsed,
+          request: reqTexto,
+          response: _respuestaCruda(res),
+          // Un 404 aquí es previsto: la foto ya no está en el servidor (legacy
+          // o eliminada). Se registra igual, pero sin nivel error ni «solo
+          // errores» (no hay nada que corregir).
+          esErrorEsperado: esperado && res.statusCode == 404,
+        );
+        return res;
+      } catch (e, s) {
+        sw.stop();
+        AppLogger.instance.api(
+          metodo: metodo,
+          url: url,
+          duracion: sw.elapsed,
+          request: reqTexto,
+          error: e.toString(),
+          stack: s,
+        );
+        rethrow;
+      }
+    }
     try {
       final res = await ejecutar();
       sw.stop();
+      AppLogger.instance.api(
+        metodo: metodo,
+        url: url,
+        estado: res.statusCode,
+        duracion: sw.elapsed,
+        request: reqTexto,
+        response: _respuestaCruda(res),
+        esErrorEsperado: esperado && res.statusCode == 404,
+      );
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
         metodo: metodo,
@@ -718,8 +779,16 @@ class EdanApiV2 {
         duracion: sw.elapsed,
       ));
       return res;
-    } catch (e) {
+    } catch (e, s) {
       sw.stop();
+      AppLogger.instance.api(
+        metodo: metodo,
+        url: url,
+        duracion: sw.elapsed,
+        request: reqTexto,
+        error: e.toString(),
+        stack: s,
+      );
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
         metodo: metodo,
@@ -732,19 +801,73 @@ class EdanApiV2 {
     }
   }
 
+  /// Cuerpo de respuesta crudo para el log de [AppLogger]: texto íntegro si es
+  /// legible; si es binario (descarga de fotos) o descomunal, descriptor con
+  /// tamaño y content-type. No se recorta contenido de texto.
+  static String _respuestaCruda(http.Response res) {
+    final tipo = res.headers['content-type'] ?? '';
+    final esTexto = tipo.contains('json') ||
+        tipo.contains('text') ||
+        tipo.contains('xml') ||
+        tipo.contains('html') ||
+        tipo.isEmpty;
+    if (!esTexto || res.bodyBytes.length > 2 * 1024 * 1024) {
+      return '[binario/grande: ${res.bodyBytes.length} bytes, $tipo]';
+    }
+    return res.body;
+  }
+
   /// Variante multipart (fotos): reporta los campos y el archivo en
   /// [SyncApiEntry.requestBodyRaw]. No altera el resultado ni los errores.
+  /// En [AppLogger] queda la respuesta cruda completa y el descriptor de
+  /// campos/archivos (nunca los bytes de la imagen).
   Future<http.Response> _instrumentedMultipart(
     String url,
     String resumenCampos,
     List<String> fotos,
     Future<http.Response> Function() ejecutar,
   ) async {
-    if (!kSyncDebugMode) return ejecutar();
     final sw = Stopwatch()..start();
+    if (!kSyncDebugMode) {
+      try {
+        final res = await ejecutar();
+        sw.stop();
+        AppLogger.instance.api(
+          metodo: 'POST',
+          url: url,
+          estado: res.statusCode,
+          duracion: sw.elapsed,
+          request: resumenCampos,
+          response: _respuestaCruda(res),
+          nota: 'multipart fotos: ${fotos.length}',
+        );
+        return res;
+      } catch (e, s) {
+        sw.stop();
+        AppLogger.instance.api(
+          metodo: 'POST',
+          url: url,
+          duracion: sw.elapsed,
+          request: resumenCampos,
+          error: e.toString(),
+          stack: s,
+          nota: 'multipart fotos: ${fotos.length}',
+        );
+        rethrow;
+      }
+    }
     try {
       final res = await ejecutar();
       sw.stop();
+      AppLogger.instance.api(
+        metodo: 'POST',
+        url: url,
+        estado: res.statusCode,
+        duracion: sw.elapsed,
+        request: resumenCampos,
+        response: _respuestaCruda(res),
+        nota: 'multipart fotos: ${fotos.length}',
+      );
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
         metodo: 'POST',
@@ -756,8 +879,17 @@ class EdanApiV2 {
         duracion: sw.elapsed,
       ));
       return res;
-    } catch (e) {
+    } catch (e, s) {
       sw.stop();
+      AppLogger.instance.api(
+        metodo: 'POST',
+        url: url,
+        duracion: sw.elapsed,
+        request: resumenCampos,
+        error: e.toString(),
+        stack: s,
+        nota: 'multipart fotos: ${fotos.length}',
+      );
       SyncDebugCollector.instance.add(SyncApiEntry(
         fase: SyncDebugCollector.instance.currentPhase,
         metodo: 'POST',

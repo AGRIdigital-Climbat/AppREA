@@ -1841,6 +1841,68 @@ void main() {
           reason: 'el push local manda: el tombstone se re-evalúa sin sucio');
     });
 
+    test('checks locales (afectado/marcado) no rompen el confirm del contador',
+        () async {
+      // Regresión 2026-10-18: el wire borra `afectado`/`marcado`/`rango`
+      // legacy pero `firmaContenido` los leía de `datos_json` → firmas
+      // divergentes → `limpio=false` eterno → `pendiente_push` nunca se
+      // limpiaba (badge "Sincronizar (1 pendientes)" pegado + re-PUT en
+      // cada sync, respondiendo "Documento sin cambios").
+      await _seedFormulario('u-check',
+          localidad: 'Las Lomas', pendientePush: 1);
+      await _seedFila(
+        'sb-check', 'u-check',
+        tipo: 'servicios-basicos',
+        datos: jsonEncode({
+          'uuid_registro': 'sb-check',
+          'tipo': 'AGUA',
+          'afectado': true,
+        }),
+      );
+      await _seedFila(
+        'im-check', 'u-check',
+        tipo: 'impacto-poblacion',
+        datos: jsonEncode({
+          'uuid_registro': 'im-check',
+          'id_grupo_etario': 1,
+          'marcado': true,
+          'rango': '0 a 14 años',
+        }),
+      );
+
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull(_pullVacio());
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        if (req.method == 'POST' &&
+            req.url.path.endsWith('/formularios/completo')) {
+          return _ok({
+            'resultados': [],
+            'aplicados': 1,
+            'errores': 0,
+            'mensaje': 'Documento sin cambios',
+          });
+        }
+        return _err(404, 'no');
+      });
+
+      final resumen =
+          await EdanSyncEngineV2(api: _api(client), db: db).sincronizar();
+
+      expect(resumen.exito, isTrue);
+      expect(resumen.enviados, 1);
+      expect(resumen.errores, 0);
+      final form = await (await db.database).query('formularios',
+          where: 'uuid_edan_localidad = ?', whereArgs: ['u-check']);
+      expect(form.first['pendiente_push'], 0,
+          reason: 'el 200 con errores=0 confirma: las firmas coinciden');
+      expect(await EdanStoreV2.instance.contarLocalidadesPendientes(), 0,
+          reason: 'el badge del contador llega a 0 (misma fuente que la UI)');
+    });
+
     test('sin red deja la fila pendiente y no avanza', () async {
       await _seedFormulario('u-n');
       await _seedCola('formulario', 'u-n', 'C');
@@ -3729,6 +3791,128 @@ void main() {
       expect(extras, isEmpty,
           reason: 'cero claves fuera del schema (riesgo 422)');
       expect(payload['uuid_edan_localidad'], 'u-sub');
+    });
+  });
+
+  group('push → reconciliación sin re-GET (2026-10-18)', () {
+    test('PUT 200 con `formulario` embebido: NO se emite GET /completo y la '
+        'fila queda confirmada', () async {
+      await _seedFormulario('u-mirror', localidad: 'Lm', pendientePush: 1,
+          datosJson: '{}');
+      await _seedFila('fila-mirror', 'u-mirror', estado: 'pendiente');
+      var getsCompletos = 0;
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull(_pullVacio());
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        if ((req.method == 'PUT' || req.method == 'POST') &&
+            req.url.path.endsWith('/formularios/completo')) {
+          // El servidor responde con el documento completo embebido (como en
+          // vivo, 2026-10-18): no debe hacer falta ningún re-GET.
+          return _ok({
+            'hubo_cambios': false,
+            'cambios': [],
+            'aplicados': 0,
+            'errores': 0,
+            'formulario': {
+              'cabecera': {
+                'uuid_edan_localidad': 'u-mirror',
+                'localidad': 'Lm',
+                'id_edan_localidad_estado': 1,
+                'imp_danos_agricultura': true,
+                'grup_agropecuario': true,
+              },
+              'danos_agricultura': [
+                {
+                  'uuid_registro': 'fila-mirror',
+                  'id_dano_agricultura': 900,
+                  'tipo_cultivo': 'MAIZ',
+                  'fallecidos': 0,
+                },
+              ],
+              'fotos': [],
+            },
+          });
+        }
+        if (req.method == 'GET' && req.url.path.contains('/completo')) {
+          getsCompletos++;
+          return _err(500, 'no debe pedirse');
+        }
+        return _ok();
+      });
+
+      final resumen = await EdanSyncEngineV2(api: _api(client), db: db)
+          .sincronizar();
+
+      expect(getsCompletos, 0,
+          reason: 'el espejo embebido en el 200 elimina el re-GET');
+      expect(resumen.exito, isTrue);
+      final fila = await (await db.database).query('filas_seccion',
+          where: 'uuid_registro = ?', whereArgs: ['fila-mirror']);
+      expect(fila.first['estado_sync'], 'confirmado');
+      // El espejo corre ANTES del confirm y `_normalizarDocCompleto` tiene
+      // el guard `_esLocalidadSucia` (pendiente_push=1 → retorna temprano):
+      // es no-op mientras el formulario está sucio, igual que el re-GET
+      // viejo (misma posición en el flujo). Lo que el push SÍ debe lograr
+      // es confirmar filas y limpiar el pendiente.
+      final form = await (await db.database).query('formularios',
+          columns: ['pendiente_push'],
+          where: 'uuid_edan_localidad = ?',
+          whereArgs: ['u-mirror']);
+      expect(form.first['pendiente_push'], 0,
+          reason: 'la recepción confirmada con 200 limpia el pendiente');
+    });
+
+    test('PUT 200 SIN documento embebido + re-GET que muere en red: la '
+        'confirmación NO revienta (best-effort de verdad)', () async {
+      await _seedFormulario('u-fallback', localidad: 'Lf', pendientePush: 1,
+          datosJson: '{}');
+      await _seedFila('fila-fallback', 'u-fallback', estado: 'pendiente');
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull(_pullVacio());
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        if ((req.method == 'PUT' || req.method == 'POST') &&
+            req.url.path.endsWith('/formularios/completo')) {
+          return _ok({'hubo_cambios': false, 'errores': 0});
+        }
+        if (req.method == 'GET' && req.url.path.contains('/completo')) {
+          throw http.ClientException('Failed host lookup (simulada)');
+        }
+        return _ok();
+      });
+
+      final resumen = await EdanSyncEngineV2(api: _api(client), db: db)
+          .sincronizar();
+
+      expect(resumen.exito, isTrue,
+          reason: 'el 200 ya confirmó la recepción: una caída de red en la '
+              'relectura no puede revertirla');
+      final fila = await (await db.database).query('filas_seccion',
+          where: 'uuid_registro = ?', whereArgs: ['fila-fallback']);
+      expect(fila.first['estado_sync'], 'confirmado');
+    });
+
+    test('URL de relectura sin `?` colgado cuando no va comprimida',
+        () async {
+      Uri? capturada;
+      final client = MockClient((req) async {
+        capturada = req.url;
+        return _ok({
+          'cabecera': {'uuid_edan_localidad': 'u-url'},
+          'fotos': [],
+        });
+      });
+      await _api(client).obtenerFormularioCompleto('u-url');
+      expect(capturada!.query, isEmpty,
+          reason: '`Uri.replace(queryParameters: {})` emitía `/completo?`');
+      expect(capturada!.path, endsWith('/formularios/u-url/completo'));
     });
   });
 }

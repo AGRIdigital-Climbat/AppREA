@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../config/app_roles.dart';
+import '../services/app_logger.dart';
 import '../services/auth_service.dart';
 import '../services/api/edan_api_v2.dart';
 import '../services/edan_sync_service.dart';
@@ -57,6 +58,16 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     final success = await _authService.login(usuario, contrasena);
+    AppLogger.instance.auth(
+      titulo: success
+          ? 'Login OK usuario=$usuario'
+          : 'Login FALLIDO usuario=$usuario',
+      detalle: success
+          ? 'user_id=${_authService.userId} '
+              'rol=${_authService.idRol} (${_authService.rolName ?? '?'})'
+          : _errorDeLogin(),
+      nivel: success ? AppLogLevel.info : AppLogLevel.warn,
+    );
 
     _isLoading = false;
     if (!success) {
@@ -226,6 +237,7 @@ class AuthProvider extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    AppLogger.instance.auth(titulo: 'Logout (usuario cerrado)');
     await _authService.logout();
     notifyListeners();
   }

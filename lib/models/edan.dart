@@ -234,13 +234,16 @@ class EdanGrupoEtario {
         'marcado': marcado,
       };
 
-  /// JSON para la API: igual que [toJson] pero SIN `marcado` (campo interno
-  /// de la UI que no debe enviarse al servidor).
+  /// JSON para la API. Lleva `marcado` —igual que `afectado` en servicios—
+  /// para que el check del grupo sobreviva el round-trip por `datos_json`:
+  /// `prepararPayloadCompleto` lo remueve del wire (la tabla
+  /// `edan_localidades_impacto_poblacion` no tiene esa columna y daría 400).
   Map<String, dynamic> toApiJson() => {
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
         if (idGrupoEtario != null) 'id_grupo_etario': idGrupoEtario,
         'rango': rango,
+        'marcado': marcado,
         'fallecidos': fallecidos,
         'heridos': heridos,
         'desaparecidos': desaparecidos,
@@ -248,6 +251,60 @@ class EdanGrupoEtario {
       };
 
   bool get tieneDatos => fallecidos > 0 || heridos > 0 || desaparecidos > 0;
+
+  /// El set EXACTO de los 4 grupos etarios del catálogo (ids 1-4) para las
+  /// vistas (resumen del wizard, previews UGR/RESP): los grupos que llegan se
+  /// fusionan por id (con nombre canónico de respaldo si viene vacío), los
+  /// que faltan se rellenan en ceros y los ajenos al catálogo se agregan al
+  /// final para no esconder datos. Espejo visual del contrato §20.10.E del
+  /// POST (si el flag es true viajan las 4 filas exactas, 0 incluido).
+  static List<EdanGrupoEtario> completarSet4(List<EdanGrupoEtario> grupos) {
+    const canon = <int, String>{
+      1: 'Niño (a) 0-5 años',
+      2: 'Escolar de 6-18 años',
+      3: 'Adulto de 19-60 años',
+      4: 'Adulto mayor de 60 años adelante',
+    };
+    final porId = <int, EdanGrupoEtario>{};
+    final extras = <EdanGrupoEtario>[];
+    for (final g in grupos) {
+      final id = g.idGrupoEtario;
+      if (id == null || !canon.containsKey(id)) {
+        extras.add(g);
+        continue;
+      }
+      final prev = porId[id];
+      bool contenido(EdanGrupoEtario g) =>
+          g.marcado ||
+          g.tieneDatos ||
+          g.observaciones.trim().isNotEmpty;
+      if (prev == null) {
+        porId[id] = g;
+      } else if (contenido(g) && !contenido(prev)) {
+        // Choque de duplicados (borrador contaminado: huérfana legacy +
+        // sintética de padding, o doble legacy): el slot se lo queda la
+        // fila con contenido (check, números u observaciones); la vacía
+        // se descarta (Gap-2 la purga de `filas_seccion`).
+        porId[id] = g;
+      } else if (contenido(g) && contenido(prev)) {
+        // Ambas con contenido: ninguna se esconde.
+        extras.add(g);
+      }
+    }
+    final out = <EdanGrupoEtario>[];
+    for (final e in canon.entries) {
+      final g = porId[e.key];
+      if (g == null) {
+        out.add(
+            EdanGrupoEtario(rango: e.value, idGrupoEtarioCatalogo: e.key));
+      } else {
+        if (g.rango.trim().isEmpty) g.rango = e.value;
+        out.add(g);
+      }
+    }
+    out.addAll(extras);
+    return out;
+  }
 }
 
 class EdanImpactoPoblacion {
@@ -896,7 +953,7 @@ class EdanServicioBasicoDetalle with EdanFotoHolder {
 
   factory EdanServicioBasicoDetalle.fromJson(Map<String, dynamic> json) {
     final fotosRaw = json['fotos'];
-    return EdanServicioBasicoDetalle(
+    final item = EdanServicioBasicoDetalle(
       idSeccion: uuidFilaDe(json),
       tipo: _str(json['tipo']),
       afectado: _toBool(json['afectado'] ?? json['impactado']),
@@ -915,6 +972,24 @@ class EdanServicioBasicoDetalle with EdanFotoHolder {
           ? (json['fecha_modificacion_local']?.toString())
           : json['fecha_modificacion']?.toString(),
     );
+    // El check "afectado" es un dato LOCAL: el servidor no tiene la columna
+    // (rechazaría el POST) y los datos guardados antes de 2026-10-18 no lo
+    // serializan. Si el JSON no trae ninguna de las dos claves, el marcado se
+    // deriva del contenido de la fila (una fila de servicios que existe con
+    // daño/necesidades/observaciones/foto/coords ES un servicio afectado).
+    // Las filas en ceros absolutos —como la contaminación legacy de la siembra
+    // de page06— siguen naciendo desmarcadas y Gap-2 las purga al guardar.
+    if (!json.containsKey('afectado') && !json.containsKey('impactado')) {
+      item.afectado = item.danoParcial ||
+          item.danoTotal ||
+          item.necesidadesInmediatas.trim().isNotEmpty ||
+          item.observaciones.trim().isNotEmpty ||
+          item.fotos.isNotEmpty ||
+          (item.fotografia?.isNotEmpty ?? false) ||
+          item.coordenadaLat != 0 ||
+          item.coordenadaLon != 0;
+    }
+    return item;
   }
 
   Map<String, dynamic> toJson() => {
@@ -931,10 +1006,16 @@ class EdanServicioBasicoDetalle with EdanFotoHolder {
         'coordenada_lon': coordenadaLon,
       };
 
+  /// JSON de la fila. Lleva `afectado` para que el check sobreviva el round-trip
+  /// por `filas_seccion`/snapshot: el motor lo REMUEVE antes del POST
+  /// (`prepararPayloadCompleto`), porque la tabla del servidor
+  /// `edan_localidades_servicios_basicos` no tiene esa columna y respondería
+  /// 400 "campo desconocido o no escribible".
   Map<String, dynamic> toApiJson() => {
         'id_seccion': idSeccion,
         'fecha_modificacion': EdanLocalidad.toBoliviaIso(fechaModificacion),
         'tipo': tipo,
+        'afectado': afectado,
         'dano_parcial': danoParcial,
         'dano_total': danoTotal,
         'necesidades_inmediatas': necesidadesInmediatas,
@@ -1609,6 +1690,52 @@ class EdanGrupoVulnerable {
       (reposicionDocumentos == true) ||
       observaciones.trim().isNotEmpty;
 
+  /// El set EXACTO de los 8 grupos vulnerables del catálogo (ids 1-8) para
+  /// las vistas, con la misma regla que [EdanGrupoEtario.completarSet4]:
+  /// fusión por id (nombre canónico de respaldo), relleno en ceros de los
+  /// que faltan y extras al final. Espejo visual del contrato §20.11.
+  static List<EdanGrupoVulnerable> completarSet8(
+      List<EdanGrupoVulnerable> grupos) {
+    final porId = <int, EdanGrupoVulnerable>{};
+    final extras = <EdanGrupoVulnerable>[];
+    for (final g in grupos) {
+      final id = g.idGrupoVulnerable;
+      if (id == null || id < 1 || id > 8) {
+        extras.add(g);
+        continue;
+      }
+      final prev = porId[id];
+      if (prev == null) {
+        porId[id] = g;
+      } else if (g.tieneDatos && !prev.tieneDatos) {
+        // Mismo choque de duplicados que `completarSet4` (legacy huérfana +
+        // sintética de padding): gana la fila con datos; la cero se descarta
+        // (Gap-2 la purga de `filas_seccion` en el próximo guardado).
+        porId[id] = g;
+      } else if (g.tieneDatos && prev.tieneDatos) {
+        // Ambas con datos: ninguna se esconde.
+        extras.add(g);
+      }
+    }
+    final out = <EdanGrupoVulnerable>[];
+    for (var i = 1; i <= 8; i++) {
+      final g = porId[i];
+      if (g == null) {
+        out.add(EdanGrupoVulnerable(
+          idGrupoVulnerableCatalogo: i,
+          nombreGrupo: EdanLocalidad.nombreGrupoVulnerablePorId(i),
+        ));
+      } else {
+        if ((g.nombreGrupo?.trim().isNotEmpty ?? false) == false) {
+          g.nombreGrupo = EdanLocalidad.nombreGrupoVulnerablePorId(i);
+        }
+        out.add(g);
+      }
+    }
+    out.addAll(extras);
+    return out;
+  }
+
   factory EdanGrupoVulnerable.fromJson(Map<String, dynamic> json) {
     final grupoRaw = json['grupo'];
     String? nombreGrupo;
@@ -2062,15 +2189,35 @@ class EdanLocalidad {
   List<Map<String, String>> seccionesEliminadas;
 
   static List<EdanGrupoVulnerable> _proteccionPorDefecto() => [
-        EdanGrupoVulnerable(nombreGrupo: 'Niñas y niños 0-5 años'),
-        EdanGrupoVulnerable(nombreGrupo: 'Niñas y niños 6-12 años'),
-        EdanGrupoVulnerable(nombreGrupo: 'Adolescentes'),
-        EdanGrupoVulnerable(nombreGrupo: 'Mujeres lactantes'),
-        EdanGrupoVulnerable(nombreGrupo: 'Mujeres embarazadas'),
-        EdanGrupoVulnerable(nombreGrupo: 'Adultos mayores'),
-        EdanGrupoVulnerable(nombreGrupo: 'Personas con discapacidad'),
-        EdanGrupoVulnerable(nombreGrupo: 'Personas con enfermedad crónica'),
+        for (final n in _kNombresGrupoVulnerable)
+          EdanGrupoVulnerable(nombreGrupo: n),
       ];
+
+  /// Nombres canónicos del catálogo v2 `grupo_vulnerable` en orden de id
+  /// (1-8). Única copia del texto: alimenta los defaults de arriba, el
+  /// respaldo de enunciado en hidratación/vistas y
+  /// [nombreGrupoVulnerablePorId].
+  static const List<String> _kNombresGrupoVulnerable = [
+    'Niñas y niños 0-5 años',
+    'Niñas y niños 6-12 años',
+    'Adolescentes',
+    'Mujeres lactantes',
+    'Mujeres embarazadas',
+    'Adultos mayores',
+    'Personas con discapacidad',
+    'Personas con enfermedad crónica',
+  ];
+
+  /// Enunciado canónico del catálogo para un `id_grupo_vulnerable_catalogo`
+  /// (1-8). Último respaldo en resumen/visualización cuando la fila hidratada
+  /// no trae nombre y el catálogo cacheado tampoco estaba disponible; `null`
+  /// para ids fuera del catálogo.
+  static String? nombreGrupoVulnerablePorId(int? id) {
+    if (id == null || id < 1 || id > _kNombresGrupoVulnerable.length) {
+      return null;
+    }
+    return _kNombresGrupoVulnerable[id - 1];
+  }
 
   static List<EdanGrupoVulnerable> proteccionDesdeCatalogo(
       List<dynamic> catalogo) {
@@ -2190,6 +2337,23 @@ class EdanLocalidad {
 
   factory EdanLocalidad.empty() => EdanLocalidad();
 
+  /// Los documentos del servidor (`GET /formularios`, `GET /edan/{id}` y
+  /// `GET /formularios/{uuid}/completo`) envuelven la cabecera bajo el nodo
+  /// `cabecera` y dejan las secciones al nivel superior. El parser trabaja
+  /// con el doc plano (cabecera al nivel superior, como el `toJson` propio).
+  /// Si no hay nodo `cabecera`, devuelve el doc tal cual: compatibilidad con
+  /// snapshots locales planos, card maps y docs sin wrapper.
+  static Map<String, dynamic> desempaquetarCabecera(Map<String, dynamic> doc) {
+    final cabecera = doc['cabecera'];
+    if (cabecera is! Map) return doc;
+    final flat = Map<String, dynamic>.from(doc);
+    flat.remove('cabecera');
+    for (final e in cabecera.entries) {
+      flat[e.key] = e.value;
+    }
+    return flat;
+  }
+
   factory EdanLocalidad.fromJson(Map<String, dynamic> json) {
     List<T> parseList<T>(dynamic value, T Function(Map<String, dynamic>) parser) {
       if (value is List) {
@@ -2210,6 +2374,21 @@ class EdanLocalidad {
         dynamic value, T Function(Map<String, dynamic>) parser) {
       if (value is Map) return [parser(Map<String, dynamic>.from(value))];
       return parseList<T>(value, parser);
+    }
+
+    /// Secciones **1:1** (`necesidad_primera_respuesta`, `necesidad_salud`,
+    /// `necesidad_humanitaria`): son objeto único en `toJson` propio, pero el
+    /// servidor las devuelve como **lista de 0..1 filas** (`[]` sin datos,
+    /// `[fila]` con datos). Ambas formas se leen con el mismo parser; cualquier
+    /// otra cosa queda en `null` sin tumbar el documento.
+    T? parse1a1<T>(dynamic value, T Function(Map<String, dynamic>) parser) {
+      if (value is Map) return parser(Map<String, dynamic>.from(value));
+      if (value is List) {
+        for (final m in value.whereType<Map>()) {
+          return parser(Map<String, dynamic>.from(m));
+        }
+      }
+      return null;
     }
 
     // Nodo `grupos` del `GET /completo` (los 9 `grup_*` anidados) frente al
@@ -2364,16 +2543,12 @@ class EdanLocalidad {
       impProteccion: _toBool(json['imp_proteccion']),
       impNecesidadHumanitaria: _toBool(json['imp_necesidad_humanitaria']),
       impactoPoblacion: impactoPoblacion,
-      necesidadPrimeraRespuesta: json['necesidad_primera_respuesta'] is Map
-          ? EdanNecesidadPrimeraRespuesta.fromJson(
-              Map<String, dynamic>.from(json['necesidad_primera_respuesta'] as Map))
-          : null,
+      necesidadPrimeraRespuesta: parse1a1(json['necesidad_primera_respuesta'],
+          EdanNecesidadPrimeraRespuesta.fromJson),
       establecimientosSalud: parseObjetoOLista(
           json['establecimientos_salud'], EdanEstablecimientoSalud.fromJson),
-      necesidadSalud: json['necesidad_salud'] is Map
-          ? EdanNecesidadSalud.fromJson(
-              Map<String, dynamic>.from(json['necesidad_salud'] as Map))
-          : null,
+      necesidadSalud:
+          parse1a1(json['necesidad_salud'], EdanNecesidadSalud.fromJson),
       danosViales:
           parseObjetoOLista(json['danos_viales'], EdanDanoVial.fromJson),
       danosInfraPublica: parseObjetoOLista(
@@ -2390,10 +2565,8 @@ class EdanLocalidad {
       infraProductiva: parseObjetoOLista(
           json['infra_productiva'], EdanInfraProductiva.fromJson),
       proteccion: proteccion,
-      necesidadHumanitaria: json['necesidad_humanitaria'] is Map
-          ? EdanNecesidadHumanitaria.fromJson(
-              Map<String, dynamic>.from(json['necesidad_humanitaria'] as Map))
-          : null,
+      necesidadHumanitaria: parse1a1(json['necesidad_humanitaria'],
+          EdanNecesidadHumanitaria.fromJson),
       seccionesEliminadas: _parseSeccionesEliminadas(json['secciones_eliminadas']),
     );
     localidad.deduplicarSecciones();
@@ -3346,10 +3519,14 @@ class Edan {
 
   factory Edan.fromJson(Map<String, dynamic> json) {
     final localidadesRaw = json['localidades'];
+    // Cada localidad del servidor viene envuelta en `{"cabecera": {...}, ...}`
+    // (GET /edan/{id}, /formularios…); se desempaqueta a plano antes del
+    // parser (passthrough si no hay nodo, para snapshots/card planos).
     final localidades = localidadesRaw is List
         ? localidadesRaw
             .whereType<Map>()
-            .map((m) => EdanLocalidad.fromJson(Map<String, dynamic>.from(m)))
+            .map((m) => EdanLocalidad.fromJson(EdanLocalidad
+                .desempaquetarCabecera(Map<String, dynamic>.from(m))))
             .toList()
         : <EdanLocalidad>[];
 
@@ -3736,7 +3913,9 @@ bool filaSeccionConDatos(String rutaV2, dynamic item) {
       // Dos formas según la punta: la expansión del store consulta por GRUPO
       // (`EdanGrupoEtario`), el guardado genérico por WRAPPER.
       if (item is EdanGrupoEtario) {
-        return item.marcado || item.tieneDatos;
+        return item.marcado ||
+            item.tieneDatos ||
+            item.observaciones.trim().isNotEmpty;
       }
       if (item is! EdanImpactoPoblacion) return true;
       return item.tieneDatosGlobales ||
@@ -3793,4 +3972,27 @@ bool filaSeccionConDatos(String rutaV2, dynamic item) {
     default:
       return true;
   }
+}
+
+/// Orden de listados de localidades (Inicio RESP, Reportes y Localidades
+/// UGR): **fecha de llenado más reciente arriba**. `fechaLlenado` es ISO
+/// ('2026-10-17' o fecha+hora), por lo que la comparación de strings ya es
+/// cronológica descendente. Las filas sin fecha de llenado (importaciones o
+/// borradores legacy) no se pierden: se ordenan entre sí por
+/// `fechaModificacion` (también descendente) y quedan después de las que sí
+/// tienen llenado.
+int compararRecientePrimero(EdanLocalidad a, EdanLocalidad b) {
+  final la = (a.fechaLlenado ?? '').trim();
+  final lb = (b.fechaLlenado ?? '').trim();
+  if (la.isNotEmpty && lb.isNotEmpty) {
+    final c = lb.compareTo(la);
+    if (c != 0) return c;
+  } else if (la.isNotEmpty) {
+    return -1;
+  } else if (lb.isNotEmpty) {
+    return 1;
+  }
+  final ma = (a.fechaModificacion ?? '').trim();
+  final mb = (b.fechaModificacion ?? '').trim();
+  return mb.compareTo(ma);
 }

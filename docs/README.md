@@ -143,7 +143,12 @@ Facilitar la recolección y reporte de eventos adversos (inundaciones, riadas, d
 
 ## API SINAGER-SAT
 
-**URL Base:** `https://aircraft-specialty-impaired-procedures.trycloudflare.com/api/v1`
+> **Vigente (2026-10-19):** `https://api.climbat.net/api/v2`.
+> El mapa completo pantalla → API para los roles 6 (UGR) y 7 (RESP), incluido el
+> wizard EDAN, está en [`MAPA_APIS_WEB_EDAN.md`](./MAPA_APIS_WEB_EDAN.md).
+> La tabla siguiente es histórica (API v1).
+
+**URL Base (histórica):** `https://aircraft-specialty-impaired-procedures.trycloudflare.com/api/v1`
 
 | Endpoint | Método | Descripción |
 |----------|--------|-------------|

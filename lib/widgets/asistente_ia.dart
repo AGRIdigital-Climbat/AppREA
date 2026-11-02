@@ -14,6 +14,10 @@ class AsistenteIaFab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FloatingActionButton.small(
+      // heroTag único: en resp_screen convive con el FAB «Nuevo reporte»
+      // (sin él, ambos heredan el tag default y el HeroController revienta
+      // al empujar cualquier ruta).
+      heroTag: 'asistente_ia_fab',
       tooltip: 'Asistente con IA',
       backgroundColor: fabColor ?? PaletteScope.of(context).primary,
       foregroundColor: Colors.white,
@@ -62,6 +66,7 @@ class AsistenteIaFormFab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FloatingActionButton.small(
+      heroTag: 'asistente_ia_form_fab',
       tooltip: 'Ayuda con esta sección',
       backgroundColor: fabColor ?? PaletteScope.of(context).primary,
       foregroundColor: Colors.white,

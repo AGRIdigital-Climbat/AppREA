@@ -13,6 +13,13 @@ class EdanSyncService {
   final ValueNotifier<bool> sincronizando = ValueNotifier(false);
   final ValueNotifier<bool> sincronizandoMunicipio = ValueNotifier(false);
 
+  /// Progreso del histórico del municipio (proceso propio del rol 6) para la
+  /// franja de UGR: fase legible + `hechas de total` por EDAN procesado.
+  /// `total == 0` = la lista todavía no llegó (el GET está en vuelo).
+  final ValueNotifier<String> faseMunicipio = ValueNotifier('');
+  final ValueNotifier<int> municipioTotal = ValueNotifier(0);
+  final ValueNotifier<int> municipioHechas = ValueNotifier(0);
+
 
   /// Descarga los EDANs del municipio del usuario (todos los usuarios de ese
   /// municipio) y los guarda localmente. Se dispara tras login/registro de
@@ -23,9 +30,14 @@ class EdanSyncService {
   }) async {
     if (sincronizandoMunicipio.value) return;
     sincronizandoMunicipio.value = true;
+    faseMunicipio.value = 'Consultando EDANs del municipio...';
+    municipioTotal.value = 0;
+    municipioHechas.value = 0;
     try {
       final lista = await ApiService.instance
           .listarEdansPorMunicipio(idMunicipio);
+      municipioTotal.value = lista.length;
+      faseMunicipio.value = 'Guardando histórico del municipio';
       for (final item in lista) {
         try {
           final edan = Edan.fromJson(item);
@@ -54,12 +66,18 @@ class EdanSyncService {
         } catch (e) {
           debugPrint('Error cargando EDAN del municipio: $e');
         }
+        // Se cuenta también el ítem que falló: lo que mide la barra es
+        // avance del lote, no éxitos.
+        municipioHechas.value = municipioHechas.value + 1;
       }
       await recargarPendientes();
     } catch (e) {
       debugPrint('Error cargando EDANs del municipio: $e');
     } finally {
       sincronizandoMunicipio.value = false;
+      faseMunicipio.value = '';
+      municipioTotal.value = 0;
+      municipioHechas.value = 0;
     }
   }
 

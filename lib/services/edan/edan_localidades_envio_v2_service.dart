@@ -193,6 +193,14 @@ class EdanLocalidadesEnvioV2Service {
         servicio.asignarIdSeccionSiFalta(localidad, _prefijoDeRuta(ruta));
         _asignarId11SiFalta(localidad, ruta);
         final filas = servicio.filasGuardar(localidad);
+        for (final f in filas) {
+          // `afectado`/`impactado`/`marcado` (checks locales que `toApiJson`
+          // sí persiste en `filas_seccion`): las tablas legacy `seccion_*`
+          // no tienen esas columnas y el INSERT fallaría.
+          f.remove('afectado');
+          f.remove('impactado');
+          f.remove('marcado');
+        }
         if (filas.isEmpty && desc.tipo == EdanSeccionTipo.unoAUno) {
           // "Vaciado" de 1:1: si existía fila sincronizada, coordinarla para
           // DELETE (el servidor es la ley; una 1:1 vacía no persiste fila).

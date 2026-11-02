@@ -4,6 +4,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../../models/edan.dart';
 import '../api/edan_api_v2.dart';
+import '../app_logger.dart';
 import '../auth_service.dart';
 import '../sync/edan_sync_engine_v2.dart';
 import 'edan_store_v2.dart';
@@ -67,6 +68,11 @@ class EdanEnvioV2 {
       dirFotos = null; // sin disco: el motor omite la descarga de fotos
     }
 
+    AppLogger.instance.sync(
+      titulo: 'Enviar EDAN: inicio',
+      detalle: 'uuid=$uuid destino_estado=$idEdanLocalidadEstado',
+    );
+
     final engine = EdanSyncEngineV2(
       api: EdanApiV2(),
       dirFotos: dirFotos,
@@ -80,6 +86,12 @@ class EdanEnvioV2 {
       idEdanLocalidadEstado: idEdanLocalidadEstado,
     );
     ultimoErrorDiagnostico = ok ? null : engine.ultimoErrorDiagnostico; // TEMP DIAG (borrar)
+    AppLogger.instance.sync(
+      titulo: 'Enviar EDAN: ${ok ? 'CONFIRMADO' : 'FALLÓ'}',
+      detalle: 'uuid=$uuid destino_estado=$idEdanLocalidadEstado'
+          '${ok ? '' : ' error=${engine.ultimoErrorDiagnostico ?? 'sin detalle'}'}',
+      nivel: ok ? AppLogLevel.info : AppLogLevel.error,
+    );
 
     if (ok) {
       localidad

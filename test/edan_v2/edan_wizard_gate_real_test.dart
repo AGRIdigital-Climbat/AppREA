@@ -78,12 +78,8 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
 
-    final prev = FlutterError.onError;
-    FlutterError.onError = (d) {
-      if (d.toString().contains('ListTile background color')) return;
-      prev?.call(d);
-    };
-    addTearDown(() => FlutterError.onError = prev);
+    // Sin silenciador de la queja del `CheckboxListTile`: los bloques del
+    // wizard van sobre `Card` (Material) y el aviso ya no se emite.
 
     await tester.pumpWidget(
       PaletteScope(
@@ -157,7 +153,7 @@ void main() {
     await tester.tap(find.widgetWithText(ElevatedButton, 'Siguiente'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-    expect(find.text('Paso 3 de 6'), findsOneWidget);
+    expect(find.text('Paso 3 de 7'), findsOneWidget);
 
     // Page02 con los 3 totales > 0: habilitado.
     expect(boton(tester).onPressed, isNotNull);
@@ -165,7 +161,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
-    expect(find.text('Paso 4 de 6'), findsOneWidget,
+    expect(find.text('Paso 4 de 7'), findsOneWidget,
         reason: 'llegó a la página 03 (Impacto en la población)');
     expect(
       find.descendant(
@@ -247,12 +243,8 @@ void main() {
     tester.view.physicalSize = const Size(400, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    final prev = FlutterError.onError;
-    FlutterError.onError = (d) {
-      if (d.toString().contains('ListTile background color')) return;
-      prev?.call(d);
-    };
-    addTearDown(() => FlutterError.onError = prev);
+    // (sin silenciador: la queja del `CheckboxListTile` ya no se emite, los
+    // bloques del wizard van sobre `Card`)
 
     // El wizard dispara `_prepararSnapshot()` desde initState (consulta real
     // a `secciones_grupos_local`). Si el pump queda fuera de `runAsync`, la

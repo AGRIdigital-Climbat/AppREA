@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../services/app_logger.dart';
 import '../services/connectivity_service.dart';
 
 /// Puente entre [ConnectivityService] y la UI.
@@ -36,6 +37,14 @@ class ConnectivityProvider extends ChangeNotifier {
   void _suscribir() {
     if (_subscription != null) return;
     _subscription = _connectivityService.connectionStream.listen((connected) {
+      if (connected != _isConnected) {
+        AppLogger.instance.app(
+          titulo: connected
+              ? 'Red: conexión restablecida'
+              : 'Red: SIN conexión',
+          nivel: connected ? AppLogLevel.info : AppLogLevel.warn,
+        );
+      }
       _isConnected = connected;
       _chequeoCompletado = true;
       notifyListeners();

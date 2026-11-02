@@ -1,5 +1,19 @@
 # Localidad completa EDAN v2 — sync todo en uno (SIEMPRE compacto)
 
+> ## ⚠ DOCUMENTO OBSOLETO (2026-10-19)
+>
+> El flujo `/edan/localidades/{id}/documento` descrito aquí **ya no existe** en el
+> backend (responde 404). Fue reemplazado por:
+>
+> - `POST /edan/formularios/completo` (crear)
+> - `PUT /edan/formularios/completo` (editar)
+> - `GET /edan/formularios/{uuid|id}/completo` (leer)
+> - `DELETE /edan/formularios/{uuid}` (borrar)
+>
+> **Documento vigente:** [`MAPA_APIS_WEB_EDAN.md`](./MAPA_APIS_WEB_EDAN.md) y el
+> contrato detallado `PLAN_APIS_V2_EDAN.md`. Este archivo se conserva solo como
+> referencia histórica.
+
 > **Documento GLOBAL.** Este es el flujo recomendado para la app/web actual.
 > Reemplaza la sincronización sección por sección (ver `SQLITE_OFFLINE_APP.md`)
 > por **UN solo JSON de la localidad completa** que viaja en cada dirección: el

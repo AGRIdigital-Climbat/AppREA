@@ -1032,6 +1032,27 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
             final i = entry.key;
             final l = entry.value;
             final ip = _primerImpactoPoblacionConDatos(l.impactoPoblacion);
+            // Set EXACTO de 4 grupos del catálogo (§20.10.E): en la vista
+            // se ven siempre los 4, los vacíos en 0. Sin grupos anidados
+            // (documento legacy plano) cada fila con datos aporta su rango.
+            final grupos = EdanGrupoEtario.completarSet4([
+              if (ip != null)
+                if (ip.gruposEtarios.isNotEmpty)
+                  ...ip.gruposEtarios
+                else
+                  for (final p in l.impactoPoblacion
+                      .where((p) => p.tieneDatosGlobales))
+                    EdanGrupoEtario(
+                      rango: p.grupoEtario,
+                      fallecidos: p.fallecidos,
+                      heridos: p.heridos,
+                      desaparecidos: p.desaparecidos,
+                      observaciones: p.observaciones,
+                      marcado: true,
+                      idGrupoEtarioCatalogo:
+                          EdanGrupoEtario.resolverIdGrupoEtario(p.grupoEtario),
+                    ),
+            ]);
             return _bloqueLocalidad(i, l.etiquetaLugar, [
               if (ip != null) ...[
                 _dg([
@@ -1039,7 +1060,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
                   _df('Heridos', '${ip.heridos}'),
                   _df('Desaparecidos', '${ip.desaparecidos}'),
                 ]),
-                ..._gruposEtariosConDatos(ip.gruposEtarios).map((g) => _tb([
+                ...grupos.map((g) => _tb([
                       _tbRow('Grupo etario', _v(g.rango)),
                       _tbRow('Fallecidos', '${g.fallecidos}'),
                       _tbRow('Heridos', '${g.heridos}'),
@@ -1081,11 +1102,6 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       }
     }
     return null;
-  }
-
-  /// Filtra solo los grupos etarios que tienen al menos un dato > 0
-  List<EdanGrupoEtario> _gruposEtariosConDatos(List<EdanGrupoEtario> lista) {
-    return lista.where((g) => g.fallecidos > 0 || g.heridos > 0 || g.desaparecidos > 0).toList();
   }
 
   bool get _aplicaNecesidadesSalud {
@@ -1543,28 +1559,27 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     );
   }
 
-/// Muestra solo grupos vulnerables que tienen datos (mujeres > 0, hombres > 0,
-  /// total > 0, o flags activados)
+  /// Set EXACTO de 8 grupos vulnerables del catálogo (§20.11): en la vista
+  /// se ven siempre los 8, los vacíos en 0 y los apoyos como Sí/No/—.
   List<Widget> _filasProteccionFiltradas(List<EdanGrupoVulnerable> grupos) {
-    final conDatos = grupos.where((g) =>
-        g.mujeres > 0 ||
-        g.hombres > 0 ||
-        g.total > 0 ||
-        g.apoyoPsicologico == true ||
-        g.reposicionDocumentos == true).toList();
-    if (conDatos.isEmpty) return [_vacio()];
-    return conDatos.map((g) => Padding(
+    String siNo(bool? v) => v == null ? '—' : (v ? 'Sí' : 'No');
+    return EdanGrupoVulnerable.completarSet8(grupos).map((g) => Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: _tb([
-        _tbRow('Grupo', g.nombreGrupo ?? 'Grupo vulnerable'),
+        _tbRow(
+            'Grupo',
+            _v((g.nombreGrupo?.trim().isNotEmpty ?? false)
+                ? g.nombreGrupo
+                : EdanLocalidad.nombreGrupoVulnerablePorId(
+                    g.idGrupoVulnerable))),
         _dg([
           _df('Mujeres', '${g.mujeres}'),
           _df('Hombres', '${g.hombres}'),
           _df('Total', '${g.total}'),
         ]),
-        _tags([
-          if (g.apoyoPsicologico == true) 'Apoyo psicológico',
-          if (g.reposicionDocumentos == true) 'Reposición de documento',
+        _dg([
+          _df('¿Apoyo psicológico?', siNo(g.apoyoPsicologico)),
+          _df('¿Reposición de documento?', siNo(g.reposicionDocumentos)),
         ]),
         if (g.observaciones.trim().isNotEmpty)
           _tbRow('Observaciones', g.observaciones),
@@ -1670,98 +1685,105 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.divider, width: 1),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          GestureDetector(
-            onTap: () => setState(() => _localidadesExpanded = !_localidadesExpanded),
-            child: Row(
-              children: [
-                Container(
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: primary,
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.location_on, color: Colors.white, size: 14),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Localidades (${localidades.length})',
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.textPrimary,
+      // Material transparente entre el fondo decorado del Container y los
+      // `ListTile` de las localidades: sin el Material intermedio, el color del
+      // BoxDecoration tapaba el fondo y el ripple de la fila (aviso del
+      // framework "ListTile background color or ink splashes may be invisible").
+      child: Material(
+        color: Colors.transparent,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            GestureDetector(
+              onTap: () => setState(() => _localidadesExpanded = !_localidadesExpanded),
+              child: Row(
+                children: [
+                  Container(
+                    width: 28,
+                    height: 28,
+                    decoration: BoxDecoration(
+                      color: primary,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Center(
+                      child: Icon(Icons.location_on, color: Colors.white, size: 14),
                     ),
                   ),
-                ),
-                Icon(
-                  _localidadesExpanded
-                      ? Icons.keyboard_arrow_up
-                      : Icons.keyboard_arrow_down,
-                  color: AppColors.textSecondary,
-                ),
-              ],
-            ),
-          ),
-          if (_localidadesExpanded) ...[
-            const SizedBox(height: 12),
-            if (localidades.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 6),
-                child: Text(
-                  'Sin localidades registradas.',
-                  style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
-                ),
-              )
-            else
-              ...localidades.asMap().entries.map((entry) {
-                final l = entry.value;
-                final estadoLabel = l.estadoLocalidad?.label ?? 'Sin estado';
-                final estadoColor = _localidadEstadoColor(estadoLabel.toLowerCase());
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                    leading: Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: estadoColor,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    title: Text(
-                      l.etiquetaLugar.isNotEmpty ? l.etiquetaLugar : 'Localidad ${entry.key + 1}',
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Localidades (${localidades.length})',
                       style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
                         color: AppColors.textPrimary,
                       ),
                     ),
-                    subtitle: Text(
-                      estadoLabel,
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: estadoColor,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    trailing: const Icon(
-                      Icons.chevron_right,
-                      color: AppColors.textSecondary,
-                      size: 20,
-                    ),
-                    onTap: () => _verDetalleLocalidad(l),
                   ),
-                );
-              }),
+                  Icon(
+                    _localidadesExpanded
+                        ? Icons.keyboard_arrow_up
+                        : Icons.keyboard_arrow_down,
+                    color: AppColors.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+            if (_localidadesExpanded) ...[
+              const SizedBox(height: 12),
+              if (localidades.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 6),
+                  child: Text(
+                    'Sin localidades registradas.',
+                    style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+                  ),
+                )
+              else
+                ...localidades.asMap().entries.map((entry) {
+                  final l = entry.value;
+                  final estadoLabel = l.estadoLocalidad?.label ?? 'Sin estado';
+                  final estadoColor = _localidadEstadoColor(estadoLabel.toLowerCase());
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: ListTile(
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                      leading: Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(
+                          color: estadoColor,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      title: Text(
+                        l.etiquetaLugar.isNotEmpty ? l.etiquetaLugar : 'Localidad ${entry.key + 1}',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textPrimary,
+                        ),
+                      ),
+                      subtitle: Text(
+                        estadoLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: estadoColor,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      trailing: const Icon(
+                        Icons.chevron_right,
+                        color: AppColors.textSecondary,
+                        size: 20,
+                      ),
+                      onTap: () => _verDetalleLocalidad(l),
+                    ),
+                  );
+                }),
+            ],
           ],
-        ],
+        ),
       ),
     );
   }

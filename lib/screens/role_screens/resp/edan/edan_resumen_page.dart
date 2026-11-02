@@ -414,30 +414,49 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
     final lineas = <_Linea>[];
     if (l.impactoPoblacion.isNotEmpty) {
       lineas.add(const _Linea.titulo('Grupos de edad'));
-      for (final p in l.impactoPoblacion) {
-        final sub = <_Linea>[
-          if (p.grupoEtario.trim().isNotEmpty)
-            _Linea.par('Rango', p.grupoEtario),
-          if (p.fallecidos > 0) _Linea.par('Fallecidos', '${p.fallecidos}'),
-          if (p.heridos > 0) _Linea.par('Heridos', '${p.heridos}'),
-          if (p.desaparecidos > 0)
-            _Linea.par('Desaparecidos', '${p.desaparecidos}'),
-          if (p.observaciones.trim().isNotEmpty)
-            _Linea.par('Observaciones', p.observaciones),
-        ];
-        if (sub.isNotEmpty) lineas.add(_Linea.subcard(sub));
+      // Contrato del set EXACTO 1-4 (§20.10.E): la vista muestra SIEMPRE los
+      // 4 grupos, rellenos con 0 donde no hay datos. Con la forma V2 (wrapper
+      // con grupos anidados) se toma el anidado; con la plana legacy (una fila
+      // por rango) cada fila aporta su grupo.
+      final anidados = <EdanGrupoEtario>[
+        for (final p in l.impactoPoblacion) ...p.gruposEtarios,
+      ];
+      final fuentes = anidados.isNotEmpty
+          ? anidados
+          : [
+              for (final p in l.impactoPoblacion)
+                EdanGrupoEtario(
+                  rango: p.grupoEtario,
+                  fallecidos: p.fallecidos,
+                  heridos: p.heridos,
+                  desaparecidos: p.desaparecidos,
+                  observaciones: p.observaciones,
+                  marcado: p.tieneDatosGlobales ||
+                      p.observaciones.trim().isNotEmpty,
+                  idGrupoEtarioCatalogo:
+                      EdanGrupoEtario.resolverIdGrupoEtario(p.grupoEtario),
+                ),
+            ];
+      final grupos = EdanGrupoEtario.completarSet4(fuentes);
+      for (final g in grupos) {
+        lineas.add(_Linea.subcard([
+          _Linea.par('Rango', g.rango),
+          _Linea.par('Fallecidos', '${g.fallecidos}'),
+          _Linea.par('Heridos', '${g.heridos}'),
+          _Linea.par('Desaparecidos', '${g.desaparecidos}'),
+          if (g.observaciones.trim().isNotEmpty)
+            _Linea.par('Observaciones', g.observaciones.trim()),
+        ]));
       }
 
-      // Total desglosado
+      // Total desglosado (suma de los 4 slots mostrados).
       var tf = 0;
       var th = 0;
       var td = 0;
-      for (final p in l.impactoPoblacion) {
-        for (final g in p.gruposEtarios) {
-          tf += g.fallecidos;
-          th += g.heridos;
-          td += g.desaparecidos;
-        }
+      for (final g in grupos) {
+        tf += g.fallecidos;
+        th += g.heridos;
+        td += g.desaparecidos;
       }
       final total = tf + th + td;
       if (total > 0) {
@@ -816,22 +835,27 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
 
   List<_Linea> _proteccion(EdanLocalidad l) {
     final lineas = <_Linea>[];
-    for (final g in l.proteccion) {
-      if (!g.tieneDatos) continue;
+    // Contrato del set EXACTO 1-8 (§20.11): la vista muestra SIEMPRE los 8
+    // grupos vulnerables, rellenos con 0 donde no hay datos.
+    final grupos = EdanGrupoVulnerable.completarSet8(l.proteccion);
+    for (final g in grupos) {
+      String siNo(bool? v) => v == null ? '—' : (v ? 'Sí' : 'No');
       lineas.add(_Linea.subcard([
-        _Linea.par('Grupo', g.nombreGrupo ?? 'Grupo vulnerable'),
-        if (g.mujeres > 0) _Linea.par('N° Mujeres', '${g.mujeres}'),
-        if (g.hombres > 0) _Linea.par('N° Hombres', '${g.hombres}'),
-        if (g.total > 0) _Linea.par('Total', '${g.total}'),
-        if (g.apoyoPsicologico == true)
-          _Linea.par('¿Apoyo psicológico?', 'Sí'),
-        if (g.reposicionDocumentos == true)
-          _Linea.par('¿Reposición de documentos?', 'Sí'),
+        _Linea.par(
+            'Grupo',
+            (g.nombreGrupo?.trim().isNotEmpty ?? false)
+                ? g.nombreGrupo!.trim()
+                : 'Grupo vulnerable'),
+        _Linea.par('N° Mujeres', '${g.mujeres}'),
+        _Linea.par('N° Hombres', '${g.hombres}'),
+        _Linea.par('Total', '${g.total}'),
+        _Linea.par('¿Apoyo psicológico?', siNo(g.apoyoPsicologico)),
+        _Linea.par('¿Reposición de documentos?', siNo(g.reposicionDocumentos)),
         if (g.observaciones.trim().isNotEmpty)
           _Linea.par('Observaciones', g.observaciones),
       ]));
     }
-    // Total desglosado protección
+    // Total desglosado protección (solo grupos con datos).
     final gruposConDatos = l.proteccion.where((g) => g.tieneDatos).toList();
     if (gruposConDatos.isNotEmpty) {
       var tm = 0;

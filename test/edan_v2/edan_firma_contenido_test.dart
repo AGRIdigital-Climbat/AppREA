@@ -101,6 +101,46 @@ void main() {
     });
   }
 
+  Future<void> _seedConChecks(String uuid) async {
+    final d = await db.database;
+    await d.insert('formularios', {
+      'uuid_edan_localidad': uuid,
+      'localidad': 'Loc Checks',
+      'id_municipio': 70101,
+      'total_poblacion_afectada': 10,
+      'pendiente_push': 1,
+    });
+    // Servicios básicos: el check `afectado` vive en `datos_json` (sobrevive
+    // el round-trip) pero el wire lo borra (motor 2405-2407). Con la firma
+    // leyéndolo, los hashes divergían siempre → `pendiente_push` jamás se
+    // limpiaba (badge pegado en 1 + re-PUT en cada sync).
+    await d.insert('filas_seccion', {
+      'uuid_registro': '11111111-0000-4000-8000-00000000sb01',
+      'uuid_edan_localidad': uuid,
+      'tipo': 'servicios-basicos',
+      'datos_json': jsonEncode({
+        'uuid_registro': '11111111-0000-4000-8000-00000000sb01',
+        'tipo': 'AGUA',
+        'afectado': true,
+      }),
+      'estado_sync': 'pendiente',
+    });
+    // Impacto por grupo etario: `marcado` local + `rango` legacy que el wire
+    // borra cuando la fila trae `id_grupo_etario` (motor 2414-2416).
+    await d.insert('filas_seccion', {
+      'uuid_registro': '22222222-0000-4000-8000-00000000im01',
+      'uuid_edan_localidad': uuid,
+      'tipo': 'impacto-poblacion',
+      'datos_json': jsonEncode({
+        'uuid_registro': '22222222-0000-4000-8000-00000000im01',
+        'id_grupo_etario': 1,
+        'marcado': true,
+        'rango': '0 a 14 años',
+      }),
+      'estado_sync': 'pendiente',
+    });
+  }
+
   group('paridad firma payload-DB', () {
     test('firmaDePayload == firmaContenido sin cambios', () async {
       const uuid = 'u-par';
@@ -117,6 +157,108 @@ void main() {
           await EdanStoreV2.firmaContenido(database, uuid);
       expect(fPayload, fDb,
           reason: 'misma canonicalización en motor y store');
+    });
+
+    test('firmaDePayload == firmaContenido con checks locales (afectado/'
+        'marcado/rango legacy)', () async {
+      const uuid = 'u-par-checks';
+      await _seedConChecks(uuid);
+      final database = await db.database;
+      final row = (await database.query('formularios',
+          where: 'uuid_edan_localidad = ?',
+          whereArgs: [uuid])).first;
+      final payload = await EdanSyncEngineV2.prepararPayloadCompleto(
+          uuid, row,
+          dbHelper: db);
+      final fPayload = EdanSyncEngineV2.firmaDePayload(payload);
+      final fDb =
+          await EdanStoreV2.firmaContenido(database, uuid);
+      expect(fPayload, fDb,
+          reason: 'las claves locales que el wire borra tampoco entran a la '
+              'firma: sin esto el confirm nunca declaraba limpio y el '
+              'contador quedaba pegado en 1');
+    });
+
+    test('el check local no mueve la firma; el contenido sí', () async {
+      const uuid = 'u-checks-mov';
+      await _seedConChecks(uuid);
+      final database = await db.database;
+      final antes =
+          await EdanStoreV2.firmaContenido(database, uuid);
+      // Cambiar solo `afectado` no cambia nada que viaje: no ensucia.
+      await database.update(
+        'filas_seccion',
+        {
+          'datos_json': jsonEncode({
+            'uuid_registro': '11111111-0000-4000-8000-00000000sb01',
+            'tipo': 'AGUA',
+            'afectado': false,
+          })
+        },
+        where: 'uuid_registro = ?',
+        whereArgs: ['11111111-0000-4000-8000-00000000sb01'],
+      );
+      expect(await EdanStoreV2.firmaContenido(database, uuid), antes);
+      // Cambiar un dato que SÍ viaja ensucia.
+      await database.update(
+        'filas_seccion',
+        {
+          'datos_json': jsonEncode({
+            'uuid_registro': '11111111-0000-4000-8000-00000000sb01',
+            'tipo': 'ELECTRICIDAD',
+            'afectado': false,
+          })
+        },
+        where: 'uuid_registro = ?',
+        whereArgs: ['11111111-0000-4000-8000-00000000sb01'],
+      );
+      expect(await EdanStoreV2.firmaContenido(database, uuid), isNot(antes));
+    });
+
+    test('la fila legacy sin id no rompe la paridad (el padding de catálogo '
+        'la descarta en ambos lados)', () async {
+      const uuid = 'u-rango-legacy';
+      await _seedRica(uuid);
+      final database = await db.database;
+      // Impacto solo con `rango` (sin `id_grupo_etario`): el set exacto 1-4
+      // lo descarta del payload Y de la firma (motor 2521 y réplica del
+      // store 3550). La paridad debe sostenerse igual.
+      await database.insert('filas_seccion', {
+        'uuid_registro': '33333333-0000-4000-8000-00000000im03',
+        'uuid_edan_localidad': uuid,
+        'tipo': 'impacto-poblacion',
+        'datos_json': jsonEncode({
+          'uuid_registro': '33333333-0000-4000-8000-00000000im03',
+          'rango': '0 a 14 años',
+        }),
+        'estado_sync': 'pendiente',
+      });
+      final row = (await database.query('formularios',
+          where: 'uuid_edan_localidad = ?',
+          whereArgs: [uuid])).first;
+      final payload = await EdanSyncEngineV2.prepararPayloadCompleto(
+          uuid, row,
+          dbHelper: db);
+      expect(
+          EdanSyncEngineV2.firmaDePayload(payload),
+          await EdanStoreV2.firmaContenido(database, uuid));
+      // Como la fila no viaja, editar su rango no cambia nada enviado:
+      // no ensucia (consistente en ambos lados).
+      final antes =
+          await EdanStoreV2.firmaContenido(database, uuid);
+      await database.update(
+        'filas_seccion',
+        {
+          'datos_json': jsonEncode({
+            'uuid_registro': '33333333-0000-4000-8000-00000000im03',
+            'rango': '15 a 64 años',
+          })
+        },
+        where: 'uuid_registro = ?',
+        whereArgs: ['33333333-0000-4000-8000-00000000im03'],
+      );
+      expect(await EdanStoreV2.firmaContenido(database, uuid), antes,
+          reason: 'la fila sin id no entra al payload ni a la firma');
     });
 
     test('cualquier cambio en las 14 secciones mueve la firma', () async {

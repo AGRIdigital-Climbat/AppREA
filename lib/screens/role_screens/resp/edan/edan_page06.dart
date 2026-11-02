@@ -141,12 +141,16 @@ class _EdanPage06State extends State<EdanPage06> {
   }
 
   Widget _servicioBlock(EdanServicioBasicoDetalle s) {
-    return Container(
+    // Card (Material) en lugar de Container decorado: el `CheckboxListTile`
+    // pinta su fondo y su ripple sobre el Material más cercano; con un
+    // BoxDecoration en medio quedaban invisibles (aviso del framework).
+    return Card(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+      elevation: 0,
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.divider),
+        side: const BorderSide(color: AppColors.divider),
       ),
       child: Column(
         children: [

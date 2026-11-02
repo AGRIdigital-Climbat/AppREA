@@ -1,5 +1,12 @@
 # APIs de la pestaña "EDAN" — Rol 6 UGR
 
+> **Parcialmente obsoleto (2026-10-19).** Las rutas de envío por localidad
+> (`/edan/localidades/{id}/documento`) y el pull legacy
+> (`/edan/localidades/sync/pull`) **ya no existen**. El envío vigente es
+> `POST/PUT /edan/formularios/completo`. Para el mapa completo y actualizado,
+> ver [`MAPA_APIS_WEB_EDAN.md`](./MAPA_APIS_WEB_EDAN.md). El listado de EDAN
+> padre, consolidaciones, localidades, usuarios y repositorio sigue vigente.
+
 Documento técnico con el inventario **exacto** de endpoints que utiliza la pestaña "EDAN" de la pantalla del rol 6 UGR (`UgrScreen` → `UgrEdanTab`).
 
 > Alcance: solo la pestaña **EDAN** (index 1), incluye su sub-tab **Recursos** y las acciones del detalle/preview y sincronización asociadas a EDAN. **No** incluye la pestaña "EDAN Local" (localidades).
@@ -103,9 +110,9 @@ Campos del multipart en `subirDocumentoEdan`:
 Flujo del botón **Sincronizar** (`Sincronizar` → `EdanSyncService.sincronizar()`):
 1. `_pullEdans` — descarga EDANs del municipio/UGL (`GET /edan/`) y sus localidades con secciones (`GET /edan/localidades/mis-reportes`).
 2. `_pushDeletions` — elimina EDANs marcados como pendientes (`DELETE /edan/{id}`).
-3. `_pushEdans` — envía EDANs no sincronizados **por localidad** vía `PUT /edan/localidades/{id_localidad}/documento` (contrato Fase 2 del RESP, gestionado por `EdanDocumentoSyncService`).
+3. `_pushEdans` — envía los documentos locales vía `POST/PUT /edan/formularios/completo` (flujo V2; `EdanDocumentoSyncService` está en desuso).
 
-Nota: el endpoint antiguo `/edan/sync/pull` ya no existe en v2 (404) y fue sustituido por el listado estándar.
+Nota: el pull legacy `/edan/localidades/sync/pull` ya no existe (404). El pull vigente es `GET /edan/sync/pull?desde=&limit=`.
 
 ---
 
@@ -120,7 +127,8 @@ Inventario confirmado contra `oea_openapi_v2.json` — **todas las rutas existen
 | `/edan/{id}/deshacer` | `put` |
 | `/edan/{id}/estado` | `put` |
 | `/edan/localidades/mis-reportes` | `get` |
-| `/edan/localidades/{id_localidad}/documento` | `get, put, delete` |
+| `/edan/formularios/completo` | `post, put` |
+| `/edan/formularios/{uuid}/completo` | `get` |
 | `/edan/localidades/{id_localidad}/estado` | `put` |
 | `/usuarios/` | `get, post` |
 | `/usuarios/{id}` | `get, put, delete` |

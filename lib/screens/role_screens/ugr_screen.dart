@@ -12,9 +12,12 @@ import '../../services/edan/edan_store_v2.dart';
 import '../../services/sync/edan_sync_engine_v2.dart';
 import '../../services/auth_service.dart';
 import '../../services/connectivity_service.dart';
+import '../../services/sync_debug_config.dart';
+import '../../screens/app_debug_screen.dart';
 import '../../models/edan.dart';
 import '../../widgets/asistente_ia.dart';
 import '../../widgets/perfil_tab.dart';
+import '../../widgets/ugr_progress_franja.dart';
 import 'ugr/ugr_edan_tab.dart';
 import 'ugr/ugr_guia_tab.dart';
 import 'ugr/ugr_localidades_tab.dart';
@@ -37,6 +40,8 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   /// Evita apilar auto-syncs si la red parpadea
   /// (offline→online→offline→online seguidos).
   bool _sincronizandoAuto = false;
+  /// Evita apilar descargas del municipio para el mapa (una a la vez).
+  bool _descargaMapaMunicipio = false;
   final _edanTabKey = GlobalKey<UgrEdanTabState>();
   final _perfilTabKey = GlobalKey<PerfilTabState>();
   final _localidadesTabKey = GlobalKey<UgrLocalidadesTabState>();
@@ -115,7 +120,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
             if (rp.isInitializing) {
               return _buildDownloadOverlay(palette, rp.downloadPhase);
             }
-            return _buildMainContent(palette);
+            return _buildMainContent(palette, rp);
           },
         ),
       ),
@@ -176,13 +181,25 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildMainContent(ToolPalette palette) {
+  Widget _buildMainContent(ToolPalette palette, ReporteProvider rp) {
     return Scaffold(
           backgroundColor: palette.background,
           appBar: AppBar(
             title: Text(_getTabTitle()),
             centerTitle: false,
             actions: [
+              if (kSyncDebugMode)
+                IconButton(
+                  tooltip: 'Debug · Registro de la app (24 h)',
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const AppDebugScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.bug_report_outlined, size: 20),
+                ),
               _buildSyncButton(),
               Consumer<ConnectivityProvider>(
                 builder: (context, connectivity, child) {
@@ -228,36 +245,52 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
               ),
             ],
           ),
-          body: SafeArea(
-            child: IndexedStack(
-              index: _selectedIndex,
-              children: [
-                UgrLocalidadesTab(
-                  key: _localidadesTabKey,
-                  onVistaChanged: () => setState(() {}),
-                  onConsolidado: () => _edanTabKey.currentState?.refresh(),
-                  onNavigateToEdan: () => setState(() => _selectedIndex = 1),
+          body: Column(
+            children: [
+              // Una sola franja bajo el AppBar (empuja, no tapa): histórico del
+              // municipio → motor V2 (primera descarga/reportes propios y sync)
+              // → catálogos. Sin actividad no pinta.
+              UgrProgressFranja(rp: rp),
+              Expanded(
+                child: SafeArea(
+                  child: IndexedStack(
+                    index: _selectedIndex,
+                    children: [
+                      UgrLocalidadesTab(
+                        key: _localidadesTabKey,
+                        onVistaChanged: () => setState(() {}),
+                        onConsolidado: () =>
+                            _edanTabKey.currentState?.refresh(),
+                        onNavigateToEdan: () =>
+                            setState(() => _selectedIndex = 1),
+                      ),
+                      UgrEdanTab(key: _edanTabKey),
+                      RespMapaTab(
+                        key: _mapaTabKey,
+                        // Offline-first: el mapa lee SQLite (`formularios`),
+                        // no la red. Pinta ya con lo local; con red, dispara
+                        // en segundo plano `descargarMunicipio` (V2: docs de
+                        // `GET /formularios` paginados por municipio), que
+                        // escribe `id_municipio` y las secciones con
+                        // coordenadas de TODOS los usuarios del municipio
+                        // (scope rol 6), y repinta una sola vez al terminar.
+                        cargarLocalidades: () async {
+                          final token = AuthService.instance.currentToken;
+                          final municipio = token?.idMunicipio;
+                          if (municipio == null) return <EdanLocalidad>[];
+                          unawaited(_refrescarMapaMunicipio(municipio));
+                          return EdanStoreV2.instance.listarFormularios(
+                            idMunicipio: municipio,
+                          );
+                        },
+                      ),
+                      const UgrGuiaTab(),
+                      PerfilTab(key: _perfilTabKey, catalogoEdan: true),
+                    ],
+                  ),
                 ),
-                UgrEdanTab(key: _edanTabKey),
-                RespMapaTab(
-                  key: _mapaTabKey,
-                  // Offline-first como RESP: el mapa lee SQLite (`formularios`),
-                  // no la red. El sync pull ya puebla el municipio (escribe
-                  // `id_municipio`), así que sin conexión el mapa se pinta igual
-                  // con lo local.
-                  cargarLocalidades: () async {
-                    final token = AuthService.instance.currentToken;
-                    final municipio = token?.idMunicipio;
-                    if (municipio == null) return <EdanLocalidad>[];
-                    return EdanStoreV2.instance.listarFormularios(
-                      idMunicipio: municipio,
-                    );
-                  },
-                ),
-                const UgrGuiaTab(),
-                PerfilTab(key: _perfilTabKey, catalogoEdan: true),
-              ],
-            ),
+              ),
+            ],
           ),
           floatingActionButton: _buildFab(),
           bottomNavigationBar: BottomNavigationBar(
@@ -313,6 +346,31 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
               ],
           ),
         );
+  }
+
+  /// Descarga el municipio entero por V2 (`GET /formularios?id_municipio`
+  /// paginado con `modo=completo`, aplicando solo los nuevos/modificados) y
+  /// repinta el mapa al terminar. Best-effort: cualquier fallo deja el mapa
+  /// con lo local (offline-first intacto); el motor y este guard impiden dos
+  /// descargas a la vez.
+  Future<void> _refrescarMapaMunicipio(int municipio) async {
+    if (_descargaMapaMunicipio) return;
+    if (!ConnectivityService().isConnected) return;
+    _descargaMapaMunicipio = true;
+    try {
+      final res = await EdanSyncEngineV2(
+        api: EdanApiV2(),
+        usuarioId: AuthService.instance.userId,
+      ).descargarMunicipio(municipio);
+      if (!mounted) return;
+      if (res.descargados > 0) {
+        _mapaTabKey.currentState?.refresh();
+      }
+    } catch (_) {
+      // Best-effort: el mapa sigue con lo local.
+    } finally {
+      _descargaMapaMunicipio = false;
+    }
   }
 
   Widget _buildSyncButton() {
@@ -415,6 +473,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
 
     _localidadesTabKey.currentState?.refresh();
     _edanTabKey.currentState?.refresh();
+    _mapaTabKey.currentState?.refresh();
     store.refrescarPendientes();
 
     if (auto &&
@@ -479,6 +538,12 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
     switch (_selectedIndex) {
       case 0:
         final tab = _localidadesTabKey.currentState;
+        // En la vista Galería del tab Localidades no procede crear ni
+        // consolidar: se ocultan ambos FAB (el bug de heroTag ya resuelto).
+        if (tab?.vistaGaleria ?? false) return null;
+        // En modo consolidación el control es la barra de checks (Cancelar /
+        // Vista previa): ocultar el FAB de crear evita ambigüedad.
+        if (tab?.modoConsolidacion ?? false) return null;
         final consolidarVisible = tab != null && tab.mostrarFabConsolidar;
         return Column(
           mainAxisSize: MainAxisSize.min,

@@ -6,8 +6,10 @@ import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:crypto/crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../models/edan.dart';
 import '../../models/edan_registro_v2.dart';
 import '../api/edan_api_v2.dart';
+import '../app_logger.dart';
 import '../database_helper.dart';
 import '../edan/edan_secciones_fuente.dart';
 import '../edan/edan_store_v2.dart';
@@ -45,6 +47,30 @@ class EdanSyncResumen {
       'SyncResumen(exito=$exito, enviados=$enviados, conflictos=$conflictos, '
       'errores=$errores, fotos=$fotosSubidas pendientes=$fotosPendientes '
       'descargadas=$fotosDescargadas)';
+}
+
+/// Resultado de [EdanSyncEngineV2.descargarMunicipio].
+class EdanMunicipioDescarga {
+  final bool exito;
+  final int total;
+  final int descargados;
+  final int omitidos;
+  final int errores;
+  final String? ultimoError;
+
+  const EdanMunicipioDescarga({
+    required this.exito,
+    this.total = 0,
+    this.descargados = 0,
+    this.omitidos = 0,
+    this.errores = 0,
+    this.ultimoError,
+  });
+
+  @override
+  String toString() =>
+      'MunicipioDescarga(exito=$exito, total=$total, '
+      'descargados=$descargados, omitidos=$omitidos, errores=$errores)';
 }
 
 /// Motor de sync v2: pull → apply → ack → push → fotos.
@@ -90,6 +116,7 @@ class EdanSyncEngineV2 {
   Future<EdanSyncResumen> sincronizar() async {
     var resumen = const EdanSyncResumen(exito: true);
     if (kSyncDebugMode) SyncDebugCollector.instance.startSession();
+    AppLogger.instance.sync(titulo: 'Sincronización V2: inicio');
 
     try {
       // Arranque/recuperación: una corrida muerta (kill a mitad de sync)
@@ -165,6 +192,7 @@ class EdanSyncEngineV2 {
     } finally {
       _fase('');
       if (kSyncDebugMode) SyncDebugCollector.instance.endSession();
+      AppLogger.instance.sync(titulo: 'Sincronización V2: fin');
     }
   }
 
@@ -719,16 +747,10 @@ class EdanSyncEngineV2 {
   /// El código interno (columnas, grupos, secciones) trabaja con el doc
   /// plano (header al nivel superior). Si no hay nodo `cabecera`, devuelve
   /// el doc tal cual (compatibilidad con pull plano y docs sin wrapper).
-  static Map<String, dynamic> unwrapCabecera(Map<String, dynamic> doc) {
-    final cabecera = doc['cabecera'];
-    if (cabecera is! Map) return doc;
-    final flat = Map<String, dynamic>.from(doc);
-    flat.remove('cabecera');
-    for (final e in cabecera.entries) {
-      flat[e.key] = e.value;
-    }
-    return flat;
-  }
+  /// Implementación compartida con `Edan.fromJson` (misma lógica, una sola
+  /// copia): `EdanLocalidad.desempaquetarCabecera`.
+  static Map<String, dynamic> unwrapCabecera(Map<String, dynamic> doc) =>
+      EdanLocalidad.desempaquetarCabecera(doc);
 
   Future<void> _normalizarDocCompleto(Map<String, dynamic> docRaw) async {
     // El GET /formularios/{uuid}/completo devuelve el header anidado bajo
@@ -786,6 +808,15 @@ class EdanSyncEngineV2 {
     }
     for (final e in porTipo.entries) {
       for (final fila in e.value) {
+        // Servicios básicos: en el servidor la EXISTENCIA de la fila es el
+        // marcado (no hay columna `afectado`). Se estampa igual que en
+        // `_aplicarSeccionPull` para que al descargar el reporte por
+        // `/completo` el check vuelva marcado, no solo con los números.
+        if (e.key == 'servicios-basicos' &&
+            !fila.containsKey('afectado') &&
+            !fila.containsKey('impactado')) {
+          fila['afectado'] = true;
+        }
         await db.insert(
           'filas_seccion',
           {
@@ -936,6 +967,15 @@ class EdanSyncEngineV2 {
     final tipo = tipoCrudo.isEmpty
         ? ''
         : EdanSeccionesRegistry.rutaDesdeTabla(tipoCrudo);
+    // Servicios básicos: el servidor no tiene columna `afectado` — allí LA
+    // EXISTENCIA de la fila ES el marcado. Se estampa al asentar la fila
+    // (y solo si el JSON no trae la clave) para que otro dispositivo que
+    // baje este reporte vea el checkbox activo, no solo los números.
+    if (tipo == 'servicios-basicos' &&
+        !r.containsKey('afectado') &&
+        !r.containsKey('impactado')) {
+      r['afectado'] = true;
+    }
     await db.insert(
       'filas_seccion',
       {
@@ -1794,6 +1834,113 @@ class EdanSyncEngineV2 {
   Future<EdanSyncResumen> procesarBorrados() =>
       _procesarCola(const EdanSyncResumen(exito: true), 0, 0, 0);
 
+  /// Guarda de re-entrancia ENTRE instancias: la app crea un motor por
+  /// llamada, así que el flag vive en la clase (un solo download de municipio
+  /// a la vez por dispositivo).
+  static bool _descargandoMunicipio = false;
+
+  /// Descarga el municipio [idMunicipio] completo por la familia V2 (refresco
+  /// del mapa rol 6, que ve todo su municipio por scope de servidor).
+  ///
+  /// Flujo: pagina `GET /formularios?id_municipio=N&todos=false&modo=completo`
+  /// (documentos completos con `cabecera`; sin watermark, así que el diff se
+  /// hace LOCAL comparando `fecha_modificacion` por uuid) y aplica con
+  /// `_normalizarDocCompleto` solo a los uuid nuevos o con fecha distinta
+  /// (escribe `id_municipio` y las filas de sección con coordenadas que pinta
+  /// el mapa).
+  ///
+  /// Contrato deliberado:
+  /// * NO toca el watermark personal ni hace ack: es descarga de lectura
+  ///   orthogonal al ciclo pull/push propio del usuario.
+  /// * NO pisa sucios (`pendiente_push=1` / cola): el PUT local gana (LWW).
+  /// * Un error por documento no aborta el lote (parcial = sigue).
+  /// * Al terminar avisa `EdanStoreV2.datosCambiados()` si bajó algo.
+  Future<EdanMunicipioDescarga> descargarMunicipio(int idMunicipio) async {
+    if (idMunicipio <= 0) {
+      return const EdanMunicipioDescarga(
+          exito: false, ultimoError: 'idMunicipio inválido');
+    }
+    if (_descargandoMunicipio) {
+      return const EdanMunicipioDescarga(exito: true);
+    }
+    _descargandoMunicipio = true;
+    var total = 0;
+    var descargados = 0;
+    var omitidos = 0;
+    var errores = 0;
+    String? ultimoError;
+    try {
+      const limite = 200;
+      var skip = 0;
+      final vistos = <String>{};
+      while (true) {
+        final res = await _api.listarFormularios(
+          idMunicipio: idMunicipio,
+          limit: limite,
+          skip: skip,
+          modo: 'completo',
+        );
+        final docs = res.data ?? const <Map<String, dynamic>>[];
+        if (res.total != null) total = res.total!;
+        for (final raw in docs) {
+          final doc = unwrapCabecera(raw);
+          final uuid = doc['uuid_edan_localidad'] as String?;
+          if (uuid == null || uuid.isEmpty) continue;
+          if (!vistos.add(uuid)) continue;
+          try {
+            if (await _esLocalidadSucia(uuid)) {
+              omitidos++;
+              continue;
+            }
+            final local = await (await _db.database).query(
+              'formularios',
+              columns: ['fecha_modificacion'],
+              where: 'uuid_edan_localidad = ?',
+              whereArgs: [uuid],
+              limit: 1,
+            );
+            final fmRemota = doc['fecha_modificacion'];
+            if (local.isNotEmpty &&
+                fmRemota is String &&
+                fmRemota.isNotEmpty &&
+                local.first['fecha_modificacion'] == fmRemota) {
+              omitidos++;
+              continue;
+            }
+            // El doc crudo (con `cabecera`) va a `_normalizarDocCompleto`,
+            // que internamente desempaqueta y guarda el crudo en
+            // `datos_json_servidor` (la verdad del servidor).
+            await _normalizarDocCompleto(raw);
+            descargados++;
+          } on EdanApiConflict {
+            omitidos++;
+          } catch (e) {
+            errores++;
+            ultimoError = '$uuid: $e';
+          }
+        }
+        if (docs.length < limite) break;
+        skip += docs.length;
+      }
+      if (descargados > 0) {
+        EdanStoreV2.instance.datosCambiados();
+      }
+    } catch (e) {
+      errores++;
+      ultimoError = e.toString();
+    } finally {
+      _descargandoMunicipio = false;
+    }
+    return EdanMunicipioDescarga(
+      exito: errores == 0,
+      total: total,
+      descargados: descargados,
+      omitidos: omitidos,
+      errores: errores,
+      ultimoError: ultimoError,
+    );
+  }
+
   /// Firma del documento que se va a enviar (misma canonicalización que
   /// `EdanStoreV2.firmaContenido`): el confirm la guarda como
   /// `firma_enviada` y el dirty se deriva comparando con la firma actual,
@@ -1936,19 +2083,34 @@ class EdanSyncEngineV2 {
       debugPrint('[SyncV2] /completo $uuid hubo_cambios=${data['hubo_cambios']} '
           'cambios=${data['cambios']}');
     }
-    // Tras el POST exitoso, re-leer el documento canónico del servidor para
-    // aplicar LWW (ids y campos derivados).
-    // OJO: `_aplicarFormularioPull` NO sirve aquí (espera fila plana del
-    // pull y el doc `{cabecera,...}` sería ignorado en silencio): se usa
-    // `_normalizarDocCompleto`, que desempaqueta `cabecera`.
-    try {
-      final resp = await _api.obtenerFormularioCompleto(uuid);
-      if (resp.data != null) {
-        await _normalizarDocCompleto(resp.data!);
+    // Reconciliar el documento canónico del servidor. El PUT/POST 200 YA lo
+    // trae embebido en `data['formulario']` (cabecera + 14 secciones + fotos,
+    // verificado en vivo 2026-10-18): reconciliar desde ahí evita un segundo
+    // viaje de red que, si la red cae justo ahí, abortaba la confirmación
+    // (la excepción cruda de http no es `EdanApiError`) y dejaba el
+    // formulario `pendiente_push` para siempre → re-push eterno de un
+    // documento que el servidor ya tiene igual ("Documento sin cambios").
+    final formularioRespuesta = data['formulario'];
+    if (formularioRespuesta is Map<String, dynamic> &&
+        formularioRespuesta.containsKey('cabecera')) {
+      try {
+        await _normalizarDocCompleto(formularioRespuesta);
+      } catch (e) {
+        // La recepción ya fue confirmada con 200 y la cabecera reconciliada
+        // arriba; una falla aplicando el espejo no debe revertir nada.
+        debugPrint('[SyncV2] /completo $uuid: espejo embebido no aplicado: $e');
       }
-    } on EdanApiError {
-      // La relectura es best-effort: si falla, el POST ya fue exitoso y la
-      // cabecera ya quedó reconciliada arriba.
+    } else {
+      // Respuesta sin documento embebido (servidor viejo): re-lectura
+      // best-effort REAL — cualquier excepción se traga, nunca escapa.
+      try {
+        final resp = await _api.obtenerFormularioCompleto(uuid);
+        if (resp.data != null) {
+          await _normalizarDocCompleto(resp.data!);
+        }
+      } catch (e) {
+        debugPrint('[SyncV2] /completo $uuid: relectura omitida: $e');
+      }
     }
     return firmaDePayload(enviado);
   }
@@ -2364,6 +2526,23 @@ class EdanSyncEngineV2 {
         // §20.10.C: `fotografia` NO viaja en ninguna sección de los POST; es
         // solo el espejo del path que el servidor llena al subir la foto.
         datos.remove('fotografia');
+        // `afectado`/`impactado` (check de servicios básicos) y `marcado`
+        // (check de grupo etario) son locales: se persisten en `datos_json`
+        // para que el checkbox sobreviva el round-trip, pero las tablas del
+        // servidor no tienen esas columnas y el POST contestaría 400
+        // "campo desconocido o no escribible". Se quitan solo en el wire.
+        datos.remove('afectado');
+        datos.remove('impactado');
+        datos.remove('marcado');
+        // Contrato impacto por grupo etario: con `id_grupo_etario` presente
+        // el servidor RECHAZA `rango` (400 por fila: "Campo desconocido o no
+        // escribible para impacto_poblacion: 'rango'") — resuelve el grupo
+        // por el id del catálogo. Misma regla que la
+        // `EdanImpactoPoblacionService.filaDesdeRow` legacy; sin id, `rango`
+        // sigue viajando como resolver. El set exacto 1-4 no se toca.
+        if (tipo == 'impacto-poblacion' && datos['id_grupo_etario'] != null) {
+          datos.remove('rango');
+        }
         // `datos` ya viene decodificado y con `uuid_registro` (Fuente).
         if (desc.tipo == EdanSeccionTipo.unoAUno) {
           // 1:1 → objeto único (no lista).
