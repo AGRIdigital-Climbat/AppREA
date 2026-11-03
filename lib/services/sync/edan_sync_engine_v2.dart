@@ -1079,8 +1079,13 @@ class EdanSyncEngineV2 {
         'uuid_registro': uuid,
         'uuid_dano_vivienda': r['uuid_dano_vivienda'] ?? '',
         'tipo_dano': (r['tipo_dano'] as String? ?? 'PARCIAL').toUpperCase(),
-        'coordenada_lat': (r['coordenada_lat'] as num?)?.toDouble(),
-        'coordenada_lon': (r['coordenada_lon'] as num?)?.toDouble(),
+        // El servidor manda las coordenadas de `viviendas` como STRING
+        // (verificado en vivo 2026-11-03, snackbar capturado: "type 'String'
+        // is not a subtype of type 'num?'"): el `as num?` lanzaba TypeError,
+        // esa 1 vivienda era el "Pull parcial: 1 de 28" de la app limpia y,
+        // al no ackar el watermark, la alerta se repetía en CADA sync.
+        'coordenada_lat': _doubleDeServidor(r['coordenada_lat']),
+        'coordenada_lon': _doubleDeServidor(r['coordenada_lon']),
         'fotografia': r['fotografia'],
         'fecha_modificacion_local': r['fecha_modificacion'],
       },
@@ -2829,6 +2834,15 @@ class EdanSyncEngineV2 {
     if (v is int) return v;
     if (v is num) return v.toInt();
     return int.tryParse('${v ?? ''}');
+  }
+
+  /// num→double y string numérica→double (el servidor provee varias columnas
+  /// numéricas —p. ej. `coordenada_lat/lon` de `viviendas`— como STRING en el
+  /// JSON); null si no es parseable. Nunca lanza.
+  static double? _doubleDeServidor(Object? v) {
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v.trim());
+    return null;
   }
 
   /// Fotos pendientes de subida (`cola_fotos`) dueñas de una localidad.

@@ -192,4 +192,40 @@ void main() {
       expect(EdanLocalidad.desempaquetarCabecera(sinNodo), same(sinNodo));
     });
   });
+
+  group('coordenadas string en viviendas (snackbar capturado 2026-11-03)', () {
+    test('hija anidada con coords string del servidor: parsea sin TypeError',
+        () {
+      // El "Pull parcial: 1 de 28 · type 'String' is not a subtype of type
+      // 'num?'" venía de aquí: el servidor devuelve las coords de `viviendas`
+      // como string (documento real de "Escoma"). Las vías v1/UGR
+      // (`getCompletoByUuid`) y los snapshots pasan por este fromJson.
+      final padre = EdanDanoVivienda.fromJson({
+        'id_seccion': 'b4341e9a-7e91-4d48-b93b-761c4855d6e1',
+        'comunidad': 'Escoma',
+        'viviendas': [
+          {
+            'uuid_registro': '1d65cb56-9775-462c-abb0-5c2152b41f51',
+            'tipo_dano': 'PARCIAL',
+            'coordenada_lat': '-16.5096056',
+            'coordenada_lon': '-68.1057141',
+            'fotografia': '/uploads/reports/020701/x.jpg',
+          },
+        ],
+      });
+      expect(padre.viviendas, hasLength(1));
+      expect(padre.viviendas.first.coordenadaLat, closeTo(-16.5096056, 1e-9));
+      expect(padre.viviendas.first.coordenadaLon, closeTo(-68.1057141, 1e-9));
+    });
+
+    test('coords numéricas y null siguen igual (no regresión)', () {
+      final padre = EdanDanoVivienda.fromJson({
+        'viviendas': [
+          {'coordenada_lat': -16.5, 'coordenada_lon': null},
+        ],
+      });
+      expect(padre.viviendas.first.coordenadaLat, -16.5);
+      expect(padre.viviendas.first.coordenadaLon, 0.0);
+    });
+  });
 }

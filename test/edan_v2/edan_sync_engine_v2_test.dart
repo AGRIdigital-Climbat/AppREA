@@ -4010,6 +4010,56 @@ void main() {
     });
   });
 
+  group('viviendas del pull con coords STRING (bug 2026-11-03)', () {
+    test('coordenadas como string del servidor: se aplican como double y la '
+        'sync ackea el watermark', () async {
+      // Snackbar capturado en el registro del usuario: "type 'String' is not
+      // a subtype of type 'num?'" — el servidor devuelve `coordenada_lat/lon`
+      // de `viviendas` como STRING. El `as num?` lanzaba TypeError: esa 1
+      // vivienda era el "Pull parcial: 1 de 28" de la app limpia y, sin ack,
+      // la alerta "incompleta" se repetía en cada sync para siempre.
+      await _seedFormulario('u-viv-str');
+      await _seedFila('viv-padre', 'u-viv-str', tipo: 'danos-vivienda');
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull({
+            'watermark': 'wm-vivstr',
+            'viviendas': [
+              {
+                'uuid_registro': 'hija-str',
+                'uuid_dano_vivienda': 'viv-padre',
+                'uuid_edan_localidad': 'u-viv-str',
+                'tipo_dano': 'parcial',
+                'coordenada_lat': '-16.5096056',
+                'coordenada_lon': '-68.1057141',
+                'fotografia': '/uploads/x.jpg',
+                'fecha_modificacion': '2026-11-03T05:20:00',
+              },
+            ],
+          });
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        return _err(404, 'ruta no esperada');
+      });
+
+      final resumen =
+          await EdanSyncEngineV2(api: _api(client), db: db).sincronizar();
+      expect(resumen.exito, isTrue,
+          reason: 'coords string no pueden lanzar TypeError ni bloquear el ack');
+      final v = (await (await db.database)
+              .query('viviendas',
+                  where: 'uuid_registro = ?', whereArgs: ['hija-str']))
+          .first;
+      expect(v['coordenada_lat'], closeTo(-16.5096056, 1e-9));
+      expect(v['coordenada_lon'], closeTo(-68.1057141, 1e-9));
+      expect(v['tipo_dano'], 'PARCIAL');
+      expect(await db.getConfig('sync_watermark_v2'), 'wm-vivstr',
+          reason: 'el watermark avanza: la alerta "incompleta" ya no vuelve');
+    });
+  });
+
   group('detallePushParcial (mensaje honesto del 200 con errores)', () {
     test('lista SOLO las filas fallidas con su mensaje y los contadores', () {
       // Réplica de la respuesta real de Escoma (2026-11-02): los primeros

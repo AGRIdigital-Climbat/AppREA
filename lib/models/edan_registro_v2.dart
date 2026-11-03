@@ -86,11 +86,26 @@ class EdanVivienda {
         uuidRegistro: json['uuid_registro'] as String?,
         uuidDanoVivienda: json['uuid_dano_vivienda'] as String?,
         tipoDano: _tipoFromString(json['tipo_dano'] as String?),
-        coordenadaLat: (json['coordenada_lat'] as num?)?.toDouble() ?? 0.0,
-        coordenadaLon: (json['coordenada_lon'] as num?)?.toDouble() ?? 0.0,
+        // El servidor manda `coordenada_lat/lon` como STRING (verificado en
+        // vivo 2026-11-03: "coordenada_lat": "-16.5096056" en el /completo y
+        // en el pull V2; snackbar capturado: "type 'String' is not a subtype
+        // of type 'num?'"). El `as num?` lanzaba TypeError al parsear
+        // documentos server por las vías v1/UGR y snapshots.
+        coordenadaLat: _coord(json['coordenada_lat']),
+        coordenadaLon: _coord(json['coordenada_lon']),
         fotografia: json['fotografia'] as String?,
         fechaModificacionLocal: json['fecha_modificacion_local'] as String?,
       );
+
+  /// Coordenada tolerante: numérico, string numérica (con coma decimal) o
+  /// null → 0.0. Misma regla que `_toDouble` de `edan.dart`.
+  static double _coord(Object? v) {
+    if (v is num) return v.toDouble();
+    if (v is String) {
+      return double.tryParse(v.trim().replaceAll(',', '.')) ?? 0.0;
+    }
+    return 0.0;
+  }
 
   static EdanViviendaTipo _tipoFromString(String? value) {
     final normalizado = value?.trim().toUpperCase();
