@@ -9,6 +9,7 @@ import '../services/database_helper.dart';
 import '../services/image_service.dart';
 import '../services/sync_manager.dart';
 import '../screens/login_screen.dart';
+import '../services/app_logger_ui.dart';
 
 class PerfilTab extends StatefulWidget {
   final VoidCallback? onLogout;
@@ -141,7 +142,7 @@ class PerfilTabState extends State<PerfilTab> {
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text(
             serverOk
@@ -373,7 +374,8 @@ class PerfilTabState extends State<PerfilTab> {
                           final messenger = ScaffoldMessenger.of(context);
                           await rp.fetchAndCacheCatalogs();
                           if (context.mounted) {
-                            messenger.showSnackBar(
+                            showAppSnackBarOn(
+                              messenger,
                               SnackBar(
                                 content: Text(
                                   '${rp.estados.length} estados, ${rp.tiposEvento.length} tipos y ${rp.categorias.length} categorias cargados',

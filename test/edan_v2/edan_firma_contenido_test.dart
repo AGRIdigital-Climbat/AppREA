@@ -179,6 +179,124 @@ void main() {
               'contador quedaba pegado en 1');
     });
 
+    test('metacampos del espejo: wire los despoja y la firma no reensucia',
+        () async {
+      // Réplica de la fila `proteccion` contaminada por el espejo del pull
+      // (log Escoma 2026-11-02): el servidor respondió "campo desconocido o
+      // no escribible: 'tipo_seccion'" y el Enviar falló con Push parcial.
+      const uuid = 'u-meta-espejo';
+      final d = await db.database;
+      await d.insert('formularios', {
+        'uuid_edan_localidad': uuid,
+        'localidad': 'Escoma',
+        'id_municipio': 20701,
+        'total_poblacion_afectada': 30,
+        'pendiente_push': 1,
+      });
+      await d.insert('filas_seccion', {
+        'uuid_registro': 'aaaaaaaa-0000-4000-8000-00000000pr01',
+        'uuid_edan_localidad': uuid,
+        'tipo': 'proteccion',
+        'datos_json': jsonEncode({
+          'id_seccion': 'aaaaaaaa-0000-4000-8000-00000000pr01',
+          'uuid_registro': 'aaaaaaaa-0000-4000-8000-00000000pr01',
+          'tipo_seccion': 'proteccion',
+          'id_edan_localidad': 343711,
+          'uuid_edan_localidad': uuid,
+          'id_grupo_vulnerable_catalogo': 1,
+          'mujeres': 4,
+          'hombres': 2,
+        }),
+        'estado_sync': 'pendiente',
+      });
+      final row = (await d.query('formularios',
+              where: 'uuid_edan_localidad = ?', whereArgs: [uuid]))
+          .first;
+      final payload = await EdanSyncEngineV2.prepararPayloadCompleto(
+          uuid, row,
+          dbHelper: db);
+      final filas = (payload['proteccion'] as List).cast<Map>();
+      expect(filas, isNotEmpty);
+      expect(
+          filas.every((f) =>
+              !f.containsKey('tipo_seccion') &&
+              !f.containsKey('id_edan_localidad') &&
+              !f.containsKey('uuid_edan_localidad')),
+          isTrue,
+          reason: 'el wire jamas reenvia los meta-campos del espejo: '
+              'proteccion los rechaza (200 con errores por fila)');
+      expect(filas.first['mujeres'], 4, reason: 'el contenido real viaja');
+
+      final fPayload = EdanSyncEngineV2.firmaDePayload(payload);
+      final fDb = await EdanStoreV2.firmaContenido(d, uuid);
+      expect(fPayload, fDb,
+          reason: 'BD contaminada (fila pre-fix) vs wire despojado deben '
+              'firmar igual o pendiente_push no se limpiaria nunca');
+    });
+
+    test('create then mirror: the sent firma is equal to the server-normalized '
+        'content (single sync)', () async {
+      // Bug 2026-11-02 (log del usuario, "Escoma"): al crear, la fila local
+      // guarda `fecha_llenado` ISO con hora y `hora_evento` "HH:MM"; el espejo
+      // del POST los normaliza a "YYYY-MM-DD" y "HH:MM:SS". Sin canonizar, la
+      // firma recalculada en `_confirmarPushLocalidad` divergía de la enviada
+      // y dejaba `pendiente_push=1` → había que sincronizar dos veces.
+      const uuid = 'u-espejo-formato';
+      await _seedRica(uuid);
+      final database = await db.database;
+      await database.update(
+        'formularios',
+        {
+          'fecha_llenado': '2026-11-02T21:48:13.498893', // formato al crear
+          'hora_evento': '06:00',
+        },
+        where: 'uuid_edan_localidad = ?',
+        whereArgs: [uuid],
+      );
+      final row = (await database.query('formularios',
+          where: 'uuid_edan_localidad = ?',
+          whereArgs: [uuid])).first;
+      final payload = await EdanSyncEngineV2.prepararPayloadCompleto(
+          uuid, row,
+          dbHelper: db);
+      final fEnviada = EdanSyncEngineV2.firmaDePayload(payload);
+
+      // El servidor espeja la cabecera con sus formatos normalizados.
+      await database.update(
+        'formularios',
+        {
+          'fecha_llenado': '2026-11-02',
+          'hora_evento': '06:00:00',
+        },
+        where: 'uuid_edan_localidad = ?',
+        whereArgs: [uuid],
+      );
+      final fEspejo =
+          await EdanStoreV2.firmaContenido(database, uuid);
+      expect(fEspejo, fEnviada,
+          reason: 'la normalización de formato del espejo no debe reensuciar: '
+              'con esto la primera sync confirma limpia');
+
+      // Y sigue siendo sensible al contenido REAL: otra hora distinta sí
+      // mueve la firma (no se perdió detección de cambios).
+      await database.update(
+        'formularios',
+        {'hora_evento': '07:00:00'},
+        where: 'uuid_edan_localidad = ?',
+        whereArgs: [uuid],
+      );
+      expect(await EdanStoreV2.firmaContenido(database, uuid),
+          isNot(fEnviada));
+      await database.update(
+        'formularios',
+        {'fecha_llenado': '2026-11-03T10:00:00.000'},
+        where: 'uuid_edan_localidad = ?',
+        whereArgs: [uuid],
+      );
+      expect(await EdanStoreV2.firmaContenido(database, uuid),
+          isNot(fEnviada));
+    });
+
     test('el check local no mueve la firma; el contenido sí', () async {
       const uuid = 'u-checks-mov';
       await _seedConChecks(uuid);

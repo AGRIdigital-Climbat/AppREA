@@ -7,6 +7,7 @@ import '../widgets/custom_text_field.dart';
 import 'forgot_password_screen.dart';
 import '../config/role_router.dart';
 import 'register_screen.dart';
+import '../services/app_logger_ui.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -43,7 +44,7 @@ class _LoginScreenState extends State<LoginScreen> {
           MaterialPageRoute(builder: (_) => homeForRole(authProvider)),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text(authProvider.error ?? 'Error al iniciar sesión'),
             backgroundColor: AppColors.error,

@@ -11,6 +11,7 @@ import '../../../../services/edan/edan_store_v2.dart';
 import '../../ugr/ugr_route.dart';
 import 'edan_form_wizard.dart';
 import 'edan_ia_asistente_screen.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Diálogo de elección al apretar el FAB de `+`.
 ///
@@ -251,7 +252,7 @@ Future<bool> abrirCreacionEdan(
 }
 
 void _avisar(BuildContext context, String mensaje) {
-  ScaffoldMessenger.of(context).showSnackBar(
+  showAppSnackBar(context, 
     SnackBar(content: Text(mensaje), backgroundColor: AppColors.error),
   );
 }

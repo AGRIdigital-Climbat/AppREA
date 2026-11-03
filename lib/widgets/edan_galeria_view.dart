@@ -11,6 +11,7 @@ import '../services/api/edan_api_v2.dart';
 import '../services/api_service.dart';
 import '../services/edan/edan_store_v2.dart';
 import '../services/edan_secciones_registry.dart';
+import '../services/app_logger_ui.dart';
 
 /// Galería de fotos EDAN compartida por el rol 7 (sus localidades) y el rol 6
 /// (localidades del municipio, con autor): fotos agrupadas por localidad,
@@ -558,7 +559,7 @@ class EdanGaleriaViewState extends State<EdanGaleriaView>
     } catch (e) {
       if (!mounted) return;
       setState(() => _descargando.remove(f.uuidFotografia));
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text('No se pudo descargar la foto: $e'),
           backgroundColor: AppColors.error,

@@ -8,6 +8,7 @@ import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_subsection_header.dart';
 import 'edan_aviso.dart';
+import '../../../../services/app_logger_ui.dart';
 
 const _tiposEstructura = [
   'Oficinas públicas',
@@ -179,7 +180,7 @@ class _EdanPage05State extends State<EdanPage05> {
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
             ElevatedButton(onPressed: () {
                   if (_tramo.text.isEmpty && _km.text.isEmpty && _nec.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    showAppSnackBar(context, 
                       const SnackBar(content: Text('No hay datos para guardar')),
                     );
                     Navigator.pop(ctx, false);
@@ -306,7 +307,7 @@ _campoTitulo('Observaciones'),
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
             ElevatedButton(onPressed: () {
               if (_comunidad.text.isEmpty && _obs.text.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                showAppSnackBar(context, 
                   const SnackBar(content: Text('No hay datos para guardar')),
                 );
                 Navigator.pop(ctx, false);

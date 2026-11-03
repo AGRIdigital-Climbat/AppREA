@@ -7,6 +7,7 @@ import '../../../models/edan.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrEdanLocalidadPreviewScreen extends StatefulWidget {
   final EdanLocalidad localidad;
@@ -66,7 +67,7 @@ class _UgrEdanLocalidadPreviewScreenState
   Future<void> _aprobar() async {
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Sin conexión. Verifica tu red y reintenta.'),
             backgroundColor: AppColors.pending,
@@ -83,7 +84,7 @@ class _UgrEdanLocalidadPreviewScreenState
       );
       localidad.estadoLocalidad = UgrLocalidadEstado.aprobadoUgr;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Localidad aprobada'),
             backgroundColor: AppColors.aprobado,
@@ -93,7 +94,7 @@ class _UgrEdanLocalidadPreviewScreenState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -108,7 +109,7 @@ class _UgrEdanLocalidadPreviewScreenState
   Future<void> _rechazar() async {
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Sin conexión. Verifica tu red y reintenta.'),
             backgroundColor: AppColors.pending,
@@ -125,7 +126,7 @@ class _UgrEdanLocalidadPreviewScreenState
       );
       localidad.estadoLocalidad = UgrLocalidadEstado.rechazadoUgr;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Localidad rechazada'),
             backgroundColor: AppColors.rechazado,
@@ -135,7 +136,7 @@ class _UgrEdanLocalidadPreviewScreenState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,

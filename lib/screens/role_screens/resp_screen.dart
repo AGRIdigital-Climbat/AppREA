@@ -22,6 +22,7 @@ import 'resp/resp_galeria_tab.dart';
 import 'resp/resp_guia_tab.dart';
 import 'resp/resp_mapa_tab.dart';
 import 'ugr/ugr_route.dart';
+import '../../services/app_logger_ui.dart';
 
 class RespScreen extends StatefulWidget {
   const RespScreen({super.key});
@@ -89,7 +90,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     _refrescarContadores();
     final error = EdanStoreV2.instance.ultimoErrorPrimeraDescarga;
     if (error != null && mounted && !error.startsWith('Sin conexión')) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text('Primera sincronización incompleta: $error. '
               'Se reintentará al iniciar sesión.'),
@@ -553,7 +554,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
         ? (result.exito ? 'Sin cambios por enviar.' : 'La sincronización falló.')
         : partes.join(' · ');
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       SnackBar(
         content: Text(
           result.exito ? mensaje : '$mensaje${result.ultimoError != null ? ' — ${result.ultimoError}' : ''}',
@@ -607,7 +608,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
 
     _dashboardTabKey.currentState?.refresh();
     _galeriaTabKey.currentState?.refresh();
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       const SnackBar(
         content: Text('Reporte guardado correctamente.'),
         backgroundColor: AppColors.completed,

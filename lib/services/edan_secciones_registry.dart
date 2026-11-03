@@ -328,7 +328,8 @@ class EdanSeccionesRegistry {
   ///   número > 0 o texto con contenido). Se exige en AND.
   /// * **1:N** ([EdanSeccionTipo.unoAN]): ≥1 hija válida en ALGUNA de sus
   ///   secciones (OR dentro del grupo). Casos especiales: `danos-vivienda`
-  ///   exige padre con daño (>0) y ≥1 `viviendas`; los catálogos
+  ///   exige ≥1 `vivienda` hija en el padre (los contadores legacy
+  ///   `dano_parcial`/`dano_total` no se llenan en el flujo V2); los catálogos
   ///   (`impacto-poblacion` 4, `proteccion` 8) exigen ≥1 grupo con datos.
   ///
   /// Ejemplo mixto: en page03, aunque `impacto-poblacion` tenga datos, el
@@ -436,14 +437,14 @@ class EdanSeccionesRegistry {
           return 'Educación: agregue al menos una unidad educativa';
         }
       case 'grupVivienda':
-        final padres = loc.danosVivienda
-            .where((v) => v.danoParcial > 0 || v.danoTotal > 0)
-            .toList();
-        if (padres.isEmpty) {
-          return 'Vivienda: registre el daño (parcial o total)';
-        }
-        if (!padres.any((v) => v.viviendas.isNotEmpty)) {
-          return 'Vivienda: agregue al menos una vivienda al daño';
+        // El flujo 1:N vive en `viviendas` (las hijas): los contadores legacy
+        // `dano_parcial`/`dano_total` del padre NO se llenan en la página 08
+        // (los contadores visibles son los derivados `viviendasParcial/
+        // ViviendasTotal`). Validar por ellos bloqueaba "Siguiente" aunque el
+        // usuario ya tuviera viviendas capturadas (bug 2026-11-02). Basta ≥1
+        // hija en el padre; sin hijas no hay sección.
+        if (!loc.danosVivienda.any((v) => v.viviendas.isNotEmpty)) {
+          return 'Vivienda: agregue al menos una vivienda con daño';
         }
       case 'grupAgropecuario':
         final ok = loc.danosAgricultura

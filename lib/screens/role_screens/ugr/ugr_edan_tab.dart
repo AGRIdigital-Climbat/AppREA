@@ -9,6 +9,7 @@ import '../../../services/edan_sync_service.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_recurso_tab.dart';
 import 'ugr_route.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrEdanTab extends StatefulWidget {
   const UgrEdanTab({super.key});
@@ -97,7 +98,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
     } catch (e) {
       if (mounted) {
         setState(() => _cargando = false);
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al cargar EDANs: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -350,7 +351,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
         if (mounted) await _cargarEdanesServidor();
       } catch (_) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
           );
         }
@@ -367,7 +368,7 @@ class UgrEdanTabState extends State<UgrEdanTab>
       if (mounted) await _cargarEdanesServidor();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text('Error al cargar EDAN: ${ApiService.traducirError(e)}'), backgroundColor: AppColors.error),
         );
       }

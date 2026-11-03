@@ -5,6 +5,7 @@ import '../../../../models/usuario.dart';
 import '../../../../services/api_service.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../widgets/custom_text_field.dart';
+import '../../../services/app_logger_ui.dart';
 
 class CrearUsuarioScreen extends StatefulWidget {
   final int? idMunicipio;
@@ -72,7 +73,7 @@ class _CrearUsuarioScreenState extends State<CrearUsuarioScreen> {
 
     if (!ConnectivityService().isConnected) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('Sin conexión. Verifica tu red y reintenta.'),
           backgroundColor: AppColors.pending,
@@ -133,7 +134,7 @@ class _CrearUsuarioScreenState extends State<CrearUsuarioScreen> {
       Navigator.pop(context, usuario.idUsuario);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text(
               '${_modoEdicion ? 'Error al actualizar usuario' : 'Error al crear usuario'}: ${ApiService.traducirError(e)}'),

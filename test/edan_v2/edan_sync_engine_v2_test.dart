@@ -218,6 +218,54 @@ void main() {
       expect(fila.first['estado_sync'], 'confirmado');
     });
 
+    test('pull: NO contamina datos_json con metacampos del documento del '
+        'servidor (tipo_seccion / ids)', () async {
+      // Bug 2026-11-02 (log "Escoma"): el espejo guardaba la fila cruda con
+      // `tipo_seccion`, `id_edan_localidad` y `uuid_edan_localidad`; al
+      // reenviarlas en el PUT el servidor respondía "campo desconocido o no
+      // escribible para proteccion" y el Enviar fallaba con Push parcial.
+      await _seedFormulario('u-meta', localidad: 'Escoma');
+      await _seedFila('f-meta', 'u-meta',
+          tipo: 'proteccion', datos: '{"mujeres":1}');
+
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull({
+            'watermark': 'wm-meta',
+            'secciones': [
+              {
+                'uuid_registro': 'f-meta',
+                'uuid_edan_localidad': 'u-meta',
+                'tipo_seccion': 'proteccion',
+                'id_edan_localidad': 343711,
+                'mujeres': 4,
+                'fecha_modificacion': '2026-11-03T02:24:24.779',
+              },
+            ],
+          });
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        return _err(404, 'ruta no esperada');
+      });
+
+      await EdanSyncEngineV2(api: _api(client), db: db).sincronizar();
+
+      final fila = (await (await db.database).query('filas_seccion',
+              where: 'uuid_registro = ?', whereArgs: ['f-meta']))
+          .first;
+      expect(fila['tipo'], 'proteccion',
+          reason: 'la columna tipo se normaliza a ruta igual que antes');
+      final datos = jsonDecode(fila['datos_json'] as String)
+          as Map<String, dynamic>;
+      expect(datos.containsKey('tipo_seccion'), isFalse,
+          reason: 'reenviar tipo_seccion en el PUT pone la fila en error');
+      expect(datos.containsKey('id_edan_localidad'), isFalse);
+      expect(datos.containsKey('uuid_edan_localidad'), isFalse);
+      expect(datos['mujeres'], 4, reason: 'el contenido real sí persiste');
+    });
+
     test('pull NO toca estado ni items si hay push pendiente', () async {
       await _seedFormulario('u-dirty', localidad: 'Mia', pendientePush: 1);
       await (await db.database).update(
@@ -3913,6 +3961,225 @@ void main() {
       expect(capturada!.query, isEmpty,
           reason: '`Uri.replace(queryParameters: {})` emitía `/completo?`');
       expect(capturada!.path, endsWith('/formularios/u-url/completo'));
+    });
+  });
+
+  group('tombstones del pull no bloquean el ack (bug 2026-11-03)', () {
+    test('tombstone con id numérico y uuid sintético: la sync limpia termina '
+        'exitosa y el watermark avanza', () async {
+      // Réplica del registro_20261103_052515 del usuario (app limpia): el
+      // servidor manda para siempre los tombstones de los borrados viejos
+      // (incluidos ids sintéticos de diagnóstico). Antes: `as String?` con
+      // id numérico lanzaba TypeError → "Pull parcial: 1 de 28" → ack:false →
+      // alerta "Primera sincronización incompleta" PERMANENTE en cada sync.
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull({
+            'watermark': 'wm-tomb',
+            'formularios': [
+              {'uuid_edan_localidad': 'u-tomb', 'localidad': 'Limpia'},
+            ],
+            'tombstones': [
+              {'tabla': 'fotografias', 'id_registro': 123},
+              {
+                'tabla': 'edan_localidades',
+                'id_registro': 'aaaaaaaa-1111-4222-8333-ccccccccccc1',
+              },
+            ],
+          });
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        return _err(404, 'ruta no esperada');
+      });
+
+      final resumen =
+          await EdanSyncEngineV2(api: _api(client), db: db).sincronizar();
+
+      expect(resumen.exito, isTrue,
+          reason: 'un tombstone no aplicable es basura inofensiva: jamas '
+              'puede dejar la primera sync en "incompleta"');
+      expect(resumen.ultimoError, isNull);
+      final rows = await (await db.database)
+          .query('formularios',
+              where: 'uuid_edan_localidad = ?', whereArgs: ['u-tomb']);
+      expect(rows, hasLength(1), reason: 'el contenido sí se aplicó');
+      expect(await db.getConfig('sync_watermark_v2'), 'wm-tomb',
+          reason: 'el watermark se acks: los tombstones basura no volverán');
+    });
+  });
+
+  group('detallePushParcial (mensaje honesto del 200 con errores)', () {
+    test('lista SOLO las filas fallidas con su mensaje y los contadores', () {
+      // Réplica de la respuesta real de Escoma (2026-11-02): los primeros
+      // resultados son OK y el motivo está al final (proteccion tipo_seccion).
+      final data = {
+        'aplicados': 5,
+        'conflictos': 0,
+        'errores': 2,
+        'resultados': [
+          {'indice': 0, 'tipo': 'impacto_poblacion', 'estado': 'aplicado', 'message': 'OK'},
+          {'indice': 1, 'tipo': 'impacto_poblacion', 'estado': 'aplicado', 'message': 'OK'},
+          {
+            'indice': 2,
+            'tipo': 'proteccion',
+            'estado': 'error',
+            'message': "Campo desconocido o no escribible para proteccion: 'tipo_seccion'",
+          },
+          {
+            'indice': 3,
+            'tipo': 'proteccion',
+            'estado': 'error',
+            'message': "Campo desconocido o no escribible para proteccion: 'tipo_seccion'",
+          },
+        ],
+      };
+      final msg = EdanSyncEngineV2.detallePushParcial(data);
+      expect(msg, contains('tipo_seccion'),
+          reason: 'el motivo real debe aparecer (el take(3) viejo lo ocultaba)');
+      expect(msg, contains('i=2'));
+      expect(msg, contains('i=3'));
+      expect(msg, contains('errores=2'));
+      expect(msg, isNot(contains('i=0')),
+          reason: 'las filas aplicado OK no se listan como si fallaran');
+      expect(msg, isNot(contains('i=1')));
+    });
+
+    test('errores>0 sin fila fallida: lo dice explícitamente', () {
+      final msg = EdanSyncEngineV2.detallePushParcial({
+        'aplicados': 2,
+        'conflictos': 0,
+        'errores': 2,
+        'resultados': [
+          {'indice': 0, 'estado': 'aplicado', 'message': 'OK'},
+          {'indice': 1, 'estado': 'creado', 'message': 'OK'},
+        ],
+      });
+      expect(msg, contains('ninguna fila en estado error'));
+      expect(msg, contains('errores=2'));
+    });
+
+    test('resultados ausentes: no revienta, muestra los contadores', () {
+      final msg = EdanSyncEngineV2.detallePushParcial({'errores': 7});
+      expect(msg, contains('Push parcial'));
+      expect(msg, contains('errores=7'));
+    });
+  });
+
+  group('foto del pull: dueña resuelta y preservada (bug 2026-11-02)', () {
+    test('fotos[] sin `uuid_edan_localidad` (solo id numérico): se resuelve '
+        'la dueña y la galería ve la foto (flujo UGR: fotos descargadas)',
+        () async {
+      await _seedFormulario('u-foto-pull', localidad: 'Escoma');
+      final d0 = await db.database;
+      // El formulario ya sincronizado: id_server es la PK numérica que el
+      // servidor usa para identificar al dueño en `fotos`.
+      await d0.update(
+          'formularios',
+          {
+            'id_server': 343711,
+            'id_usuario': 55,
+            'id_municipio': 20701,
+          },
+          where: 'uuid_edan_localidad = ?',
+          whereArgs: ['u-foto-pull']);
+      // Dueña de la foto: padre `danos-vivienda` + hija (como en el documento
+      // real de Escoma: la foto apunta al uuid de la HIJA).
+      await _seedFila('padre-viv', 'u-foto-pull', tipo: 'danos-vivienda');
+      final d = await db.database;
+      await d.insert('viviendas', {
+        'uuid_registro': '1d65cb56-9775-462c-abb0-5c2152b41f51',
+        'uuid_dano_vivienda': 'padre-viv',
+        'tipo_dano': 'PARCIAL',
+      });
+
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull({
+            'watermark': 'wm-foto',
+            'fotos': [
+              {
+                'uuid_fotografia': '1978d46d-3508-44d4-bf3a-22eceda1db08',
+                'id_edan_localidad': 343711,
+                'tipo_entidad': 'vivienda',
+                'uuid_registro': '1d65cb56-9775-462c-abb0-5c2152b41f51',
+                'ruta_archivo': '/uploads/reports/020701/x.jpg',
+                'borrado_logico': false,
+                'fecha_modificacion': '2026-11-02T21:53:32',
+              },
+            ],
+          });
+        }
+        if (req.method == 'POST' && req.url.path.endsWith('/sync/ack')) {
+          return _ok();
+        }
+        return _err(404, 'ruta no esperada');
+      });
+
+      await EdanSyncEngineV2(api: _api(client), db: db).sincronizar();
+
+      final foto = (await d.query('fotografias',
+              where: 'uuid_fotografia = ?',
+              whereArgs: ['1978d46d-3508-44d4-bf3a-22eceda1db08']))
+          .first;
+      expect(foto['uuid_edan_localidad'], 'u-foto-pull',
+          reason: 'el REPLACE con "" dejaba la foto invisible para siempre en '
+              'la galería (JOIN con formularios)');
+      expect(foto['ruta_servidor'], '/uploads/reports/020701/x.jpg');
+
+      final store = EdanStoreV2(db: db);
+      final porUsuario =
+          await store.listarFotosGaleria(usuarioId: 55);
+      expect(porUsuario.map((f) => f.uuidFotografia),
+          contains('1978d46d-3508-44d4-bf3a-22eceda1db08'),
+          reason: 'galería RESP (fotos propias)');
+      final porMunicipio =
+          await store.listarFotosGaleriaPorMunicipio(idMunicipio: 20701);
+      expect(porMunicipio.map((f) => f.uuidFotografia),
+          contains('1978d46d-3508-44d4-bf3a-22eceda1db08'),
+          reason: 'galería UGR (alcance municipio) — el mismo JOIN');
+    });
+
+    test('foto ya enlazada: un pull sin datos resolubles NO la desenlaza',
+        () async {
+      await _seedFormulario('u-keep-foto');
+      final d = await db.database;
+      await d.insert('fotografias', {
+        'uuid_fotografia': 'foto-keep',
+        'uuid_edan_localidad': 'u-keep-foto',
+        'tipo_entidad': 'cabecera',
+        'uuid_registro': 'fantasma-x',
+        'ruta_servidor': '/uploads/a.jpg',
+        // ruta_local poblada: la fase de descarga del sync la ignora y el
+        // test se limita a la preservación del enlace.
+        'ruta_local': '/data/files/a.jpg',
+        'borrado_logico': 0,
+      });
+
+      final client = MockClient((req) async {
+        if (req.method == 'GET' && req.url.path.endsWith('/sync/pull')) {
+          return _pull({
+            'watermark': 'wm-keep',
+            'fotos': [
+              {
+                'uuid_fotografia': 'foto-keep',
+                'ruta_archivo': '/uploads/a.jpg',
+                'borrado_logico': false,
+              },
+            ],
+          });
+        }
+        return _ok();
+      });
+      await EdanSyncEngineV2(api: _api(client), db: db).sincronizar();
+
+      final foto = (await d.query('fotografias',
+              where: 'uuid_fotografia = ?', whereArgs: ['foto-keep']))
+          .first;
+      expect(foto['uuid_edan_localidad'], 'u-keep-foto',
+          reason: 'sin uuid en el pull, sin id_server y sin dueña local: '
+              'preservar el enlace existente (antes lo pisaba con "")');
     });
   });
 }

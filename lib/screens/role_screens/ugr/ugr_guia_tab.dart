@@ -8,6 +8,7 @@ import '../../../services/connectivity_service.dart';
 import '../../../services/motor_ia_service.dart';
 import '../../../providers/asistente_ia_provider.dart';
 import '../../../widgets/asistente_ia/asistente_ia_bottom_sheet.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrGuiaTab extends StatefulWidget {
   const UgrGuiaTab({super.key});
@@ -476,7 +477,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
     if (_descargando.contains(doc.id)) return;
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Sin conexión. Verifica tu red y reintenta.'),
             backgroundColor: AppColors.pending,
@@ -496,7 +497,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       _guardarDescargados();
       final res = await OpenFilex.open(path);
       if (res.type != ResultType.done && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('No se pudo abrir el PDF.'),
             backgroundColor: AppColors.rechazado,
@@ -505,7 +506,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
       }
     } catch (_) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Error al descargar el documento.'),
             backgroundColor: AppColors.rechazado,
@@ -522,7 +523,7 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
     if (path == null) return;
     final res = await OpenFilex.open(path);
     if (res.type != ResultType.done && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('No se pudo abrir el PDF.'),
           backgroundColor: AppColors.rechazado,

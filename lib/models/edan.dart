@@ -2648,6 +2648,7 @@ class EdanLocalidad {
         d.comunidad.trim().isNotEmpty ||
         d.danoParcial > 0 ||
         d.danoTotal > 0 ||
+        d.viviendas.isNotEmpty ||
         d.necesidadesInmediatas.trim().isNotEmpty ||
         d.observaciones.trim().isNotEmpty ||
         d.fotografia != null ||
@@ -3356,8 +3357,7 @@ class Edan {
     final lugares08 = <String>[
       for (final entry in localidades.asMap().entries)
         if (entry.value.grupVivienda &&
-            !entry.value.danosVivienda
-                .any((v) => v.danoParcial > 0 || v.danoTotal > 0))
+            !entry.value.danosVivienda.any((v) => v.viviendas.isNotEmpty))
           '${etiqueta(entry.value, entry.key)} (vivienda)',
     ];
     marcar('08', lugares08);

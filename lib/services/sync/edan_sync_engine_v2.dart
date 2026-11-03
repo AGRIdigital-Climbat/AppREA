@@ -152,6 +152,12 @@ class EdanSyncEngineV2 {
       }
       _fase('Finalizando');
       resumen = await _pushBorradosFotos(resumen);
+      // Higiene (última): fotos huérfanas nunca subidas cuya dueña no se
+      // persistió (capturar + salir sin guardar). Corre después de todas las
+      // fases de subida/descarga — no hay nada en tránsito — y con guarda de
+      // edad (7 días), de modo que una captura pendiente de su primer
+      // guardado (minutos) no puede ser tocada aunque dispare un auto-sync.
+      await _purgarFotosHuerfanasBestEffort();
       if (kSyncDebugMode) {
         SyncDebugCollector.instance.addDiagnostico('Resumen V2', {
           'exito': resumen.exito,
@@ -193,6 +199,25 @@ class EdanSyncEngineV2 {
       _fase('');
       if (kSyncDebugMode) SyncDebugCollector.instance.endSession();
       AppLogger.instance.sync(titulo: 'Sincronización V2: fin');
+    }
+  }
+
+  /// Envuelve [EdanStoreV2.purgarFotosHuerfanas] sin riesgo para la corrida:
+  /// una falla de higiene no puede volver `exito=false` un sync que ya
+  /// subió/bajó todo. Registra el resultado en el log global cuando purga.
+  Future<void> _purgarFotosHuerfanasBestEffort() async {
+    try {
+      final n = await EdanStoreV2.instance.purgarFotosHuerfanas();
+      if (n > 0) {
+        debugPrint('[SyncV2] fotos huerfanas purgadas: $n');
+        AppLogger.instance.sync(
+          titulo: 'Fotos huerfanas purgadas: $n',
+          detalle: 'nunca subidas, dueña inexistente y > 7 días '
+              '(capturas abandonadas sin guardar)',
+        );
+      }
+    } catch (e) {
+      debugPrint('[SyncV2] purga de fotos huerfanas omitida: $e');
     }
   }
 
@@ -409,8 +434,9 @@ class EdanSyncEngineV2 {
 
     var aplicado = true;
     int filasFallidas = 0;
+    int tombstonesFallidos = 0;
     String? primerError;
-    Future<void> aplicar(Future<void> Function() fn) async {
+    Future<void> aplicar(Future<void> Function() fn, {String item = '?'}) async {
       try {
         await fn();
       } catch (e) {
@@ -420,24 +446,56 @@ class EdanSyncEngineV2 {
         // NUNCA tragarse el fallo en silencio: antes un `catch (_) { }` dejaba
         // `exito=true` con 0 filas aplicadas → se marcaba la primera sync como
         // hecha y la lista quedaba VACÍA sin ningún aviso en el celular.
+        // El texto solo vivía en logcat: ahora queda en el registro de 24 h
+        // (log del usuario 2026-11-03: "1 de 28 falló" sin poder identificar
+        // NI el ítem NI el error).
+        AppLogger.instance.sync(
+          nivel: AppLogLevel.warn,
+          titulo: 'Pull V2: no aplicada $item',
+          detalle: '$e',
+        );
         debugPrint('[SyncV2] pull: fila no aplicada ($filasFallidas): $e');
       }
     }
 
     for (final r in formularios) {
-      await aplicar(() => _aplicarFormularioPull(r));
+      await aplicar(() => _aplicarFormularioPull(r),
+          item: 'formulario ${r['uuid_edan_localidad'] ?? '?'}');
     }
     for (final r in secciones) {
-      await aplicar(() => _aplicarSeccionPull(r));
+      await aplicar(() => _aplicarSeccionPull(r),
+          item: 'seccion ${r['uuid_registro'] ?? '?'}'
+              ' (${r['tipo_seccion'] ?? r['tipo'] ?? '?'})');
     }
     for (final r in viviendas) {
-      await aplicar(() => _aplicarViviendaPull(r));
+      await aplicar(() => _aplicarViviendaPull(r),
+          item: 'vivienda ${r['uuid_registro'] ?? '?'}');
     }
     for (final r in fotos) {
-      await aplicar(() => _aplicarFotoPull(r));
+      await aplicar(() => _aplicarFotoPull(r),
+          item: 'foto ${r['uuid_fotografia'] ?? '?'}');
     }
+    // Un tombstone que no se pudo aplicar NO bloquea el ack del watermark:
+    // es un borrado, su fallo significa "no había nada que borrar" (app
+    // limpia: el servidor manda para siempre los tombstones de datos de
+    // diagnóstico viejos, p. ej. uuids sintéticos `aaaa-...`). Bloquear acá
+    // dejaba el watermark clavado, el mismo tombstone fallando en cada sync y
+    // la alerta "Primera sincronización incompleta" PERMANENTE (bug
+    // 2026-11-03, registro_20261103_052515: fallidas:1, ack:false).
     for (final t in tombstones) {
-      await aplicar(() => _aplicarTombstonePull(t));
+      final idT = (t['id_registro'] ?? t['uuid_registro'])?.toString() ?? '?';
+      try {
+        await _aplicarTombstonePull(t);
+      } catch (e) {
+        tombstonesFallidos++;
+        AppLogger.instance.sync(
+          nivel: AppLogLevel.warn,
+          titulo: 'Pull V2: tombstone no aplicado '
+              '${t['tabla'] ?? '?'}/$idT (no bloquea el ack)',
+          detalle: '$e',
+        );
+        debugPrint('[SyncV2] pull: tombstone no aplicado ($idT): $e');
+      }
     }
 
     if (kSyncDebugMode) {
@@ -448,6 +506,8 @@ class EdanSyncEngineV2 {
         'fotos': fotos.length,
         'tombstones': tombstones.length,
         'fallidas': filasFallidas,
+        'tombstones_fallidos': tombstonesFallidos,
+        'primer_error': primerError,
         'watermark': nuevoWatermark,
         'ack': aplicado,
       });
@@ -817,6 +877,10 @@ class EdanSyncEngineV2 {
             !fila.containsKey('impactado')) {
           fila['afectado'] = true;
         }
+        // No contaminar `datos_json` con los meta-campos del documento del
+        // servidor (ver `sinMetaServidor`): reenviarlos en el PUT pone la
+        // fila en error (proteccion, 2026-11-02).
+        sinMetaServidor(fila);
         await db.insert(
           'filas_seccion',
           {
@@ -976,6 +1040,11 @@ class EdanSyncEngineV2 {
         !r.containsKey('impactado')) {
       r['afectado'] = true;
     }
+    // El documento del servidor trae por fila `tipo_seccion` e ids servidos;
+    // persistirlos contamina `datos_json` y el PUT de vuelta los rechaza
+    // ("campo desconocido o no escribible", proteccion 2026-11-02). El tipo
+    // YA quedó capturado en la variable `tipo` (columna `tipo`).
+    sinMetaServidor(r);
     await db.insert(
       'filas_seccion',
       {
@@ -1022,18 +1091,54 @@ class EdanSyncEngineV2 {
     }
   }
 
+  /// Resuelve el `uuid_edan_localidad` dueño de una foto del pull. El
+  /// servidor NO siempre manda el campo dentro de `fotos` (a veces solo el
+  /// `id_edan_localidad` numérico y el `uuid_registro` de la dueña — verificado
+  /// en vivo 2026-11-02 con el documento de "Escoma"): escribir `''` en ese
+  /// caso deja la foto invisible en la galería (el JOIN con `formularios`)
+  /// para SIEMPRE, y en REPLACE pisa el valor ya resuelto localmente. Cadena:
+  /// campo directo → formulario por `id_server` → dueña local (la foto es de
+  /// cabecera, de fila de sección, o de hija `viviendas` → fila del padre).
+  /// `null` = irresoluble.
+  Future<String?> _resolverUuidLocalidadFoto(
+    DatabaseExecutor db,
+    Map<String, dynamic> r,
+  ) async {
+    final directo = r['uuid_edan_localidad'] as String?;
+    if (directo != null && directo.isNotEmpty) return directo;
+    // El documento del servidor identifica al formulario por su PK numérica
+    // (`id_edan_localidad` = `formularios.id_server` local): única vía cuando
+    // el pull no manda el uuid.
+    if (r['id_edan_localidad'] != null) {
+      final f = await db.query(
+        'formularios',
+        columns: ['uuid_edan_localidad'],
+        where: 'id_server = ?',
+        whereArgs: [r['id_edan_localidad']],
+        limit: 1,
+      );
+      if (f.isNotEmpty) {
+        final u = f.first['uuid_edan_localidad'] as String?;
+        if (u != null && u.isNotEmpty) return u;
+      }
+    }
+    // Dueña local de la fila `uuid_registro` (cabecera, sección, vivienda o
+    // foto): cadena ya probada en `_uuidLocalidadDeRegistro`.
+    return _uuidLocalidadDeRegistro((r['uuid_registro'] ?? '').toString());
+  }
+
   Future<void> _aplicarFotoPull(Map<String, dynamic> r) async {
     final uuid = r['uuid_fotografia'] as String?;
     if (uuid == null || uuid.isEmpty) return;
     final db = await _db.database;
     final borrado = r['borrado_logico'] == true || r['borrado_logico'] == 1;
+    final duenoResuelto = await _resolverUuidLocalidadFoto(db, r);
     if (!borrado) {
       // No revivir fotos de una localidad con `D` pendiente (el dueño sale
-      // del dato del pull).
-      final dueno = r['uuid_edan_localidad'] as String?;
-      if (dueno != null &&
-          dueno.isNotEmpty &&
-          await _tieneDeletePendiente(dueno)) {
+      // del dato del pull, resuelto con la cadena completa).
+      if (duenoResuelto != null &&
+          duenoResuelto.isNotEmpty &&
+          await _tieneDeletePendiente(duenoResuelto)) {
         return;
       }
     }
@@ -1065,7 +1170,7 @@ class EdanSyncEngineV2 {
     // se limpia ruta/error/intentos para bajar la nueva.
     final previa = await db.query(
       'fotografias',
-      columns: ['ruta_local', 'ruta_servidor', 'last_error'],
+      columns: ['ruta_local', 'ruta_servidor', 'last_error', 'uuid_edan_localidad'],
       where: 'uuid_fotografia = ?',
       whereArgs: [uuid],
       limit: 1,
@@ -1082,11 +1187,19 @@ class EdanSyncEngineV2 {
         errorPrevio = previa.first['last_error'] as String?;
       }
     }
+    // Enlace del dueño para el REPLACE de abajo: lo que el pull trae o se
+    // puede resolver; si nada resuelve, PRESERVAR el enlace local existente
+    // (pisarlo con '' invisibilizaba la foto en la galería de ambos roles).
+    var uuidLocFoto = duenoResuelto;
+    if ((uuidLocFoto == null || uuidLocFoto.isEmpty) && previa.isNotEmpty) {
+      final local = previa.first['uuid_edan_localidad'] as String?;
+      if (local != null && local.isNotEmpty) uuidLocFoto = local;
+    }
     await db.insert(
       'fotografias',
       {
         'uuid_fotografia': uuid,
-        'uuid_edan_localidad': r['uuid_edan_localidad'] as String? ?? '',
+        'uuid_edan_localidad': uuidLocFoto ?? '',
         'tipo_entidad': r['tipo_entidad'] ?? '',
         'uuid_registro': r['uuid_registro'] ?? '',
         'ruta_servidor': r['ruta_archivo'],
@@ -1380,7 +1493,10 @@ class EdanSyncEngineV2 {
 
   Future<void> _aplicarTombstonePull(Map<String, dynamic> t) async {
     final tabla = t['tabla'] as String? ?? '';
-    final id = (t['id_registro'] ?? t['uuid_registro']) as String?;
+    // `toString()` defensivo: el servidor puede traer el id numérico en
+    // alguna tabla y un `as String?` lanzaría TypeError (que hoy ya no
+    // bloquea el ack, pero tampoco debe ensuciar el registro).
+    final id = (t['id_registro'] ?? t['uuid_registro'])?.toString();
     if (id == null || id.isEmpty) return;
     // P6: nunca pisar una localidad sucia (pendiente_push/cola): el push
     // local es la fuente de verdad y el tombstone se re-evalúa en el próximo
@@ -2061,11 +2177,9 @@ class EdanSyncEngineV2 {
     final data = resp.data ?? {};
     final errores = (data['errores'] as num?)?.toInt() ?? 0;
     if (errores > 0) {
-      final resultados = data['resultados'];
       throw EdanApiError(
         statusCode: 200,
-        detail: 'Push parcial: $errores error(es): '
-            '${resultados is List ? resultados.take(3).join(' | ') : resultados}',
+        detail: detallePushParcial(data),
         rawBody: data,
       );
     }
@@ -2431,6 +2545,49 @@ class EdanSyncEngineV2 {
   /// tipo no tiene filas V2, el snapshot `formularios.datos_json`); como las
   /// 14 flags se derivan del MISMO conjunto, es imposible que un `imp_*` salga
   /// en `true` con su sección vacía — que era el fallo reportado.
+  /// Quita de la fila los **meta-campos del documento del servidor** que no
+  /// son columnas escribibles de `/completo`: el espejo los trae por fila
+  /// (`sync/pull → secciones[].tipo_seccion`, ids servidos) y reenviarlos
+  /// hace que el servidor rechace la fila entera — verificado en vivo
+  /// 2026-11-02: 7 filas de `proteccion` en error con
+  /// "Campo desconocido o no escribible para proteccion: 'tipo_seccion'".
+  /// Se usa al persistir el espejo (no contaminar `datos_json`) Y al armar el
+  /// wire (descontaminar filas ya persistidas en BD de dispositivos viejos).
+  static void sinMetaServidor(Map<String, dynamic> fila) {
+    fila
+      ..remove('tipo_seccion')
+      ..remove('id_edan_localidad')
+      ..remove('uuid_edan_localidad');
+  }
+
+  /// Detalle HONESTO de un push 200 con `errores > 0`: lista SOLO las filas
+  /// fallidas (`estado` distinto de aplicado/creado/omitido) con su mensaje,
+  /// más los contadores del servidor. El mensaje viejo (`take(3)`) mostraba
+  /// las primeras filas — casi siempre OK — y ocultaba el motivo real.
+  static String detallePushParcial(Map<String, dynamic> data) {
+    final contadores = 'aplicados=${data['aplicados'] ?? '?'} '
+        'conflictos=${data['conflictos'] ?? '?'} '
+        'errores=${data['errores'] ?? '?'}';
+    final resultados = data['resultados'];
+    if (resultados is! List) {
+      return 'Push parcial ($contadores): resultados=${resultados ?? 'ausentes'}';
+    }
+    const ok = {'aplicado', 'creado', 'omitido'};
+    final fallidas = resultados
+        .whereType<Map>()
+        .where((r) => !ok.contains((r['estado'] ?? '').toString()))
+        .toList();
+    if (fallidas.isEmpty) {
+      return 'Push parcial ($contadores): ninguna fila en estado error '
+          '(inconsistencia del servidor)';
+    }
+    final detalle = fallidas.map((r) {
+      return '{i=${r['indice']} t=${r['tipo']} estado=${r['estado']} '
+          'msg=${r['message']}}';
+    }).join(' | ');
+    return 'Push parcial ($contadores): $detalle';
+  }
+
   static Future<Map<String, dynamic>> prepararPayloadCompleto(
     String uuid,
     Map<String, Object?> row, {
@@ -2534,6 +2691,10 @@ class EdanSyncEngineV2 {
         datos.remove('afectado');
         datos.remove('impactado');
         datos.remove('marcado');
+        // Meta-campos que el espejo dejó persistidos en BD en dispositivos
+        // anteriores a este fix: fuera del wire siempre (el servidor los
+        // rechaza o ignora; proteccion responde 200 con fila en error).
+        sinMetaServidor(datos);
         // Contrato impacto por grupo etario: con `id_grupo_etario` presente
         // el servidor RECHAZA `rango` (400 por fila: "Campo desconocido o no
         // escribible para impacto_poblacion: 'rango'") — resuelve el grupo

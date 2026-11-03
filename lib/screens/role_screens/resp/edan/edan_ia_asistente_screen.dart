@@ -27,6 +27,7 @@ import '../../../../providers/edan_ia_borrador_provider.dart';
 import '../../../../services/edan_ia/edan_traduccion.dart';
 import '../../../../services/edan/edan_store_v2.dart';
 import 'edan_ia_paso_fotos.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Pantalla de conversación. Recibe el provider ya construido para que la
 /// pantalla no dependa de cómo se arma la dependencia.
@@ -122,7 +123,7 @@ class _EdanIaAsistenteScreenState extends State<EdanIaAsistenteScreen> {
 
   void _avisar(String texto, Color color) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    showAppSnackBar(context, SnackBar(
       content: Text(texto),
       backgroundColor: color,
       duration: const Duration(seconds: 4),
@@ -136,7 +137,7 @@ class _EdanIaAsistenteScreenState extends State<EdanIaAsistenteScreen> {
   Future<void> _copiar(String texto) async {
     await Clipboard.setData(ClipboardData(text: texto));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+    showAppSnackBar(context, const SnackBar(
       content: Text('Mensaje copiado'),
       backgroundColor: AppColors.aprobado,
       duration: Duration(seconds: 2),

@@ -9,6 +9,7 @@ import '../../../models/edan.dart';
 import '../../../services/api_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrRecursoUploadScreen extends StatefulWidget {
   final Edan edan;
@@ -95,7 +96,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al seleccionar archivo: $e'),
             backgroundColor: AppColors.error,
@@ -108,7 +109,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
   Future<void> _subirDocumento() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedFile == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('Selecciona un archivo PDF primero.'),
           backgroundColor: AppColors.pending,
@@ -118,7 +119,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
     }
 
     if (_selectedTipoId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('Selecciona un tipo de documento.'),
           backgroundColor: AppColors.pending,
@@ -128,7 +129,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
     }
 
     if (edan.idDepartamento == null || edan.idProvincia == null || edan.idMunicipio == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('El EDAN no tiene ubicación completa.'),
           backgroundColor: AppColors.error,
@@ -138,7 +139,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
     }
 
     if (!ConnectivityService().isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('Sin conexión. Verifica tu red y reintenta.'),
           backgroundColor: AppColors.pending,
@@ -177,7 +178,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al preparar el archivo: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -211,7 +212,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Documento subido exitosamente.'),
             backgroundColor: AppColors.aprobado,
@@ -221,7 +222,7 @@ class _UgrRecursoUploadScreenState extends State<UgrRecursoUploadScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al subir: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,

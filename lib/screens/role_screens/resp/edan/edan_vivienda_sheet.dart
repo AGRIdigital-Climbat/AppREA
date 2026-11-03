@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
 import '../../../../models/edan_registro_v2.dart';
+import '../../../../services/app_logger_ui.dart';
 import '../../../../services/edan/edan_store.dart';
 import 'edan_boton_sacar_foto.dart';
 
@@ -305,14 +306,14 @@ class _SheetViviendaState extends State<_SheetVivienda> {
   }
 
   void _aviso(String mensaje) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(mensaje),
-          backgroundColor: AppColors.error,
-        ),
-      );
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    showAppSnackBar(
+      context,
+      SnackBar(
+        content: Text(mensaje),
+        backgroundColor: AppColors.error,
+      ),
+    );
   }
 
   void _guardar() {

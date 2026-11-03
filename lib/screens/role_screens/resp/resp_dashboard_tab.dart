@@ -13,6 +13,7 @@ import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
 import 'edan/edan_preview_resp_screen.dart';
 import '../ugr/ugr_route.dart';
+import '../../../services/app_logger_ui.dart';
 
 /// Listado visible de la pestaña Reportes: filtro por estado (los indicadores)
 /// + búsqueda por nombre/tipo, aplicados EN EL SITIO sobre `origen`.
@@ -306,7 +307,7 @@ class RespDashboardTabState extends State<RespDashboardTab>
         await DatabaseHelper.instance.deleteLocalidad(idLocal);
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text(
               fueSincronizada
@@ -320,7 +321,7 @@ class RespDashboardTabState extends State<RespDashboardTab>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error: $e'),
             backgroundColor: AppColors.error,
@@ -387,7 +388,7 @@ class RespDashboardTabState extends State<RespDashboardTab>
         UgrLocalidadEstado.borrador => 'Borrador sincronizado al servidor',
         _ => 'Localidad enviada al UGR',
       };
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text(
             sincronizada

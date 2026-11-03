@@ -18,6 +18,7 @@ import '../resp/edan/edan_form_wizard.dart';
 import '../resp/edan/edan_preview_resp_screen.dart';
 import '../../../widgets/edan_galeria_view.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
+import '../../../services/app_logger_ui.dart';
 
 enum _VistaLocalidades { todos, sinConsolidar, consolidadas, galeria }
 
@@ -252,7 +253,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           if (localidad.idTipoEvento == tipoActual) {
             _seleccionadas.add(idServer);
           } else {
-            ScaffoldMessenger.of(context).showSnackBar(
+            showAppSnackBar(context, 
               const SnackBar(
                 content: Text('Solo puede consolidar localidades del mismo tipo de evento'),
                 backgroundColor: AppColors.pending,
@@ -269,7 +270,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
         l.estadoLocalidad == UgrLocalidadEstado.aprobadoUgr &&
         (l.idEdan == null || l.idEdan == 0)).toList();
     if (aprobadas.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         const SnackBar(
           content: Text('No hay localidades aprobadas sin consolidar para consolidar'),
           backgroundColor: AppColors.pending,
@@ -341,7 +342,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     if (municipioId == null) return;
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
         );
       }
@@ -371,7 +372,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
             usuarioId: usuarioId,
           );
         }
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('EDAN consolidado correctamente'),
             backgroundColor: AppColors.aprobado,
@@ -384,7 +385,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text('Error al consolidar: ${ApiService.traducirError(e)}'), backgroundColor: AppColors.error),
         );
       }
@@ -430,7 +431,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
         );
       }
@@ -439,7 +440,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
     try {
       await ApiService.instance.cambiarEstadoLocalidad(idLocalidad, nuevoEstado);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Estado cambiado a ${estado.label}'),
             backgroundColor: estado.color,
@@ -449,7 +450,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text(ApiService.traducirError(e)), backgroundColor: AppColors.error),
         );
       }
@@ -1046,7 +1047,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text(ApiService.traducirError(e)), backgroundColor: AppColors.error),
         );
       }
@@ -1118,7 +1119,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           await db.markLocalidadAsPendingDeletion(idLocal);
         }
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Localidad eliminada del servidor'),
             backgroundColor: AppColors.aprobado,
@@ -1127,7 +1128,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       } else if (localidad.sincronizado) {
         await db.markLocalidadAsPendingDeletion(idLocal);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Localidad marcada para eliminación. Se borrará al sincronizar.'),
             backgroundColor: AppColors.pending,
@@ -1136,7 +1137,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       } else {
         await db.deleteLocalidad(idLocal);
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Localidad eliminada'),
             backgroundColor: AppColors.aprobado,
@@ -1146,7 +1147,7 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       await _cargarDatos();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text('Error al eliminar: $e'),
           backgroundColor: AppColors.rechazado,

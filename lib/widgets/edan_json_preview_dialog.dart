@@ -10,6 +10,7 @@ import '../services/api/edan_api_v2.dart';
 import '../services/database_helper.dart';
 import '../services/edan/edan_localidades_envio_v2_service.dart';
 import '../services/sync/edan_sync_engine_v2.dart';
+import '../services/app_logger_ui.dart';
 
 /// Depurador del ciclo EDAN (long-press en las tarjetas de localidad).
 ///
@@ -274,7 +275,7 @@ class _JsonPreviewBodyState extends State<_JsonPreviewBody> {
   void _copiar(String texto, String mensaje) {
     if (texto.isEmpty) return;
     Clipboard.setData(ClipboardData(text: texto));
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       SnackBar(
         content: Text(mensaje),
         backgroundColor: AppColors.primary,

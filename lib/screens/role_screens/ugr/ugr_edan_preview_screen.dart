@@ -15,6 +15,7 @@ import 'crear_usuario_screen.dart';
 import 'ugr_edan_localidad_preview_screen.dart';
 import 'ugr_recurso_upload_screen.dart';
 import 'ugr_route.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrEdanPreviewScreen extends StatefulWidget {
   final Edan edan;
@@ -421,7 +422,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     if (nuevoId != null && mounted) {
       if (!ConnectivityService().isConnected) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
           );
         }
@@ -439,7 +440,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
         await _guardarAlcalde();
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             SnackBar(
               content: Text('Error al obtener datos del usuario: ${ApiService.traducirError(e)}'),
               backgroundColor: AppColors.error,
@@ -464,7 +465,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
   Future<void> _editarAlcalde(Usuario u) async {
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
         );
       }
@@ -495,7 +496,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     if (edanId == null) return;
     if (edan.idUsuario != null && edan.idUsuario != AuthService.instance.userId) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(content: Text('Solo el creador puede editar este EDAN.'), backgroundColor: AppColors.pending),
         );
       }
@@ -505,14 +506,14 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       if (edan.idLocal != null) {
         await DatabaseHelper.instance.updateEdan(edan);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             const SnackBar(content: Text('Alcalde guardado localmente. Se sincronizará cuando haya conexión.'), backgroundColor: AppColors.pending),
           );
           setState(() {});
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
           );
         }
@@ -531,7 +532,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
         },
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Alcalde asignado correctamente'),
             backgroundColor: AppColors.aprobado,
@@ -541,7 +542,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al guardar: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -583,14 +584,14 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       if (edan.idLocal != null) {
         await DatabaseHelper.instance.markEdanAsPendingDeletion(edan.idLocal!);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             const SnackBar(content: Text('EDAN marcado para eliminar. Se procesará al sincronizar.'), backgroundColor: AppColors.pending),
           );
           Navigator.of(context).pop(true);
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          showAppSnackBar(context, 
             const SnackBar(content: Text('Sin conexión. Verifica tu red y reintenta.'), backgroundColor: AppColors.pending),
           );
         }
@@ -601,7 +602,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     try {
       await ApiService.instance.deshacerEdan(edanId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('EDAN deshecho correctamente. Localidades liberadas.'),
             backgroundColor: AppColors.aprobado,
@@ -611,7 +612,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al deshacer: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -2034,7 +2035,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
 
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('No se pudo abrir: ${result.message}'),
             backgroundColor: AppColors.error,
@@ -2043,7 +2044,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al abrir documento: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -2063,7 +2064,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Documento descargado: $fileName'),
             backgroundColor: AppColors.aprobado,
@@ -2072,7 +2073,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al descargar: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -2112,7 +2113,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     if (idDoc == null) return;
     if (!ConnectivityService().isConnected) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Sin conexión. No se puede eliminar.'),
             backgroundColor: AppColors.pending,
@@ -2124,7 +2125,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
     try {
       await ApiService.instance.eliminarDocRepositorioHard(idDoc);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Documento eliminado.'),
             backgroundColor: AppColors.aprobado,
@@ -2134,7 +2135,7 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al eliminar: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,

@@ -24,6 +24,7 @@ import 'ugr/ugr_localidades_tab.dart';
 import 'ugr/ugr_route.dart';
 import 'resp/edan/edan_form_wizard.dart';
 import 'resp/resp_mapa_tab.dart';
+import '../../services/app_logger_ui.dart';
 
 class UgrScreen extends StatefulWidget {
   const UgrScreen({super.key});
@@ -504,7 +505,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
         ? (result.exito ? 'Sin cambios por enviar.' : 'La sincronización falló.')
         : partes.join(' · ');
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       SnackBar(
         content: Text(
           result.exito

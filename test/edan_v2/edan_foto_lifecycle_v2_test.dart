@@ -16,6 +16,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:path/path.dart' as p;
 import 'package:rea/models/edan.dart';
+import 'package:rea/models/edan_registro_v2.dart';
 import 'package:rea/services/api/edan_api_v2.dart';
 import 'package:rea/services/database_helper.dart';
 import 'package:rea/services/edan/edan_store_v2.dart';
@@ -639,6 +640,164 @@ void main() {
       expect(await vieja.exists(), isFalse);
       expect(await _filasFoto('f-pend'), hasLength(1),
           reason: 'la pendiente local sobrevive al pull');
+    });
+  });
+
+  group('galería: dueña de la foto resuelta / auto-reparación '
+      '(bug 2026-11-02)', () {
+    // Como hace el wizard (`_agregarVivienda`): el uuid de la hija nace
+    // ANTES de la captura y es uuid válido (uno inválido sería regenerado al
+    // persistir, y la foto quedaría apuntando a un dueño fantasma).
+    const hijaUuid = '1d65cb56-9775-462c-abb0-5c2152b41f51';
+    const hijaUuid2 = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
+
+    test('foto de hija capturada ANTES de guardar: guardarTodo la enlaza y '
+        'la galería la ve', () async {
+      final store = await _store();
+      final loc = EdanLocalidad(nombre: 'Escoma', idTipoEvento: 40)
+        ..grupVivienda = true
+        ..danosVivienda = [EdanDanoVivienda(comunidad: 'Escoma')];
+      loc.danosVivienda.first.viviendas = [
+        EdanVivienda(
+          uuidRegistro: hijaUuid,
+          tipoDano: EdanViviendaTipo.total,
+          coordenadaLat: -16.5,
+          coordenadaLon: -68.1,
+        ),
+      ];
+
+      // Captura en la hoja de la vivienda: la dueña AÚN no existe en SQLite
+      // (el guardado de la página corre después). Así nacía la foto huerfana.
+      final foto = EdanFoto(
+        ruta: p.join(dir.path, 'hija.jpg'),
+        latitud: -16.5,
+        longitud: -68.1,
+      );
+      await store.registrarFoto(foto, 'vivienda', hijaUuid);
+      var rows = await _filasFoto(foto.uuidFotografia!);
+      expect(rows.first['uuid_edan_localidad'], '',
+          reason: 'sin dueña persistida el registro queda vacío (pre-fix '
+              'era invisible para siempre en la galería)');
+
+      // Guardar la página: persiste padre + hija y la auto-reparación de
+      // `guardarTodo` enlaza la foto al formulario.
+      await store.guardarTodo(loc,
+          usuarioId: 7, tipos: const ['danos-vivienda']);
+      rows = await _filasFoto(foto.uuidFotografia!);
+      expect(rows.first['uuid_edan_localidad'], loc.uuidEdanLocalidad,
+          reason: 'la foto huerfana se reubica al existir ahora su dueña');
+
+      // Y la galería del rol 7 (JOIN con `formularios` por id_usuario) la
+      // muestra.
+      final fotos = await store.listarFotosGaleria(usuarioId: 7);
+      expect(fotos.map((f) => f.uuidFotografia),
+          contains(foto.uuidFotografia));
+    });
+
+    test('re-captura de hija ya persistida: registrarFoto resuelve el dueño '
+        'por el JOIN viviendas→filas_seccion', () async {
+      final store = await _store();
+      final loc = EdanLocalidad(nombre: 'Escoma', idTipoEvento: 40)
+        ..grupVivienda = true
+        ..danosVivienda = [EdanDanoVivienda(comunidad: 'Escoma')];
+      loc.danosVivienda.first.viviendas = [
+        EdanVivienda(uuidRegistro: hijaUuid2, tipoDano: EdanViviendaTipo.parcial),
+      ];
+      await store.guardarTodo(loc,
+          usuarioId: 9, tipos: const ['danos-vivienda']);
+
+      final foto = EdanFoto(ruta: p.join(dir.path, 'hija2.jpg'));
+      await store.registrarFoto(foto, 'vivienda', hijaUuid2);
+      final rows = await _filasFoto(foto.uuidFotografia!);
+      expect(rows.first['uuid_edan_localidad'], loc.uuidEdanLocalidad,
+          reason: 'el fallback de dueña vía viviendas (antes ausente) resuelve '
+              'en el propio registrarFoto, sin esperar al guardado');
+
+      final fotos = await store.listarFotosGaleria(usuarioId: 9);
+      expect(fotos.map((f) => f.uuidFotografia),
+          contains(foto.uuidFotografia));
+    });
+  });
+
+  group('purga fotos huerfanas (fuga "capturar + salir sin guardar")', () {
+    Future<void> seedFoto(
+      String uuid, {
+      required String duena,
+      String loc = '',
+      String? rutaLocal,
+      String? rutaServidor,
+      String? creado, // omitido => datetime('now') por defecto
+    }) async {
+      final d = await db.database;
+      await d.insert('fotografias', {
+        'uuid_fotografia': uuid,
+        'uuid_edan_localidad': loc,
+        'tipo_entidad': 'danos-viales',
+        'uuid_registro': duena,
+        'ruta_local': rutaLocal,
+        'ruta_servidor': rutaServidor,
+        'borrado_logico': 0,
+        'created_at': ?creado,
+      });
+    }
+
+    test('borra SOLO la nunca-subida sin dueña y vieja; preserva el resto',
+        () async {
+      final store = await _store();
+      await _seedDuena(loc: 'loc-p', fila: 'padre-p');
+      const viejisima = '2020-01-01 00:00:00';
+      final rutaOrphan = p.join(dir.path, 'orphan.jpg');
+      File(rutaOrphan).writeAsBytesSync([0xFF, 0xD8, 0xFF, 0xD9]);
+      final rutaLive = p.join(dir.path, 'live.jpg');
+      File(rutaLive).writeAsBytesSync([0xFF, 0xD8, 0xFF, 0xD9]);
+
+      // 1) Huérfana real: sin localidad, dueña inexistente, nunca subida,
+      //    viejísima. Su entrada de `cola_fotos` debe correr la misma suerte.
+      await seedFoto('f-orphan',
+          duena: 'duena-fantasma', rutaLocal: rutaOrphan, creado: viejisima);
+      final d = await db.database;
+      await d.insert('cola_fotos', {
+        'uuid_fotografia': 'f-orphan',
+        'ruta_local': rutaOrphan,
+        'estado': 'pendiente',
+      });
+      // 2) Captura RECIÉN tomada esperando su primer guardado (auto-sync a
+      //    mitad de edición): la guarda de edad debe protegerla SIEMPRE.
+      await seedFoto('f-live', duena: 'duena-fantasma-2', rutaLocal: rutaLive);
+      // 3) Vieja, sin enlace, pero con dueña fila existente: el heal de
+      //    `guardarTodo` la enlazará al guardarse; no es basura.
+      await seedFoto('f-ok', duena: 'padre-p', creado: viejisima);
+      // 4) Vieja sin enlace PERO ya subida al servidor: intocable.
+      await seedFoto('f-srv',
+          duena: 'duena-fantasma-3',
+          creado: viejisima,
+          rutaServidor: '/uploads/x.jpg');
+      // 5) Dueña = el propio formulario (foto de cabecera) → existe.
+      await seedFoto('f-cab', duena: 'loc-p', creado: viejisima);
+
+      final n = await store.purgarFotosHuerfanas();
+      expect(n, 1, reason: 'solo la huérfana real (f-orphan)');
+      expect(
+          await d.query('fotografias',
+              where: 'uuid_fotografia = ?', whereArgs: ['f-orphan']),
+          isEmpty);
+      expect(
+          await d.query('cola_fotos',
+              where: 'uuid_fotografia = ?', whereArgs: ['f-orphan']),
+          isEmpty);
+      expect(File(rutaOrphan).existsSync(), isFalse,
+          reason: 'el archivo local también se reclama');
+      for (final id in ['f-live', 'f-ok', 'f-srv', 'f-cab']) {
+        expect(
+            await d.query('fotografias',
+                where: 'uuid_fotografia = ?', whereArgs: [id]),
+            hasLength(1),
+            reason: '$id debe sobrevivir');
+      }
+      expect(File(rutaLive).existsSync(), isTrue);
+
+      // Idempotente: la segunda pasada no encuentra nada.
+      expect(await store.purgarFotosHuerfanas(), 0);
     });
   });
 }

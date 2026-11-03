@@ -10,6 +10,7 @@ import '../../../../services/edan/edan_documento_sync_service.dart';
 import '../../../../services/edan/edan_store.dart';
 import '../../../../services/sync/edan_sync_engine_v2.dart';
 import '../../../../widgets/custom_text_field.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Muestra un diálogo de confirmación antes de eliminar un ítem.
 /// Devuelve `true` si el usuario confirma la eliminación.
@@ -151,7 +152,7 @@ Future<bool> eliminarItemSeccion(
     final texto = conectado
         ? 'Eliminado exitoso'
         : 'Eliminado (se sincronizará al conectar)';
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       SnackBar(
         content: Text(texto),
         duration: const Duration(seconds: 2),

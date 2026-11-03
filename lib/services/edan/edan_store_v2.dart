@@ -267,8 +267,16 @@ class EdanStoreV2 implements EdanStore {
       await _guardarFormularioTx(txn, loc,
           usuarioId: usuarioId, seccionesActivas: seccionesActivas);
       final uuid = loc.uuidEdanLocalidad;
-      if (uuid != null && uuid.isNotEmpty && tipos.isNotEmpty) {
-        await _guardarFilasTx(txn, uuid, tipos, loc, guardarCabecera: false);
+      if (uuid != null && uuid.isNotEmpty) {
+        if (tipos.isNotEmpty) {
+          await _guardarFilasTx(txn, uuid, tipos, loc, guardarCabecera: false);
+        }
+        // Recién persistidas filas y viviendas: enlaza las fotos que se
+        // capturaron cuando su dueña AÚN no estaba en la BD (registrarFoto
+        // no pudo resolver el dueño y dejó `uuid_edan_localidad=''`). Sin
+        // esto la galería (JOIN con `formularios`) las oculta para siempre
+        // en el dispositivo de origen (bug 2026-11-02, primer registro).
+        await _reubicarFotosHuerfanasTx(txn, uuid);
       }
     });
     if (purgarInactivas) {
@@ -2461,6 +2469,26 @@ class EdanStoreV2 implements EdanStore {
         uuidEdanLocalidad = fila.first['uuid_edan_localidad'] as String?;
       }
     }
+    // Fallback: dueña hija 1:N (`viviendas`). Sin esto, la foto de una
+    // vivienda re-capturada quedaba con `uuid_edan_localidad = ''` y la
+    // galería (JOIN con `formularios`) la ocultaba para siempre
+    // (bug 2026-11-02: primer registro, galería vacía). Misma cadena que
+    // valida la subida en `cola_fotos` (viviendas → filas_seccion del padre).
+    if (uuidEdanLocalidad == null || uuidEdanLocalidad.isEmpty) {
+      final duena = await db.rawQuery(
+        '''
+        SELECT s.uuid_edan_localidad
+        FROM viviendas v
+        JOIN filas_seccion s ON s.uuid_registro = v.uuid_dano_vivienda
+        WHERE v.uuid_registro = ?
+        LIMIT 1
+        ''',
+        [uuidRegistro],
+      );
+      if (duena.isNotEmpty) {
+        uuidEdanLocalidad = duena.first['uuid_edan_localidad'] as String?;
+      }
+    }
 
     await db.insert(
       'fotografias',
@@ -2489,6 +2517,40 @@ class EdanStoreV2 implements EdanStore {
     await _retirarFotosAnterioresDuena(
         db, tipo, uuidRegistro, foto.uuidFotografia);
     _notifyPendientes();
+  }
+
+  /// Enlaza al formulario [uuid] las fotos cuya dueña (fila de sección o
+  /// vivienda hija) NO existía todavía en la BD cuando `registrarFoto` las
+  /// persistió con `uuid_edan_localidad = ''`. Idempotente y acotado: solo
+  /// toca filas con el uuid vacío cuyo `uuid_registro` pertenece ahora a este
+  /// formulario (mismo enlace `viviendas → filas_seccion` que valida la
+  /// subida en `cola_fotos`). Llamada desde `guardarTodo` tras persistir
+  /// filas + viviendas, de modo que la foto del "primer registro" se vuelve
+  /// visible en la galería en cuanto se guarda la página.
+  static Future<void> _reubicarFotosHuerfanasTx(
+    DatabaseExecutor ex,
+    String uuid,
+  ) async {
+    await ex.rawUpdate(
+      '''
+      UPDATE fotografias
+      SET uuid_edan_localidad = ?
+      WHERE (uuid_edan_localidad IS NULL OR uuid_edan_localidad = '')
+        AND (
+          uuid_registro IN (
+            SELECT uuid_registro FROM filas_seccion
+            WHERE uuid_edan_localidad = ?
+          )
+          OR uuid_registro IN (
+            SELECT v.uuid_registro
+            FROM viviendas v
+            JOIN filas_seccion s ON s.uuid_registro = v.uuid_dano_vivienda
+            WHERE s.uuid_edan_localidad = ?
+          )
+        )
+      ''',
+      [uuid, uuid, uuid],
+    );
   }
 
   /// Retira las fotos activas anteriores de una dueña al registrar su
@@ -2626,6 +2688,70 @@ class EdanStoreV2 implements EdanStore {
       }
     }
     _notifyPendientes();
+  }
+
+  /// Higiene de `fotografias`: borra fotos NUNCA subidas cuya dueña no existe
+  /// en ninguna tabla local, más antiguas que [maxVida]. Fuga real del flujo
+  /// "capturar + salir sin guardar" (auditado página por página, 2026-11-03):
+  /// `registrarFoto` persiste la foto con `uuid_edan_localidad=''` cuando la
+  /// dueña aún no estaba en SQLite; si además la fila nunca se guardó, ni la
+  /// auto-reparación de `guardarTodo` (la dueña no aparece), ni la cola de
+  /// subida (nunca se confirma), ni la galería (JOIN sin dueño) la alcanzan
+  /// jamás: fila + archivo quedan huérfanos para siempre.
+  ///
+  /// Condiciones (TODAS): registro activo (`borrado_logico = 0`), sin
+  /// `ruta_servidor` (nunca llegó al servidor), sin enlace de localidad, y el
+  /// `uuid_registro` no figura ni como fila, ni como vivienda, ni como
+  /// formulario. La guarda de edad ([maxVida], por defecto 7 días) es la
+  /// protección clave: una foto recién capturada espera su primer guardado
+  /// MINUTOS, nunca días, y jamás debe ser tocada aunque corra un auto-sync
+  /// en plena edición.
+  ///
+  /// Borra también la entrada de `cola_fotos` y el archivo local (best-effort;
+  /// un fallo de disco no aborta la purga). Devuelve el número de fotos
+  /// eliminadas. Nunca lanza.
+  Future<int> purgarFotosHuerfanas({Duration maxVida = const Duration(days: 7)}) async {
+    var purgadas = 0;
+    try {
+      final db = await _db.database;
+      final huerfanas = await db.rawQuery(
+        '''
+        SELECT f.uuid_fotografia AS u, f.ruta_local AS ruta
+        FROM fotografias f
+        WHERE f.borrado_logico = 0
+          AND (f.ruta_servidor IS NULL OR f.ruta_servidor = '')
+          AND (f.uuid_edan_localidad IS NULL OR f.uuid_edan_localidad = '')
+          AND f.created_at < datetime('now', ?)
+          AND NOT EXISTS (SELECT 1 FROM filas_seccion s
+                          WHERE s.uuid_registro = f.uuid_registro)
+          AND NOT EXISTS (SELECT 1 FROM viviendas v
+                          WHERE v.uuid_registro = f.uuid_registro)
+          AND NOT EXISTS (SELECT 1 FROM formularios fo
+                          WHERE fo.uuid_edan_localidad = f.uuid_registro)
+        ''',
+        ['-${maxVida.inDays} days'],
+      );
+      for (final h in huerfanas) {
+        final uuid = h['u'] as String?;
+        if (uuid == null || uuid.isEmpty) continue;
+        await db.delete('cola_fotos',
+            where: 'uuid_fotografia = ?', whereArgs: [uuid]);
+        await db.delete('fotografias',
+            where: 'uuid_fotografia = ?', whereArgs: [uuid]);
+        final ruta = h['ruta'] as String?;
+        if (ruta != null && ruta.isNotEmpty) {
+          try {
+            final f = File(ruta);
+            if (await f.exists()) await f.delete();
+          } catch (_) {}
+        }
+        purgadas++;
+      }
+      if (purgadas > 0) await _notifyPendientes();
+    } catch (e) {
+      debugPrint('[EdanStoreV2] purgarFotosHuerfanas omitida: $e');
+    }
+    return purgadas;
   }
 
   @override
@@ -3268,6 +3394,13 @@ class EdanStoreV2 implements EdanStore {
     'afectado',
     'impactado',
     'marcado',
+    // Meta-campos del espejo del servidor (`sinMetaServidor` del motor los
+    // quita del wire): la BD puede tener filas persistidas ANTES del fix con
+    // estas claves; sin excluirlas aquí, `firmaContenido` (cruda) divergiría
+    // de `firmaDePayload` (despojada) y `pendiente_push` no se limpiaria.
+    'tipo_seccion',
+    'id_edan_localidad',
+    'uuid_edan_localidad',
   };
 
   /// Canónico estable para firmar: claves ordenadas, listas de mapas
@@ -3292,6 +3425,37 @@ class EdanStoreV2 implements EdanStore {
 
   /// Firma sha256 de un documento normalizado
   /// `{cabecera, secciones:{tipo:[filas]}, viviendas:[...]}`.
+  /// Canoniza valores de cabecera sensibles al FORMATO antes de hashear.
+  ///
+  /// El servidor normaliza al espejar la cabecera recién creada:
+  /// `fecha_llenado` "2026-11-02T21:48:13.498893" → "2026-11-02" y
+  /// `hora_evento` "06:00" → "06:00:00". Sin canonizar, `firmaContenido`
+  /// recalculada tras aplicar el espejo divergía de `firmaDePayload` (lo
+  /// enviado) y `_confirmarPushLocalidad` dejaba `pendiente_push=1` aunque el
+  /// servidor hubiera aceptado todo → había que sincronizar DOS veces
+  /// (bug 2026-11-02, formulario "Escoma" del log del usuario).
+  ///
+  /// Es IDENTIDAD sobre los valores ya normalizados por el servidor, así que
+  /// las firmas de registros ya confirmados no cambian: nada resincroniza.
+  /// Sigue siendo sensible a cambios reales (otra fecha u hora distinta mueve
+  /// la firma).
+  static Object? _canonValorCabeceraFirma(String clave, Object? valor) {
+    if (valor is! String) return valor;
+    switch (clave) {
+      case 'fecha_llenado':
+        // "YYYY-MM-DDTHH:MM:SS..." → "YYYY-MM-DD"; la fecha suelta intacta.
+        if (valor.length > 10 && valor[10] == 'T') return valor.substring(0, 10);
+        return valor;
+      case 'hora_evento':
+        // "HH:MM" → "HH:MM:00"; "HH:MM:SS(.ms)" → "HH:MM:SS"; resto intacto.
+        if (valor.length == 5) return '$valor:00';
+        if (valor.length > 8 && valor[8] == '.') return valor.substring(0, 8);
+        return valor;
+      default:
+        return valor;
+    }
+  }
+
   static String firmaDeNormalizado(Map<String, dynamic> normalizado) {
     final cab = normalizado['cabecera'];
     final cabMap = cab is Map<String, dynamic>
@@ -3307,7 +3471,7 @@ class EdanStoreV2 implements EdanStore {
     final canon = {
       'cabecera': {
         for (final k in _clavesCabeceraFirma)
-          if (cabMap.containsKey(k)) k: cabMap[k],
+          if (cabMap.containsKey(k)) k: _canonValorCabeceraFirma(k, cabMap[k]),
       },
       'secciones': {
         for (final e in secMap.entries) e.key: _filasParaFirma(e.value),

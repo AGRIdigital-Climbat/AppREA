@@ -114,6 +114,23 @@ void main() {
           reason: 'padre + 1 hija completa');
     });
 
+    test('vivienda: flujo V2 (solo hijas, contadores del padre en 0) avanza',
+        () {
+      // Bug 2026-11-02: la página 08 nunca llena `dano_parcial`/`dano_total`
+      // del padre (son derivados); validar por ellos dejaba "Siguiente"
+      // apagado aunque el usuario ya tuviera viviendas capturadas.
+      final loc = _loc(const ['danos-vivienda']);
+      loc.danosVivienda = [
+        EdanDanoVivienda(comunidad: 'Barrio Norte')
+          ..viviendas = [EdanVivienda(tipoDano: EdanViviendaTipo.total)],
+      ];
+      expect(
+          EdanSeccionesRegistry.bloqueosSiguiente(
+              loc, const ['danos-vivienda']),
+          isEmpty,
+          reason: '≥1 hija basta, sin contadores legacy');
+    });
+
     test('impacto: 1 grupo con datos basta (no los 4)', () {
       final loc = _loc(const ['impacto-poblacion']);
       loc.impactoPoblacion = [

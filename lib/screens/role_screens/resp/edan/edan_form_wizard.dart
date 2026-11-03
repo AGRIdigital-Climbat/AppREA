@@ -39,6 +39,7 @@ import 'edan_seccion_estado.dart';
 import 'edan_step_indicator.dart';
 import '../../../../widgets/tutorial_guide.dart';
 import '../../../../widgets/asistente_ia.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Wizard PageView del formulario EDAN (rol RESP).
 ///
@@ -1013,7 +1014,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (_saving) return false;
     if (_esEdanVacio()) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text(
               'No se puede guardar un EDAN vacío. Complete al menos el nombre de la localidad y el tipo de evento.',
@@ -1033,7 +1034,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       final texto = causa == null || causa.isEmpty
           ? 'No se pudo guardar el formulario. Intentá de nuevo.'
           : 'No se pudo guardar: $causa';
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text(texto),
           backgroundColor: const Color(0xFFD32F2F),
@@ -1046,7 +1047,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
                   onPressed: () async {
                     await Clipboard.setData(ClipboardData(text: causa));
                     if (mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      showAppSnackBar(context, 
                         const SnackBar(
                           content: Text('Error copiado al portapapeles'),
                           duration: Duration(seconds: 2),
@@ -1060,9 +1061,8 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
       return false;
     }
     if (!mostrarSnackBar) return true;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('Borrador guardado')));
+    showAppSnackBar(
+        context, const SnackBar(content: Text('Borrador guardado')));
     return true;
   }
 
@@ -1176,7 +1176,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     if (!guardado) {
       if (mounted) {
         setState(() => _saving = false);
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('No se pudo guardar el formulario. No se envió.'),
             backgroundColor: Color(0xFFD32F2F),
@@ -1267,7 +1267,7 @@ class _EdanFormWizardState extends State<EdanFormWizard> {
     // TEMP DIAG (borrar): mostrar el motivo real del fallo mientras se depura
     // el bug de `danos_agricultura` (status HTTP + detail del servidor).
     final diag = enviado ? null : EdanEnvioV2.ultimoErrorDiagnostico;
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       SnackBar(
         content: Text(
           enviado

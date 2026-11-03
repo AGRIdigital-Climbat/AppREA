@@ -8,6 +8,7 @@ import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_subsection_header.dart';
 import 'edan_aviso.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Página 07: Impacto en educación (unidades educativas afectadas).
 class EdanPage07 extends StatefulWidget {
@@ -167,7 +168,7 @@ class _EdanPage07State extends State<EdanPage07> {
             TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
             ElevatedButton(onPressed: () {
                   if (_nombre.text.isEmpty && _comunidad.text.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    showAppSnackBar(context, 
                       const SnackBar(content: Text('No hay datos para guardar')),
                     );
                     Navigator.pop(ctx, false);

@@ -7,6 +7,7 @@ import '../../models/ai/asistente_chat_message.dart';
 import '../../providers/asistente_ia_provider.dart';
 import '../../services/ai/asistente_ia_service.dart';
 import '../../services/ai/asistente_voz_service.dart';
+import '../../services/app_logger_ui.dart';
 
 class AsistenteIABottomSheet extends StatefulWidget {
   final AsistenteIAProvider provider;
@@ -415,7 +416,7 @@ class _AsistenteIABottomSheetState extends State<AsistenteIABottomSheet>
               onTap: () async {
                 await Clipboard.setData(ClipboardData(text: contenido));
                 if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
+                showAppSnackBar(context, 
                   const SnackBar(
                     content: Text('Respuesta copiada'),
                     duration: Duration(seconds: 2),

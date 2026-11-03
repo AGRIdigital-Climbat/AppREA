@@ -11,6 +11,7 @@ import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_subsection_header.dart';
 import 'edan_aviso.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Página 09: Impacto agropecuario.
 ///
@@ -541,7 +542,7 @@ class _EdanPage09State extends State<EdanPage09> {
                   onPressed: () {
                     final tieneDatos = camposTexto.keys.any((controller) => controller.text.isNotEmpty);
                     if (!tieneDatos) {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      showAppSnackBar(context, 
                         const SnackBar(content: Text('No hay datos para guardar')),
                       );
                       Navigator.pop(ctx, false);

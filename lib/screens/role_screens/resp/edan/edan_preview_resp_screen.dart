@@ -5,6 +5,7 @@ import '../../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../../services/edan/edan_envio_v2.dart';
 import '../../../../services/edan/edan_store_v2.dart';
 import 'edan_resumen_page.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Pantalla de previsualización del EDAN.
 ///
@@ -512,7 +513,7 @@ class _EdanPreviewRespScreenState extends State<EdanPreviewRespScreen> {
             await widget.onRechazar?.call();
           }
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            showAppSnackBar(context, 
               SnackBar(
                 content: Text('Localidad ${accion.toLowerCase()}'),
                 backgroundColor: color,
@@ -523,7 +524,7 @@ class _EdanPreviewRespScreenState extends State<EdanPreviewRespScreen> {
         } catch (e) {
           if (mounted) {
             setState(() => _procesando = false);
-            ScaffoldMessenger.of(context).showSnackBar(
+            showAppSnackBar(context, 
               SnackBar(
                 content: Text('Error: $e'),
                 backgroundColor: AppColors.error,

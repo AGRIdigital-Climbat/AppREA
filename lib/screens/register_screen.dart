@@ -6,6 +6,7 @@ import '../providers/reporte_provider.dart';
 import '../widgets/custom_button.dart';
 import '../widgets/custom_text_field.dart';
 import '../config/role_router.dart';
+import '../services/app_logger_ui.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -98,7 +99,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     if (mounted) {
       if (success) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           const SnackBar(
             content: Text('Usuario registrado exitosamente'),
             backgroundColor: AppColors.completed,
@@ -109,7 +110,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
           (route) => false,
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text(authProvider.error ?? 'Error al registrar'),
             backgroundColor: AppColors.error,

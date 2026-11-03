@@ -14,6 +14,7 @@ import '../../../services/edan/edan_store_v2.dart';
 import '../../../services/sync/edan_sync_engine_v2.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_route.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrDashboardTab extends StatefulWidget {
   const UgrDashboardTab({super.key});
@@ -90,7 +91,7 @@ class UgrDashboardTabState extends State<UgrDashboardTab>
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text('Error al cargar EDANs: ${ApiService.traducirError(e)}'), backgroundColor: AppColors.error),
         );
       }
@@ -119,7 +120,7 @@ class UgrDashboardTabState extends State<UgrDashboardTab>
       });
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text('Error al cargar localidades: ${ApiService.traducirError(e)}'), backgroundColor: AppColors.error),
         );
       }

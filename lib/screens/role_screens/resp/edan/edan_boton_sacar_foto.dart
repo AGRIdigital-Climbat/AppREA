@@ -8,6 +8,7 @@ import '../../../../config/api_config.dart';
 import '../../../../config/theme.dart';
 import '../../../../models/edan.dart';
 import '../../../../services/api_service.dart';
+import '../../../../services/app_logger_ui.dart';
 import '../../../../services/auth_service.dart';
 import '../../../../services/connectivity_service.dart';
 import '../../../../services/database_helper.dart';
@@ -534,8 +535,8 @@ class EdanBotonSacarFoto {
                                     // Desktop/sin selector de compartir:
                                     // aviso, nunca rompe el visor.
                                     if (!dialogCtx.mounted) return;
-                                    ScaffoldMessenger.of(dialogCtx)
-                                        .showSnackBar(
+                                    showAppSnackBar(
+                                      dialogCtx,
                                       SnackBar(
                                         content: Text(
                                             'No se pudo compartir: $e'),

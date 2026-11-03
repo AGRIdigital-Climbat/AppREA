@@ -8,6 +8,7 @@ import 'edan_dialog_helper.dart';
 import 'edan_item_card.dart';
 import 'edan_aviso.dart';
 import 'edan_subsection_header.dart';
+import '../../../../services/app_logger_ui.dart';
 
 /// Página 04: Impacto en la salud (establecimientos + necesidad de salud).
 class EdanPage04 extends StatefulWidget {
@@ -174,7 +175,7 @@ class _EdanPage04State extends State<EdanPage04> {
             ElevatedButton(
               onPressed: () {
                 if (_nombre.text.isEmpty && _comunidad.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  showAppSnackBar(context, 
                     const SnackBar(content: Text('No hay datos para guardar')),
                   );
                   Navigator.pop(ctx, false);

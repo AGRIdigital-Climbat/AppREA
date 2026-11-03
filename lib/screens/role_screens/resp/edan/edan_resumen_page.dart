@@ -707,6 +707,35 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
     for (final v in l.danosVivienda) {
       final parcial = parcialDe(v);
       final total = totalDe(v);
+      // Detalle 1:N: cada vivienda hija muestra su daño, coordenadas y SU
+      // propia foto (en el flujo V2 la foto vive en la hija, no en el padre;
+      // el resumen solo pintaba al padre y la foto desaparecía — bug
+      // 2026-11-02). `_Linea.fotos` acepta `foto: null` + `fotografia` (ruta
+      // local o de servidor): la miniatura y el visor compartido resuelven
+      // igual que en las demás secciones.
+      final hijas = <_Linea>[];
+      for (var i = 0; i < v.viviendas.length; i++) {
+        final viv = v.viviendas[i];
+        final tieneFoto = (viv.fotografia ?? '').isNotEmpty;
+        final conCoords = viv.coordenadaLat != 0 || viv.coordenadaLon != 0;
+        hijas.add(_Linea.subcard([
+          _Linea.par('Vivienda ${i + 1}', viv.tipoDano.name.toUpperCase()),
+          if (!tieneFoto && conCoords)
+            _Linea.par(
+              'Coordenadas',
+              '${viv.coordenadaLat.toStringAsFixed(5)}, '
+              '${viv.coordenadaLon.toStringAsFixed(5)}',
+            ),
+          if (tieneFoto)
+            _Linea.fotos(
+              seccion: 'Viviendas',
+              foto: null,
+              fotografia: viv.fotografia,
+              coordenadaLat: viv.coordenadaLat,
+              coordenadaLon: viv.coordenadaLon,
+            ),
+        ]));
+      }
       lineas.add(_Linea.subcard([
         _Linea.par('Localidad',
             v.comunidad.isEmpty ? 'No especificada' : v.comunidad),
@@ -717,6 +746,7 @@ class _EdanResumenPageState extends State<EdanResumenPage> {
         if (v.observaciones.trim().isNotEmpty)
           _Linea.par('Observaciones', v.observaciones),
         ..._fotoLineas(v, 'Vivienda'),
+        ...hijas,
       ]));
     }
     // Total desglosado vivienda

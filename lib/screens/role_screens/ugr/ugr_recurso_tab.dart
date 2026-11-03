@@ -11,6 +11,7 @@ import '../../../config/theme.dart';
 import '../../../providers/reporte_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/connectivity_service.dart';
+import '../../../services/app_logger_ui.dart';
 
 class UgrRecursoTab extends StatefulWidget {
   const UgrRecursoTab({super.key});
@@ -232,7 +233,7 @@ class UgrRecursoTabState extends State<UgrRecursoTab> {
 
       final result = await OpenFilex.open(file.path);
       if (result.type != ResultType.done && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('No se pudo abrir: ${result.message}'),
             backgroundColor: AppColors.error,
@@ -241,7 +242,7 @@ class UgrRecursoTabState extends State<UgrRecursoTab> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al abrir: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,
@@ -261,7 +262,7 @@ class UgrRecursoTabState extends State<UgrRecursoTab> {
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Descargado: $fileName'),
             backgroundColor: AppColors.aprobado,
@@ -270,7 +271,7 @@ class UgrRecursoTabState extends State<UgrRecursoTab> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(
             content: Text('Error al descargar: ${ApiService.traducirError(e)}'),
             backgroundColor: AppColors.error,

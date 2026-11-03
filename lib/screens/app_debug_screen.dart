@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/app_logger.dart';
+import '../services/app_logger_ui.dart';
 
 /// Visor del registro global de la app (últimas 24 h).
 ///
@@ -90,7 +91,7 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
     } catch (e) {
       if (mounted) setState(() => _cargando = false);
       if (!silencioso && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        showAppSnackBar(context, 
           SnackBar(content: Text('Error al leer el registro: $e')),
         );
       }
@@ -110,7 +111,7 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
     final texto = await _textoExportado();
     await Clipboard.setData(ClipboardData(text: texto));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       const SnackBar(content: Text('Registro filtrado copiado al portapapeles')),
     );
   }
@@ -118,7 +119,7 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
   Future<void> _copiarEntrada(LogEntry e) async {
     await Clipboard.setData(ClipboardData(text: e.aTexto()));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    showAppSnackBar(context, 
       const SnackBar(content: Text('Entrada copiada')),
     );
   }
@@ -141,12 +142,12 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
     try {
       final archivo = await _guardarTxt();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(content: Text('Guardado: ${archivo.path}')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(content: Text('No se pudo guardar: $e')),
       );
     }
@@ -165,7 +166,7 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
     } catch (e) {
       final ruta = archivo?.path ?? '(no se pudo escribir)';
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      showAppSnackBar(context, 
         SnackBar(
           content: Text('Compartir no disponible ($e).\n'
               'Archivo guardado en: $ruta'),
