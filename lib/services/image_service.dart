@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
@@ -16,6 +18,60 @@ class ImageService {
 
   final ImagePicker _picker = ImagePicker();
 
+  /// Post-proceso de captura (A+C): JPEG a 1280 px, calidad 75 y SIN EXIF
+  /// (la fecha y las coordenadas ya se guardan en la BD, y la rotación se
+  /// aplica sobre los píxeles con autoRotate). Escenas ultra-detail que
+  /// sigan pasando de ~300 KB se re-comprimen a 1024 px q65.
+  ///
+  /// Resultado: foto nítida en pantalla de celular (≈1.2 MP HD) con 3-4x
+  /// menos peso para subir en señal débil. Si algo falla se conserva la
+  /// foto original: perder evidencia es peor que una foto pesada. Windows
+  /// no usa el plugin (file_picker devuelve el archivo tal cual).
+  Future<XFile> _optimizarFoto(XFile foto) async {
+    if (Platform.isWindows) return foto;
+    try {
+      final antes = await File(foto.path).length();
+      final tmp = await getTemporaryDirectory();
+      final niveles = <List<int>>[
+        [1280, 75],
+        [1024, 65],
+      ];
+      var origen = foto.path;
+      XFile? mejor;
+      for (var i = 0; i < niveles.length; i++) {
+        final destino =
+            '${tmp.path}/edan_foto_${DateTime.now().microsecondsSinceEpoch}_$i.jpg';
+        final res = await FlutterImageCompress.compressAndGetFile(
+          origen,
+          destino,
+          minWidth: niveles[i][0],
+          minHeight: niveles[i][0],
+          quality: niveles[i][1],
+          format: CompressFormat.jpeg,
+          keepExif: false,
+        );
+        if (res == null) break;
+        mejor = res;
+        if (await File(res.path).length() <= 300 * 1024) break;
+        origen = res.path;
+      }
+      if (mejor != null) {
+        final despues = await File(mejor.path).length();
+        if (despues < antes) {
+          debugPrint('[ImageService] foto optimizada: '
+              '${(antes >> 10)} KB -> ${(despues >> 10)} KB');
+          return mejor;
+        }
+        // La "optimización" salió más grande (foto ya pequeña): mejor la
+        // original, intacta.
+        return foto;
+      }
+    } catch (e) {
+      debugPrint('[ImageService] optimización falló, uso original: $e');
+    }
+    return foto;
+  }
+
   Future<XFile?> takePhoto() async {
     if (Platform.isWindows) {
       return _pickFileWindows();
@@ -27,7 +83,7 @@ class ImageService {
         maxWidth: 1920,
         maxHeight: 1080,
       );
-      if (foto != null) return foto;
+      if (foto != null) return _optimizarFoto(foto);
       // Sin foto y sin excepción: el SO pudo matar la activity con la cámara
       // abierta (típico en Xiaomi/Huawei con poca RAM). Intentar rescate.
       return await recuperarFotoPerdida();
@@ -47,7 +103,9 @@ class ImageService {
     try {
       final perdidos = await _picker.retrieveLostData();
       if (!perdidos.isEmpty && perdidos.file != null) {
-        return perdidos.file;
+        // La ruta de rescate puede traer la foto NATIVA de la cámara: también
+        // pasa por la optimización.
+        return _optimizarFoto(perdidos.file!);
       }
     } catch (_) {}
     return null;
@@ -57,12 +115,14 @@ class ImageService {
     if (Platform.isWindows) {
       return _pickFileWindows();
     }
-    return await _picker.pickImage(
+    final foto = await _picker.pickImage(
       source: ImageSource.gallery,
       imageQuality: 80,
       maxWidth: 1920,
       maxHeight: 1080,
     );
+    if (foto == null) return null;
+    return _optimizarFoto(foto);
   }
 
   Future<List<XFile>> pickMultipleFromGallery({int maxImages = 5}) async {
@@ -74,10 +134,14 @@ class ImageService {
       maxWidth: 1920,
       maxHeight: 1080,
     );
-    if (images.length > maxImages) {
-      return images.sublist(0, maxImages);
+    final optimizadas = <XFile>[];
+    for (final img in images) {
+      optimizadas.add(await _optimizarFoto(img));
     }
-    return images;
+    if (optimizadas.length > maxImages) {
+      return optimizadas.sublist(0, maxImages);
+    }
+    return optimizadas;
   }
 
   /// Windows: seleccionar archivo de imagen via file_picker.

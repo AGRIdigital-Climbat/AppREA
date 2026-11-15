@@ -12,6 +12,27 @@
 ///   - No aparece el ícono de debug
 const bool kSyncDebugMode = true;
 
+/// Reemplaza el esquema+host de cualquier URL http(s) por el literal `PATH`,
+/// conservando solo la ruta. Uso: panel de depuración, copiar entradas y
+/// reportes compartidos — el dominio nunca sale del dispositivo en capturas
+/// ni archivos exportados (se cuidan las APIs).
+String enmascararUrl(String url) {
+  final uri = Uri.tryParse(url);
+  if (uri == null || uri.host.isEmpty) {
+    return 'PATH';
+  }
+  final ruta = uri.path.isEmpty ? '/' : uri.path;
+  return 'PATH$ruta';
+}
+
+/// Barrido suave para textos libres (request/response/errores/bodies JSON):
+/// toda URL http(s) que aparezca queda como `PATH/<ruta>` (sin host ni
+/// query). Los caminos siguen legibles para depurar.
+String scrubUrls(String texto) => texto.replaceAllMapped(
+      RegExp(r'''https?://[^\s"']+'''),
+      (m) => enmascararUrl(m.group(0)!),
+    );
+
 /// Modelo de una entrada de depuración para una llamada API individual.
 class SyncApiEntry {
   /// Fase del sync (ej: "Fase 0", "Fase 2 - Cabecera", "Fase 5 - Upload").

@@ -36,13 +36,56 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void initState() {
     super.initState();
+    for (final controller in [
+      _contrasenaController,
+      _confirmarController,
+      _nombreController,
+      _celularController,
+      _carnetController,
+      _comunidadController,
+      _correoController,
+      _cargoController,
+    ]) {
+      controller.addListener(_onFormChanged);
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ReporteProvider>().loadGeography();
     });
   }
 
+  void _onFormChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _isFormComplete {
+    if (_nombreController.text.trim().isEmpty) return false;
+    if (_carnetController.text.trim().isEmpty) return false;
+    if (_contrasenaController.text.length < 6) return false;
+    if (_confirmarController.text != _contrasenaController.text) return false;
+    if (_celularController.text.trim().isEmpty) return false;
+    if (_correoController.text.trim().isEmpty) return false;
+    if (_cargoController.text.trim().isEmpty) return false;
+    if (_comunidadController.text.trim().isEmpty) return false;
+    if (_selectedDepartamento == null) return false;
+    if (_selectedProvincia == null) return false;
+    if (_selectedMunicipio == null) return false;
+    return true;
+  }
+
   @override
   void dispose() {
+    for (final controller in [
+      _contrasenaController,
+      _confirmarController,
+      _nombreController,
+      _celularController,
+      _carnetController,
+      _comunidadController,
+      _correoController,
+      _cargoController,
+    ]) {
+      controller.removeListener(_onFormChanged);
+    }
     _contrasenaController.dispose();
     _confirmarController.dispose();
     _nombreController.dispose();
@@ -278,6 +321,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   hint: 'Ej. 76000000',
                   controller: _celularController,
                   keyboardType: TextInputType.phone,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Ingrese su número de celular';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
@@ -285,6 +334,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   hint: 'Ej. usuario@correo.com',
                   controller: _correoController,
                   keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Ingrese su correo electrónico';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
                 CustomTextField(
@@ -292,6 +347,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   hint: 'Ej. Responsable Local',
                   controller: _cargoController,
                   textCapitalization: TextCapitalization.words,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Ingrese su cargo';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
                 Consumer<ReporteProvider>(
@@ -313,7 +374,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         const SizedBox(height: 12),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedDepartamento,
-                          decoration: InputDecoration(
+                          validator: (value) => value == null ? 'Seleccione un departamento' : null,
+decoration: InputDecoration(
                             labelText: 'Departamento',
                             border: const OutlineInputBorder(),
                             suffixIcon: reporteProvider.isLoadingGeografia
@@ -378,7 +440,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedProvincia,
-                          decoration: InputDecoration(
+                          validator: (value) => value == null ? 'Seleccione una provincia' : null,
+decoration: InputDecoration(
                             labelText: 'Provincia',
                             border: const OutlineInputBorder(),
                             suffixIcon: reporteProvider.isLoadingProvincias
@@ -448,7 +511,8 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         const SizedBox(height: 16),
                         DropdownButtonFormField<int>(
                           initialValue: _selectedMunicipio,
-                          decoration: InputDecoration(
+                          validator: (value) => value == null ? 'Seleccione un municipio' : null,
+decoration: InputDecoration(
                             labelText: 'Municipio',
                             border: const OutlineInputBorder(),
                             suffixIcon: reporteProvider.isLoadingMunicipios
@@ -523,6 +587,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   hint: 'Ingrese su comunidad',
                   controller: _comunidadController,
                   textCapitalization: TextCapitalization.words,
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'Ingrese su comunidad';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
                 Container(
@@ -560,7 +630,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                   builder: (context, auth, child) {
                     return CustomButton(
                       text: 'Registrarse',
-                      onPressed: _handleRegister,
+                      onPressed: _isFormComplete ? _handleRegister : null,
                       isLoading: auth.isLoading,
                     );
                   },

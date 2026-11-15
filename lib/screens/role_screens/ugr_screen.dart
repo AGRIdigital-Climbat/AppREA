@@ -41,6 +41,8 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   /// Evita apilar auto-syncs si la red parpadea
   /// (offline→online→offline→online seguidos).
   bool _sincronizandoAuto = false;
+  /// Temporizador de auto-sync por cambios pendientes (debounce).
+  Timer? _autoSyncTimer;
   /// Evita apilar descargas del municipio para el mapa (una a la vez).
   bool _descargaMapaMunicipio = false;
   final _edanTabKey = GlobalKey<UgrEdanTabState>();
@@ -61,12 +63,15 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
       _wasOnline = connectivity.chequeoCompletado && connectivity.isConnected;
       connectivity.addListener(_onConnectivityChanged);
       EdanStoreV2.instance.refrescarPendientes();
+      EdanStoreV2.instance.pendientesNotifier.addListener(_onPendientesChanged);
       context.read<ReporteProvider>().initializeUgr();
     });
   }
 
   @override
   void dispose() {
+    _autoSyncTimer?.cancel();
+    EdanStoreV2.instance.pendientesNotifier.removeListener(_onPendientesChanged);
     WidgetsBinding.instance.removeObserver(this);
     _connectivity?.removeListener(_onConnectivityChanged);
     super.dispose();
@@ -76,6 +81,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       EdanStoreV2.instance.refrescarPendientes();
+      unawaited(_sincronizarSiHayPendientes());
     }
   }
 
@@ -109,6 +115,20 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _onPendientesChanged() {
+    if (!mounted) return;
+    if (EdanStoreV2.instance.pendientesNotifier.value <= 0) {
+      _autoSyncTimer?.cancel();
+      _autoSyncTimer = null;
+      return;
+    }
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      unawaited(_sincronizarSiHayPendientes());
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     const palette = Palettes.edan;
@@ -136,7 +156,7 @@ class _UgrScreenState extends State<UgrScreen> with WidgetsBindingObserver {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Image.asset(
-              'assets/images/SINAGER.png',
+              'assets/images/LOGO_VIDECI_1024.png',
               width: 100,
               height: 100,
               fit: BoxFit.contain,

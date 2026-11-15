@@ -164,20 +164,25 @@ class SyncDebugCollector {
 
       buffer.writeln('[${entry.statusIcon}] ${entry.metodo} ${entry.endpoint}');
       buffer.writeln('   Status: ${entry.statusCode ?? "N/A"} | ${entry.duracion?.inMilliseconds ?? "?"}ms');
-      if (entry.error != null) buffer.writeln('   Error: ${entry.error}');
+      if (entry.error != null) {
+        buffer.writeln('   Error: ${scrubUrls(entry.error!)}');
+      }
       if (entry.localidadId != null) buffer.writeln('   Localidad: ${entry.localidadId}');
       if (entry.seccion != null) buffer.writeln('   Sección: ${entry.seccion}');
       if (entry.fotos.isNotEmpty) buffer.writeln('   Fotos: ${entry.fotos.join(", ")}');
       if (entry.requestBody != null) {
         buffer.writeln('   Request:');
-        buffer.writeln('   ${const JsonEncoder.withIndent('   ').convert(entry.requestBody)}');
+        buffer.writeln(
+            '   ${scrubUrls(const JsonEncoder.withIndent('   ').convert(entry.requestBody))}');
       }
       if (entry.requestBodyRaw != null) {
-        buffer.writeln('   Request (raw): ${entry.requestBodyRaw}');
+        buffer.writeln(
+            '   Request (raw): ${scrubUrls(entry.requestBodyRaw!)}');
       }
       if (entry.responseBody != null) {
         buffer.writeln('   Response:');
-        buffer.writeln('   ${const JsonEncoder.withIndent('   ').convert(entry.responseBody)}');
+        buffer.writeln(
+            '   ${scrubUrls(const JsonEncoder.withIndent('   ').convert(entry.responseBody))}');
       }
       buffer.writeln();
     }

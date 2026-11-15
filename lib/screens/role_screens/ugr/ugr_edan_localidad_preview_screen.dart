@@ -7,6 +7,7 @@ import '../../../models/edan.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
+import '../resp/edan/edan_dialog_helper.dart';
 import '../../../services/app_logger_ui.dart';
 
 class UgrEdanLocalidadPreviewScreen extends StatefulWidget {
@@ -54,7 +55,12 @@ class _UgrEdanLocalidadPreviewScreenState
           TextButton(
             onPressed: () {
               Navigator.of(ctx).pop();
-              onConfirmar();
+              // Continuar un frame despues del cierre del dialogo: invocar
+              // la accion en el mismo frame del teardown disparaba el
+              // assert `_dependents.isEmpty`.
+              WidgetsBinding.instance.addPostFrameCallback(
+                (_) => onConfirmar(),
+              );
             },
             style: TextButton.styleFrom(foregroundColor: color),
             child: Text(accion),
@@ -90,7 +96,11 @@ class _UgrEdanLocalidadPreviewScreenState
             backgroundColor: AppColors.aprobado,
           ),
         );
-        Navigator.of(context).pop(true);
+        // Pop diferido (ver _rechazar): evita desactivar el messenger con
+        // dependents vivos.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Navigator.of(context).pop(true);
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -106,7 +116,9 @@ class _UgrEdanLocalidadPreviewScreenState
     }
   }
 
-  Future<void> _rechazar() async {
+  /// Paso 1 del rechazo: validacion de red + dialogo de motivo (que hace las
+  /// veces de confirmacion: un solo dialogo, menos transiciones).
+  Future<void> _onConfirmarRechazo() async {
     if (!ConnectivityService().isConnected) {
       if (mounted) {
         showAppSnackBar(context, 
@@ -118,13 +130,28 @@ class _UgrEdanLocalidadPreviewScreenState
       }
       return;
     }
+    // El servidor exige motivo para rechazar (observacion_estado, 422 si
+    // falta): se pide ANTES de llamar la API y se aborta si queda vacio.
+    final motivo = await pedirMotivoRechazo(context);
+    if (motivo == null || motivo.trim().isEmpty || !mounted) return;
+    // Dejar terminar el teardown de la ruta del dialogo antes de continuar
+    // en esta pantalla (setState en el mismo frame disparaba el assert
+    // `_dependents.isEmpty` del framework).
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await _rechazar(motivo.trim());
+  }
+
+  Future<void> _rechazar(String motivo) async {
     setState(() => _procesando = true);
     try {
       await ApiService.instance.cambiarEstadoLocalidad(
         localidad.idServer!,
         UgrLocalidadEstado.rechazadoUgr.id,
+        observacion: motivo,
       );
       localidad.estadoLocalidad = UgrLocalidadEstado.rechazadoUgr;
+      localidad.observacionEstado = motivo;
       if (mounted) {
         showAppSnackBar(context, 
           const SnackBar(
@@ -132,7 +159,11 @@ class _UgrEdanLocalidadPreviewScreenState
             backgroundColor: AppColors.rechazado,
           ),
         );
-        Navigator.of(context).pop(true);
+        // El pop va un frame despues: si se ejecuta con el SnackBar recien
+        // montado, su messenger se desactiva con dependents vivos (assert).
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) Navigator.of(context).pop(true);
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -215,7 +246,7 @@ class _UgrEdanLocalidadPreviewScreenState
                 children: [
                   Expanded(
                     child: OutlinedButton(
-                      onPressed: _procesando ? null : () => _mostrarConfirmacion('Rechazar', AppColors.rechazado, _rechazar),
+                      onPressed: _procesando ? null : _onConfirmarRechazo,
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.rechazado,
                         side: const BorderSide(color: AppColors.rechazado),

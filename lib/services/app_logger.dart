@@ -8,6 +8,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common/sqflite_logger.dart';
 
+import 'sync_debug_config.dart';
+
 /// Niveles de una entrada del registro global de la app.
 enum AppLogLevel { debug, info, warn, error }
 
@@ -112,13 +114,13 @@ class LogEntry {
     if (metodo != null || url != null) {
       final partes = <String>[];
       if (metodo != null) partes.add(metodo!);
-      if (url != null) partes.add(url!);
+      if (url != null) partes.add(enmascararUrl(url!));
       if (estado != null) partes.add('→ $estado');
       if (durMs != null) partes.add('${durMs}ms');
       sb.writeln('  http     : ${partes.join(' ')}');
     }
     if (detalle != null && detalle!.isNotEmpty) {
-      sb.writeln('  detalle  : $detalle');
+      sb.writeln('  detalle  : ${scrubUrls(detalle!)}');
     }
     if (esperado) {
       sb.writeln('  nota     : fallo esperado (no cuenta como error)');
@@ -852,7 +854,9 @@ class AppLogger {
   /// para el TÍTULO; la URL completa se guarda igual en el campo `url`.
   static String _urlCorto(String url) {
     final i = url.indexOf('/api/v2');
-    return i >= 0 ? url.substring(i + 7) : url;
+    // Sin prefijo conocido (otro host, RAG, estáticos): se enmascara el
+    // dominio en lugar de mostrarlo crudo en el titulo.
+    return i >= 0 ? url.substring(i + 7) : enmascararUrl(url);
   }
 
   /// Sustituye contraseñas por `***` en bodies JSON. No trunca: solo oculta

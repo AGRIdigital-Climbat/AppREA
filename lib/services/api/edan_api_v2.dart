@@ -913,7 +913,10 @@ class EdanApiV2 {
     }
     final uri = Uri.tryParse(url);
     if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
-      return '$metodo ${uri.host}${uri.path}';
+      // Host enmascarado: el reporte de sincronizacion es exportable
+      // (compartir/copiar) y no debe revelar dominios.
+      final ruta = uri.path.isEmpty ? '/' : uri.path;
+      return '$metodo PATH$ruta';
     }
     return '$metodo $url';
   }

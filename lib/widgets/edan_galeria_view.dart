@@ -264,7 +264,11 @@ class EdanGaleriaViewState extends State<EdanGaleriaView>
         showAutor: widget.showAutor,
       ),
     );
-    if (elegido == null || !mounted) return;
+    if (elegido == null) return;
+    // El sheet tiene buscador autofocus: esperar el teardown de su ruta
+    // antes del setState (assert _dependents.isEmpty con focus de salida).
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
     setState(() => _filtroUuid = elegido.isEmpty ? null : elegido);
   }
 

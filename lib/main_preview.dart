@@ -29,7 +29,7 @@ class PreviewScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('REA - Widget Preview')),
+      appBar: AppBar(title: const Text('EDAN - Widget Preview')),
       body: ListView(
         padding: const EdgeInsets.all(8),
         children: [

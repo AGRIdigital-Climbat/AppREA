@@ -2099,6 +2099,10 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
           TextButton(
             onPressed: () async {
               Navigator.of(ctx).pop();
+              // El borrado debe correr DESPUES del teardown de la ruta del
+              // dialogo: actuar en el mismo frame del pop disparaba el
+              // assert `_dependents.isEmpty`.
+              await WidgetsBinding.instance.endOfFrame;
               await _eliminarDocumento(doc);
             },
             child: const Text('Eliminar', style: TextStyle(color: AppColors.error)),

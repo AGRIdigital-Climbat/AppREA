@@ -42,6 +42,8 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   /// Evita apilar auto-syncs si la red parpadea
   /// (offline→online→offline→online seguidos).
   bool _sincronizandoAuto = false;
+  /// Temporizador de auto-sync por cambios pendientes (debounce).
+  Timer? _autoSyncTimer;
 
   @override
   void initState() {
@@ -56,6 +58,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
       _wasOnline = connectivity.chequeoCompletado && connectivity.isConnected;
       connectivity.addListener(_onConnectivityChanged);
       _refrescarContadores();
+      EdanStoreV2.instance.pendientesNotifier.addListener(_onPendientesChanged);
       context.read<ReporteProvider>().initializeResp();
       // Migración única v1.2.0 → V2 (idempotente): los borradores legacy sin
       // contraparte aparecen en `formularios` antes de que las pestañas lean.
@@ -73,6 +76,8 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _autoSyncTimer?.cancel();
+    EdanStoreV2.instance.pendientesNotifier.removeListener(_onPendientesChanged);
     WidgetsBinding.instance.removeObserver(this);
     _connectivity?.removeListener(_onConnectivityChanged);
     EdanStoreV2.instance.primeraDescarga.removeListener(_onPrimeraDescarga);
@@ -104,6 +109,7 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _refrescarContadores();
+      unawaited(_sincronizarSiHayPendientes());
     }
   }
 
@@ -135,6 +141,20 @@ class _RespScreenState extends State<RespScreen> with WidgetsBindingObserver {
     } finally {
       _sincronizandoAuto = false;
     }
+  }
+
+  void _onPendientesChanged() {
+    if (!mounted) return;
+    if (EdanStoreV2.instance.pendientesNotifier.value <= 0) {
+      _autoSyncTimer?.cancel();
+      _autoSyncTimer = null;
+      return;
+    }
+    _autoSyncTimer?.cancel();
+    _autoSyncTimer = Timer(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      unawaited(_sincronizarSiHayPendientes());
+    });
   }
 
   /// Refresca el contador de pendientes del flujo V2 (botón del appbar,

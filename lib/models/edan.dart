@@ -2123,6 +2123,18 @@ class EdanLocalidad {
   String? departamentoNombre;
   String? provinciaNombre;
   String? municipioNombre;
+  // Datos de censo (temporales, solo control local; NO se serializan ni sincronizan)
+  String ambitoLugar = 'rural'; // 'urbano' | 'rural' (default rural)
+  int viviendasCenso = 0;
+  int poblacionCenso = 0;
+  int hogaresCenso = 0;
+  int? personasPorHogarCenso;
+  String? codigoIneCenso;
+  // Respaldo para el calculo de page02 cuando el sector (comunidad/manzano)
+  // no trae promedio de personas por hogar. Memoria de sesion: NO se
+  // serializa ni sincroniza.
+  int? pphMunicipioCenso;
+  String? pphMunicipioNombre;
   String? fechaLlenado;
   String? fechaEvento;
   String? horaEvento;
@@ -2134,6 +2146,11 @@ class EdanLocalidad {
   String nombreAlcalde;
   String fonoAlcalde;
   String? tipoEventoNombre;
+  /// Motivo/observación del último cambio de estado que manda el servidor
+  /// (`observacion_estado`, API v2; obligatorio al rechazar). Solo lectura
+  /// local: NO entra al payload `/completo`. Los listados de Rol 6/7 lo
+  /// muestran en texto pequeño únicamente con estado "Rechazado UGR".
+  String? observacionEstado;
   EdanResponsable? responsable;
   Usuario? usuario;
 
@@ -2278,6 +2295,7 @@ class EdanLocalidad {
     this.nombreAlcalde = '',
     this.fonoAlcalde = '',
     this.tipoEventoNombre,
+    this.observacionEstado,
     EdanResponsable? responsable,
     this.usuario,
     this.grupPoblacion = false,
@@ -2502,6 +2520,7 @@ class EdanLocalidad {
           (json['tipo_evento'] is Map
               ? json['tipo_evento']['nombre']
               : null),
+      observacionEstado: json['observacion_estado']?.toString(),
       responsable: json['responsable'] is Map
           ? EdanResponsable.fromJson(
               Map<String, dynamic>.from(json['responsable'] as Map))

@@ -161,7 +161,12 @@ class LocationService {
     );
   }
 
-  /// GPS real para Android/iOS.
+  /// GPS para Android/iOS.
+  ///
+  /// Orden (sin "última posición conocida"):
+  /// 1) Proveedor por defecto (red/fused): hasta 5 intentos.
+  /// 2) GPS forzado (satélite, sin red): hasta 5 intentos.
+  /// Si todo falla, retorna null para que el llamador ofrezca captura manual.
   Future<Position?> _getLocationByGPS() async {
     try {
       final bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -170,15 +175,60 @@ class LocationService {
       final granted = await PermissionService.requestLocationPermission();
       if (!granted) return null;
 
-      return await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 10),
-        ),
-      );
-    } catch (e) {
-      return null;
-    }
+      // 1) Con red (proveedor por defecto).
+      for (int i = 0; i < 5; i++) {
+        try {
+          LocationSettings settings;
+          if (Platform.isAndroid) {
+            settings = AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            );
+          } else if (Platform.isIOS || Platform.isMacOS) {
+            settings = AppleSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            );
+          } else {
+            settings = LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            );
+          }
+          final pos = await Geolocator.getCurrentPosition(locationSettings: settings);
+          return pos;
+        } catch (_) {}
+        await Future.delayed(const Duration(seconds: 1));
+      }
+
+      // 2) Sin red (GPS forzado por satélite).
+      for (int i = 0; i < 5; i++) {
+        try {
+          LocationSettings settings;
+          if (Platform.isAndroid) {
+            settings = AndroidSettings(
+              accuracy: LocationAccuracy.high,
+              forceLocationManager: true,
+              timeLimit: Duration(seconds: 8),
+            );
+          } else if (Platform.isIOS || Platform.isMacOS) {
+            settings = AppleSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            );
+          } else {
+            settings = LocationSettings(
+              accuracy: LocationAccuracy.high,
+              timeLimit: Duration(seconds: 8),
+            );
+          }
+          final pos = await Geolocator.getCurrentPosition(locationSettings: settings);
+          return pos;
+        } catch (_) {}
+        await Future.delayed(const Duration(seconds: 1));
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Stream de ubicación actualizado según la plataforma.

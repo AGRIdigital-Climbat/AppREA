@@ -86,6 +86,7 @@ class ReporteProvider extends ChangeNotifier {
     'Descargando tipos de repositorio...',
     'Descargando estados de localidad...',
     'Descargando estados EDAN...',
+    'Descargando manzanos y comunidades...',
   ];
 
   /// 0..1 mientras se descargan catálogos; `null` en otro caso.
@@ -543,6 +544,14 @@ class ReporteProvider extends ChangeNotifier {
 
     await _downloadAndCacheMunicipioGeojson();
 
+    // Lugares (v42): manzanos (urbano) y comunidades (rural) del municipio
+    // del usuario. Se cachean en SQLite para que el selector de page01
+    // funcione offline; el refresh periodico del catalogo los mantiene
+    // al dia (boton "Actualizar catalogos" del perfil usa este mismo flujo).
+    _downloadPhase = 'Descargando manzanos y comunidades...';
+    notifyListeners();
+    await _downloadAndCacheLugares();
+
     _downloadPhase = '';
     _isDescargandoCatalogos = false;
     notifyListeners();
@@ -654,6 +663,89 @@ class ReporteProvider extends ChangeNotifier {
   Future<void> ensureMunicipioGeojson() async {
     if (_municipioGeojson != null) return;
     await _downloadAndCacheMunicipioGeojson();
+  }
+
+  /// Descarga los nombres de lugar (manzanos + comunidades) del municipio
+  /// del usuario y los persiste en `catalogo_manzanos` / `catalogo_comunidades`
+  /// (v42). Cada descarga falla en silencio marcando `_catalogsAllOk = false`:
+  /// sin red, lo ya cacheado sigue sirviendo al selector de page01.
+  Future<void> _downloadAndCacheLugares() async {
+    final idMun = AuthService.instance.currentToken?.idMunicipio;
+    if (idMun == null) return;
+    // Resumen del municipio (pph): se guarda en prefs junto con los listados,
+    // asi el respaldo de page02 esta disponible offline desde el proximo
+    // arranque. Silencioso si falla.
+    unawaited(getCensoMunicipio(idMun));
+    try {
+      final manzanos = await _api.getManzanosPorMunicipio(idMun);
+      await _db.saveManzanosLocal(manzanos);
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
+    try {
+      final comunidades = await _api.getComunidadesPorMunicipio(idMun);
+      await _db.saveComunidadesLocal(comunidades);
+    } catch (_) {
+      _catalogsAllOk = false;
+    }
+  }
+
+  /// Lectura del catalogo local de lugares (page01 lo usa primero para
+  /// pintar el selector sin esperar la red; funciona offline).
+  Future<List<Map<String, dynamic>>> getLugaresLocales(
+      {required bool urbano, required int idMunicipio}) async {
+    try {
+      return urbano
+          ? await _db.getManzanosLocal(idMunicipio)
+          : await _db.getComunidadesLocal(idMunicipio);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Resumen censal 2024 del municipio con cascada de persistencia ligera
+  /// (SIN SQL): RAM -> SharedPreferences -> API. La API responde una vez y
+  /// el valor queda en el dispositivo, asi que offline desde el arranque ya
+  /// existe el promedio real del municipio (si jamas hubo red para ese
+  /// municipio, devuelve null y page02 usara el respaldo nacional).
+  final Map<int, Map<String, dynamic>> _censoMunicipioCache = {};
+  static const String _kCensoPphPrefijo = 'censo_pph_municipio_';
+
+  Future<Map<String, dynamic>?> getCensoMunicipio(int idMunicipio) async {
+    final cached = _censoMunicipioCache[idMunicipio];
+    if (cached != null) return cached;
+
+    // 1) Persistido en el dispositivo (offline desde arranque frio).
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString('$_kCensoPphPrefijo$idMunicipio');
+      if (raw != null) {
+        final data = Map<String, dynamic>.from(jsonDecode(raw) as Map);
+        _censoMunicipioCache[idMunicipio] = data;
+        return data;
+      }
+    } catch (_) {}
+
+    // 2) Red: se cachea en RAM y en prefs para la proxima offline.
+    try {
+      final data = await _api.getCensoPoblacionMunicipio(idMunicipio);
+      final resumen = <String, dynamic>{
+        'personas_por_hogar': data['personas_por_hogar'],
+        'nombre': data['nombre'],
+        'poblacion': data['poblacion'],
+        'hogares': data['hogares'],
+        'viviendas': data['viviendas'],
+      };
+      _censoMunicipioCache[idMunicipio] = resumen;
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(
+            '$_kCensoPphPrefijo$idMunicipio', jsonEncode(resumen));
+      } catch (_) {}
+      return resumen;
+    } catch (_) {
+      return null;
+    }
   }
 
   String getEstadoNombre(int id) {

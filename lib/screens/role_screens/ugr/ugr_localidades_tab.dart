@@ -9,15 +9,18 @@ import '../../../services/database_helper.dart';
 import '../../../services/edan/edan_envio_v2.dart';
 import '../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../services/edan/edan_store_v2.dart';
+import '../../../services/edan/edan_motivo_backfill.dart';
 import '../../../services/edan_secciones_registry.dart';
 import '../../../services/edan_sync_service.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_evento.dart';
 import 'ugr_route.dart';
 import '../resp/edan/edan_form_wizard.dart';
+import '../resp/edan/edan_dialog_helper.dart';
 import '../resp/edan/edan_preview_resp_screen.dart';
 import '../../../widgets/edan_galeria_view.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
+import '../../../widgets/edan_motivo_rechazo.dart';
 import '../../../services/app_logger_ui.dart';
 
 enum _VistaLocalidades { todos, sinConsolidar, consolidadas, galeria }
@@ -172,6 +175,11 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           _cargando = false;
           _error = null;
         });
+      }
+      // Rechazos cuya fila del servidor no trajo motivo: retro-traerlo y
+      // repintar la tarjeta (online, max 10/pasada, silencioso).
+      if (await EdanMotivoBackfill.ejecutar(localidades)) {
+        if (mounted) setState(() {});
       }
     } catch (e) {
       if (mounted) {
@@ -398,35 +406,50 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
 
     final estado = UgrLocalidadEstadoX.fromId(nuevoEstado);
     final esAprobar = estado == UgrLocalidadEstado.aprobadoUgr;
+    final esRechazar = estado == UgrLocalidadEstado.rechazadoUgr;
     final accion = esAprobar ? 'Aprobar' : 'Rechazar';
     final color = estado.color;
 
-    final confirmado = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        icon: Icon(
-          esAprobar ? Icons.check_circle : Icons.cancel,
-          size: 48,
-          color: color,
-        ),
-        title: Text('$accion localidad'),
-        content: Text(
-          '¿Está seguro de que desea $accion esta localidad?',
-          textAlign: TextAlign.center,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+    // Rechazar: el servidor EXIGE motivo (`observacion_estado`, 422 si
+    // falta). El dialogo de motivo hace las veces de confirmacion.
+    String? motivo;
+    final bool confirmado;
+    if (esRechazar) {
+      motivo = await pedirMotivoRechazo(context);
+      confirmado = motivo != null;
+    } else {
+      confirmado = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          icon: Icon(
+            esAprobar ? Icons.check_circle : Icons.cancel,
+            size: 48,
+            color: color,
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: TextButton.styleFrom(foregroundColor: color),
-            child: Text(accion),
+          title: Text('$accion localidad'),
+          content: Text(
+            '¿Está seguro de que desea $accion esta localidad?',
+            textAlign: TextAlign.center,
           ),
-        ],
-      ),
-    );
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(foregroundColor: color),
+              child: Text(accion),
+            ),
+          ],
+        ),
+      ) ??
+          false;
+    }
+    // El setState/llamada que sigue debe correr DESPUES del teardown de la
+    // ruta del dialogo (pop + continuacion en el mismo frame disparaban el
+    // assert `_dependents.isEmpty`).
+    await WidgetsBinding.instance.endOfFrame;
     if (confirmado != true || !mounted) return;
 
     if (!ConnectivityService().isConnected) {
@@ -438,7 +461,11 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       return;
     }
     try {
-      await ApiService.instance.cambiarEstadoLocalidad(idLocalidad, nuevoEstado);
+      await ApiService.instance.cambiarEstadoLocalidad(idLocalidad, nuevoEstado,
+          observacion: motivo);
+      if (esRechazar) {
+        localidad.observacionEstado = motivo?.trim();
+      }
       if (mounted) {
         showAppSnackBar(context, 
           SnackBar(
@@ -961,7 +988,12 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
       onRechazar: localidad.estadoLocalidad == UgrLocalidadEstado.enRevisionUgr
           ? () => _cambiarEstado(localidad, UgrLocalidadEstado.rechazadoUgr.id)
           : null,
-      onEdit: esBorrador && esMia
+      // Editar: borradores propios y TAMBIEN rechazados (la correccion del
+      // rechazo se hace desde el propio listado, offline-first).
+      onEdit: (esBorrador ||
+                  localidad.estadoLocalidad ==
+                      UgrLocalidadEstado.rechazadoUgr) &&
+              esMia
           ? () => _editarLocalidad(localidad)
           : null,
       onDelete: esBorrador && esMia
@@ -1030,11 +1062,19 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
           onRechazar: (esAprobada || esRechazada)
               ? null
               : () async {
+                  // El server exige motivo (observacion_estado) para rechazar.
+                  final motivo = await pedirMotivoRechazo(context);
+                  if (motivo == null) return;
+                  // Continuar tras el teardown del dialogo (assert
+                  // _dependents.isEmpty si se sigue en el mismo frame).
+                  await WidgetsBinding.instance.endOfFrame;
                   await ApiService.instance.cambiarEstadoLocalidad(
                     localidad.idServer!,
                     UgrLocalidadEstado.rechazadoUgr.id,
+                    observacion: motivo,
                   );
                   localidad.estadoLocalidad = UgrLocalidadEstado.rechazadoUgr;
+                  localidad.observacionEstado = motivo;
                 },
         ), palette: Palettes.rea),
       );
@@ -1436,6 +1476,7 @@ class _LocalidadCard extends StatelessWidget {
                   ],
                 ),
               ],
+              EdanMotivoRechazo(localidad: localidad),
               const SizedBox(height: 6),
               Row(
                 children: [

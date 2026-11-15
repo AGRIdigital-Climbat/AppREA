@@ -41,23 +41,22 @@ class EdanBotonSacarFoto {
       return null;
     }
 
-    final start = DateTime.now();
-    const timeout = Duration(seconds: 45);
-    Position? mejorPos;
-
-    while (DateTime.now().difference(start) < timeout) {
-      final pos = await LocationService().getCurrentLocation();
-      if (pos != null) {
-        if (mejorPos == null || pos.accuracy < mejorPos.accuracy) {
-          mejorPos = pos;
-        }
-        if (pos.accuracy <= precisionMinima) {
-          return pos;
-        }
-      }
-      await Future.delayed(const Duration(seconds: 2));
+    // LocationService ya reintenta (5 con red + 5 sin red). Aquí solo se
+    // valida la precisión; si no se alcanza, se devuelve la mejor obtenida.
+    final pos = await LocationService().getCurrentLocation();
+    if (pos != null) {
+      if (pos.accuracy <= precisionMinima) return pos;
+      // Un segundo intento por si el primero fue marginal.
+      final pos2 = await LocationService().getCurrentLocation();
+      if (pos2 != null && pos2.accuracy < pos.accuracy) return pos2;
+      return pos;
     }
-    return mejorPos;
+
+    // Sin GPS: ofrecer captura manual en lugar de dejar el flujo colgado.
+    if (context.mounted) {
+      return await LocationService.manualLocationDialog(context);
+    }
+    return null;
   }
 
   /// Flujo de respaldo por ítem (Diseño C): captura coordenadas si faltan y

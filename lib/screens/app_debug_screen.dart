@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../services/app_logger.dart';
 import '../services/app_logger_ui.dart';
+import '../services/sync_debug_config.dart';
 
 /// Visor del registro global de la app (últimas 24 h).
 ///
@@ -423,7 +424,7 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
             textInputAction: TextInputAction.search,
             style: const TextStyle(fontSize: 13),
             decoration: InputDecoration(
-              hintText: 'Buscar en títulos, URLs, bodies, errores…',
+              hintText: 'Buscar en títulos, rutas, bodies, errores…',
               hintStyle: const TextStyle(fontSize: 12),
               prefixIcon: const Icon(Icons.search, size: 20),
               suffixIcon: _busqueda.text.isNotEmpty
@@ -710,17 +711,17 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
               ],
             ),
           ),
-          if (e.url != null) _bloque('URL', e.url!, acento),
+          if (e.url != null) _bloque('URL', enmascararUrl(e.url!), acento),
           if (e.detalle != null && e.detalle!.isNotEmpty)
-            _bloque('Detalle', e.detalle!, acento),
+            _bloque('Detalle', scrubUrls(e.detalle!), acento),
           if (e.request != null && e.request!.isNotEmpty)
-            _bloque('Request', e.request!, acento),
+            _bloque('Request', scrubUrls(e.request!), acento),
           if (e.response != null && e.response!.isNotEmpty)
-            _bloque('Response', e.response!, acento),
+            _bloque('Response', scrubUrls(e.response!), acento),
           if (e.error != null && e.error!.isNotEmpty)
-            _bloque('Error', e.error!, Colors.red),
+            _bloque('Error', scrubUrls(e.error!), Colors.red),
           if (e.stack != null && e.stack!.isNotEmpty)
-            _bloque('Stack', e.stack!, Colors.red),
+            _bloque('Stack', scrubUrls(e.stack!), Colors.red),
         ],
       ),
     );
@@ -822,8 +823,7 @@ class _AppDebugScreenState extends State<AppDebugScreen> {
   }
 
   static String _urlResumida(String url) {
-    final i = url.indexOf('/api/v2');
-    final corta = i >= 0 ? url.substring(i + 7) : url;
+    final corta = enmascararUrl(url);
     return corta.length > 60 ? '${corta.substring(0, 57)}…' : corta;
   }
 

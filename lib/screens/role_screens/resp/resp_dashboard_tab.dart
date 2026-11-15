@@ -8,6 +8,7 @@ import '../../../services/database_helper.dart';
 import '../../../services/edan/edan_envio_v2.dart';
 import '../../../services/edan/edan_localidades_envio_v2_service.dart';
 import '../../../services/edan/edan_store_v2.dart';
+import '../../../services/edan/edan_motivo_backfill.dart';
 import '../../../widgets/edan_json_preview_dialog.dart';
 import '../../../widgets/edan_seccion_badges.dart';
 import 'edan/edan_form_wizard.dart';
@@ -221,6 +222,11 @@ class RespDashboardTabState extends State<RespDashboardTab>
         _localidades = visibles;
         _errorCarga = errorCarga;
       });
+    }
+    // Rechazos cuya fila ligera no trajo motivo: retro-traerlo en segundo
+    // plano y repintar la tarjeta (silencioso, solo online, 10 por pasada).
+    if (await EdanMotivoBackfill.ejecutar(_localidades)) {
+      if (mounted) setState(() {});
     }
     await _cargarIndicadores();
   }
@@ -711,7 +717,8 @@ class RespDashboardTabState extends State<RespDashboardTab>
                     _cargarLocalidades();
                   }
                 },
-                onEdit: estado == UgrLocalidadEstado.borrador
+                onEdit: estado == UgrLocalidadEstado.borrador ||
+                        estado == UgrLocalidadEstado.rechazadoUgr
                     ? () => _editarLocalidad(loc)
                     : null,
                 onDelete: estado == UgrLocalidadEstado.borrador
@@ -992,6 +999,7 @@ class _RespLocalidadCard extends StatelessWidget {
                   ),
                 ],
               ),
+              _motivoRechazo(),
               const SizedBox(height: 6),
               Row(
                 children: [
@@ -1112,6 +1120,37 @@ class _RespLocalidadCard extends StatelessWidget {
               fontSize: 10,
               fontWeight: FontWeight.w600,
               color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Texto pequeño con el motivo de rechazo (`observacion_estado`), solo si
+  /// el estado es "Rechazado UGR" y el servidor lo mando. Cero espacio en
+  /// cualquier otro caso.
+  Widget _motivoRechazo() {
+    final motivo = (localidad.observacionEstado ?? '').trim();
+    if (motivo.isEmpty ||
+        localidad.estadoLocalidad != UgrLocalidadEstado.rechazadoUgr) {
+      return const SizedBox.shrink();
+    }
+    return Padding(
+      padding: const EdgeInsets.only(top: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.feedback_outlined,
+              size: 12, color: AppColors.rechazado),
+          const SizedBox(width: 4),
+          Expanded(
+            child: Text(
+              'Motivo del rechazo: $motivo',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  fontSize: 11, color: AppColors.rechazado),
             ),
           ),
         ],

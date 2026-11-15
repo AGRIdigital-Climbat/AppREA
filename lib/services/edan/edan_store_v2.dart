@@ -2854,6 +2854,9 @@ class EdanStoreV2 implements EdanStore {
     } else {
       loc.estadoLocalidad ??= UgrLocalidadEstado.borrador;
     }
+    // Motivo del ultimo cambio de estado (rechazo UGR, v43).
+    loc.observacionEstado =
+        (row['observacion_estado'] as String?) ?? loc.observacionEstado;
     loc.nombre = (row['localidad'] as String?) ?? loc.nombre;
     loc.fechaLlenado = row['fecha_llenado'] as String?;
     loc.fechaEvento = row['fecha_evento'] as String?;
@@ -2950,6 +2953,7 @@ class EdanStoreV2 implements EdanStore {
       'id_tipo_evento': loc.idTipoEvento,
       'id_tipo_localidad': loc.idTipoLocalidad,
       'id_edan_localidad_estado': loc.idEdanLocalidadEstado,
+      'observacion_estado': loc.observacionEstado,
       'fecha_llenado': loc.fechaLlenado,
       'fecha_evento': loc.fechaEvento,
       'hora_evento': loc.horaEvento,

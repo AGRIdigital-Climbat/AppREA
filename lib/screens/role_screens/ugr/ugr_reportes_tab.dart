@@ -3,6 +3,8 @@ import '../../../config/theme.dart';
 import '../../../models/edan.dart';
 import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
+import '../../../services/edan/edan_motivo_backfill.dart';
+import '../../../widgets/edan_motivo_rechazo.dart';
 import 'ugr_edan_preview_screen.dart';
 import 'ugr_route.dart';
 
@@ -54,6 +56,10 @@ class UgrLocalidadesTabState extends State<UgrLocalidadesTab>
         _localidades = localidades;
         _cargando = false;
       });
+      // Rechazos cuya fila ligera no trajo motivo: retro-traerlo y repintar.
+      if (await EdanMotivoBackfill.ejecutar(localidades)) {
+        if (mounted) setState(() {});
+      }
     } catch (e) {
       if (mounted) setState(() { _cargando = false; _error = e.toString(); });
     }
@@ -303,6 +309,7 @@ class _LocalidadCard extends StatelessWidget {
                   ),
                 ],
               ),
+              EdanMotivoRechazo(localidad: localidad),
               if ((localidad.fechaEvento ?? '').isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Row(

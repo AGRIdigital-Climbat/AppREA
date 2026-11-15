@@ -73,7 +73,14 @@ class AppDrawer extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(Icons.shield_rounded, size: 20, color: AppColors.primary),
+            child: Padding(
+              padding: const EdgeInsets.all(5),
+              child: Image.asset(
+                // Mismo icono que el launcher de la app (coherencia de marca).
+                'assets/images/LOGO_VIDECI_1024.png',
+                fit: BoxFit.contain,
+              ),
+            ),
           ),
           const SizedBox(width: 10),
           const Text(

@@ -70,7 +70,7 @@ class _SplashScreenState extends State<SplashScreen>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Image.asset(
-                'assets/images/SINAGER.png',
+                'assets/images/LOGO_VIDECI_1024.png',
                 width: 120,
                 height: 120,
               ),
@@ -95,12 +95,17 @@ class _SplashScreenState extends State<SplashScreen>
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                'Reporte de Eventos Adversos',
-                style: TextStyle(
-                  fontSize: 16,
-                   color: Colors.white.withValues(alpha: 0.9),
-                  letterSpacing: 2,
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24),
+                child: Text(
+                  'Evaluación de Daños y Análisis de Necesidades',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    letterSpacing: 0.5,
+                    height: 1.3,
+                  ),
                 ),
               ),
               const SizedBox(height: 48),

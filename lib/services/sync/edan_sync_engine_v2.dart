@@ -598,6 +598,10 @@ class EdanSyncEngineV2 {
           'id_tipo_localidad': r['id_tipo_localidad'],
         if (r['id_edan_localidad_estado'] != null)
           'id_edan_localidad_estado': r['id_edan_localidad_estado'],
+        // Motivo del ultimo cambio de estado (rechazo UGR, v43). Los listados
+        // de Rol 6/7 lo muestran solo con estado "Rechazado".
+        if (r['observacion_estado'] != null)
+          'observacion_estado': r['observacion_estado'],
         if (r['fecha_llenado'] != null) 'fecha_llenado': r['fecha_llenado'],
         if (r['fecha_evento'] != null) 'fecha_evento': r['fecha_evento'],
         if (r['hora_evento'] != null) 'hora_evento': r['hora_evento'],
@@ -714,11 +718,15 @@ class EdanSyncEngineV2 {
   ///    ella el wizard dejaba de cargar `filas_seccion` al reabrir (los
   ///    grupos marcados `true` no mostraban sus secciones tras sincronizar).
   ///  * `estado_local` — borrador vs. enviado; el servidor no lo conoce.
-  Future<Map<String, dynamic>> _columnasPreservadas(String uuid) async {
+  ///  * `observacion_estado` — se conserva del valor previo cuando la fila
+  ///    que llega del servidor NO trae el campo (listados ligeros que aún no
+  ///    lo exponen); si lo trae, manda el servidor.
+  Future<Map<String, dynamic>> _columnasPreservadas(
+      String uuid, Map<String, dynamic> fila) async {
     final db = await _db.database;
     final previo = await db.query(
       'formularios',
-      columns: ['secciones_activas_json', 'estado_local'],
+      columns: ['secciones_activas_json', 'estado_local', 'observacion_estado'],
       where: 'uuid_edan_localidad = ?',
       whereArgs: [uuid],
       limit: 1,
@@ -726,10 +734,17 @@ class EdanSyncEngineV2 {
     if (previo.isEmpty) return const {};
     final secciones = previo.first['secciones_activas_json'];
     final estado = previo.first['estado_local'];
+    final obs = previo.first['observacion_estado'];
     return {
       if (secciones is String && secciones.isNotEmpty && secciones != '{}')
         'secciones_activas_json': secciones,
       if (estado != null) 'estado_local': estado,
+      // Preservar el motivo SOLO si la fila que llega no lo trae (el INSERT
+      // OR REPLACE lo pondria NULL). Si el servidor lo manda, manda él.
+      if (fila['observacion_estado'] == null &&
+          obs is String &&
+          obs.isNotEmpty)
+        'observacion_estado': obs,
     };
   }
 
@@ -756,7 +771,7 @@ class EdanSyncEngineV2 {
         // CRUDO del servidor vive en `datos_json_servidor` (v34), que escribe
         // `_normalizarDocCompleto` (camino GET /completo). Así las dos vías
         // dejan de pisarse la copia del otro (doble-escritor).
-        ...await _columnasPreservadas(uuid),
+        ...await _columnasPreservadas(uuid, r),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
@@ -837,7 +852,7 @@ class EdanSyncEngineV2 {
         ..._columnasCabecera(doc),
         ..._columnasGrupo(doc),
         'datos_json_servidor': jsonEncode(docRaw),
-        ...await _columnasPreservadas(uuid),
+        ...await _columnasPreservadas(uuid, doc),
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );

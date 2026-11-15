@@ -13,10 +13,14 @@ class CustomTextField extends StatelessWidget {
   final Widget? prefixIcon;
   final Widget? suffixIcon;
   final String? Function(String?)? validator;
+  /// Error externo controlado por el padre (borde rojo + mensaje) para
+  /// validaciones que no dependen de un `Form` (el wizard EDAN no usa Form).
+  final String? errorText;
   final int maxLines;
   final bool enabled;
   final bool readOnly;
   final VoidCallback? onTap;
+  final FocusNode? focusNode;
   final ValueChanged<String>? onChanged;
   final List<TextInputFormatter>? inputFormatters;
   final bool autofocus;
@@ -33,10 +37,12 @@ class CustomTextField extends StatelessWidget {
     this.prefixIcon,
     this.suffixIcon,
     this.validator,
+    this.errorText,
     this.maxLines = 1,
     this.enabled = true,
     this.readOnly = false,
     this.onTap,
+    this.focusNode,
     this.onChanged,
     this.inputFormatters,
     this.autofocus = false,
@@ -70,6 +76,7 @@ class CustomTextField extends StatelessWidget {
           enabled: enabled,
           readOnly: readOnly,
           onTap: onTap,
+          focusNode: focusNode,
           onChanged: onChanged,
           inputFormatters: inputFormatters,
           autofocus: autofocus,
@@ -79,6 +86,7 @@ class CustomTextField extends StatelessWidget {
           ),
           decoration: InputDecoration(
             hintText: hint,
+            errorText: errorText,
             hintStyle: TextStyle(
               color: AppColors.textSecondary.withValues(alpha: 0.7),
             ),

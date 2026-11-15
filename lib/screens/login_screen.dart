@@ -73,7 +73,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Image.asset(
-                        'assets/images/SINAGER.png',
+                        'assets/images/LOGO_VIDECI_1024.png',
                         width: 100,
                         height: 100,
                         fit: BoxFit.contain,
@@ -100,10 +100,12 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Reporte de Eventos Adversos',
+                    'Evaluación de Daños y Análisis de Necesidades',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      fontSize: 14,
+                      fontSize: 13,
                       color: AppColors.textSecondary,
+                      height: 1.3,
                     ),
                   ),
                   const SizedBox(height: 48),

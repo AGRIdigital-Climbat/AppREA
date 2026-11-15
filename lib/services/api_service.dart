@@ -930,12 +930,18 @@ class ApiService {
     return _extractDataList(body);
   }
 
-  Future<Map<String, dynamic>> cambiarEstadoLocalidad(int idLocalidad, int idEstado) async {
+  Future<Map<String, dynamic>> cambiarEstadoLocalidad(int idLocalidad, int idEstado,
+      {String? observacion}) async {
     final response = await _requestWithRetry(() =>
       LogHttp.put(
         Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad/estado'),
         headers: _headers,
-        body: jsonEncode({'id_edan_localidad_estado': idEstado}),
+        body: jsonEncode({
+          'id_edan_localidad_estado': idEstado,
+          // Motivo del cambio (obligatorio para Rechazado=4 segun el server).
+          if (observacion != null && observacion.trim().isNotEmpty)
+            'observacion_estado': observacion.trim(),
+        }),
       ).timeout(const Duration(seconds: 15))
     );
     final body = await _handleResponse(response);
@@ -1250,6 +1256,64 @@ class ApiService {
         .toList();
   }
 
+  /// Manzanos (censo) de un municipio (urbano).
+  Future<List<Map<String, dynamic>>> getManzanosPorMunicipio(int idMunicipio) async {
+    final response = await _requestWithRetry(() =>
+      LogHttp.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/censo/manzanos/por-nombre')
+            .replace(queryParameters: {'id_municipio': '$idMunicipio'}),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 20))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
+
+  /// Comunidades (censo) de un municipio (rural).
+  Future<List<Map<String, dynamic>>> getComunidadesPorMunicipio(int idMunicipio) async {
+    final response = await _requestWithRetry(() =>
+      LogHttp.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/comunidades').replace(
+            queryParameters: {'id_municipio': '$idMunicipio', 'limit': '500'}),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 20))
+    );
+    final body = await _handleResponse(response);
+    return _extractDataList(body)
+        .map((json) => Map<String, dynamic>.from(json))
+        .toList();
+  }
+
+  /// Población de una comunidad por código INE.
+  Future<Map<String, dynamic>> getComunidadPoblacion(String codigoIne) async {
+    final response = await _requestWithRetry(() =>
+      LogHttp.get(
+        Uri.parse('${ApiConfig.sharedEndpoint}/comunidades/$codigoIne/poblacion'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 10))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data'] as Map);
+  }
+
+  /// Resumen censal 2024 de un MUNICIPIO (poblacion, viviendas, hogares y
+  /// promedio de personas por hogar). Se usa como respaldo cuando el sector
+  /// (comunidad/manzano) no trae promedio.
+  Future<Map<String, dynamic>> getCensoPoblacionMunicipio(
+      int idMunicipio) async {
+    final response = await _requestWithRetry(() =>
+      LogHttp.get(
+        Uri.parse(
+            '${ApiConfig.sharedEndpoint}/censo/poblacion/municipio/$idMunicipio'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    return Map<String, dynamic>.from(body['data'] as Map);
+  }
+
   Future<List<Map<String, dynamic>>> getLocalidadesMunicipio(int idMunicipio) async {
     final response = await _requestWithRetry(() =>
       LogHttp.get(
@@ -1270,6 +1334,21 @@ class ApiService {
     );
     final body = await _handleResponse(response);
     return Map<String, dynamic>.from(body['data']);
+  }
+
+  /// Localidad individual por id del servidor: devuelve su fila completa
+  /// (incluye `observacion_estado`, que los listados ligeros no siempre
+  /// traen). Usado por el backfill de motivos de rechazo.
+  Future<Map<String, dynamic>> getLocalidad(int idLocalidad) async {
+    final response = await _requestWithRetry(() =>
+      LogHttp.get(
+        Uri.parse('${ApiConfig.edanLocalidadesEndpoint}/$idLocalidad'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 15))
+    );
+    final body = await _handleResponse(response);
+    final data = body['data'];
+    return data is Map ? Map<String, dynamic>.from(data) : const {};
   }
 
   Future<List<Map<String, dynamic>>> getLocalidadesEstado() async {

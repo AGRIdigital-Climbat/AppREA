@@ -40,7 +40,7 @@ class DatabaseHelper {
   /// comparan `openDatabase` y los tests que verifican que la BD de prueba es
   /// la misma de la app (históricamente estos se quedaban en 30 y fallaban al
   /// migrar a 32).
-  static const int versionEsquema = 41;
+  static const int versionEsquema = 43;
 
   Future<Database> _initDatabase() async {
     final path =
@@ -370,7 +370,8 @@ class DatabaseHelper {
         municipio_nombre TEXT,
         municipio_codigo TEXT,
         id_edan INTEGER,
-        edan_codigo TEXT
+        edan_codigo TEXT,
+        observacion_estado TEXT
       )
     ''');
     await db.execute('''
@@ -523,6 +524,53 @@ class DatabaseHelper {
       CREATE INDEX IF NOT EXISTS idx_grupos_local
         ON grupos_local(uuid_edan_localidad)
     ''');
+
+    // v42: catalogos de nombres de lugar (manzanos/comunidades) cacheados por
+    // municipio para el selector de page01 en modo offline.
+    await _crearTablasLugares(db);
+  }
+
+  /// Tablas del catalogo de lugares (v42, aditivas: no borran nada).
+  Future<void> _crearTablasLugares(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS catalogo_manzanos (
+        id_municipio INTEGER NOT NULL,
+        nombre TEXT NOT NULL,
+        id_departamento INTEGER,
+        id_provincia INTEGER,
+        manzanos INTEGER,
+        poblacion INTEGER,
+        viviendas INTEGER,
+        hogares INTEGER,
+        unidades_con_hogares INTEGER,
+        poblacion_con_hogares INTEGER,
+        personas_por_hogar INTEGER,
+        PRIMARY KEY (id_municipio, nombre)
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS catalogo_comunidades (
+        codigo_ine TEXT NOT NULL,
+        id_municipio INTEGER NOT NULL,
+        nombre TEXT NOT NULL,
+        id_departamento INTEGER,
+        id_provincia INTEGER,
+        tipo_unidad TEXT,
+        personas INTEGER,
+        viviendas INTEGER,
+        hogares INTEGER,
+        lat REAL,
+        lon REAL,
+        area_oficial TEXT,
+        personas_por_hogar INTEGER,
+        municipio_nombre TEXT,
+        PRIMARY KEY (codigo_ine)
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_catalogo_comunidades_municipio
+        ON catalogo_comunidades(id_municipio)
+    ''');
   }
 
   /// Diseño limpio (v40): el esquema V2 se define UNA vez en
@@ -531,6 +579,24 @@ class DatabaseHelper {
   /// de las tablas V2 (los catálogos y auxiliares se conservan). Sincronizar
   /// antes de instalar: lo no subido se pierde en el alineamiento.
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
+    // v43 (aditiva): motivo del ultimo cambio de estado (`observacion_estado`,
+    // rechazo UGR). Se intenta el ALTER sobre la tabla existente; en versiones
+    // <41 el bloque de alineamiento de abajo RECREA `formularios` desde
+    // `_crearTablasV2` (que ya incluye la columna), por eso el try/catch.
+    if (oldVersion < 43) {
+      try {
+        await db.execute(
+          'ALTER TABLE formularios ADD COLUMN observacion_estado TEXT',
+        );
+      } catch (_) {
+        // tabla inexistente (se recrea) o columna ya presente: sin accion.
+      }
+    }
+    // v42 (aditiva): catalogos de lugares por municipio. Se crea antes del
+    // bloque de alineamiento V2 porque sus tablas NO se borran ni se pierden.
+    if (oldVersion < 42) {
+      await _crearTablasLugares(db);
+    }
     if (oldVersion < 41) {
       await db.execute('DROP TABLE IF EXISTS formularios');
       await db.execute('DROP TABLE IF EXISTS filas_seccion');
@@ -1171,6 +1237,102 @@ class DatabaseHelper {
   Future<List<Map<String, dynamic>>> getTiposLocalidadLocal() async {
     final db = await database;
     return await db.query('catalogo_tipo_localidad', orderBy: 'orden ASC');
+  }
+
+  // ── Catalogo de lugares (v42): manzanos + comunidades por municipio ──
+
+  /// Reemplaza los manzanos cacheados de UN municipio (el resto se conserva).
+  Future<void> saveManzanosLocal(List<Map<String, dynamic>> items) async {
+    if (items.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final m in items) {
+      final idMun = m['id_municipio'];
+      final nombre = m['nombre']?.toString() ?? '';
+      if (idMun == null || nombre.isEmpty) continue;
+      batch.insert(
+        'catalogo_manzanos',
+        {
+          'id_municipio': idMun,
+          'nombre': nombre,
+          'id_departamento': m['id_departamento'],
+          'id_provincia': m['id_provincia'],
+          'manzanos': m['manzanos'],
+          'poblacion': m['poblacion'],
+          'viviendas': m['viviendas'],
+          'hogares': m['hogares'],
+          'unidades_con_hogares': m['unidades_con_hogares'],
+          'poblacion_con_hogares': m['poblacion_con_hogares'],
+          'personas_por_hogar': m['personas_por_hogar'],
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getManzanosLocal(int idMunicipio) async {
+    final db = await database;
+    return db.query('catalogo_manzanos',
+        where: 'id_municipio = ?',
+        whereArgs: [idMunicipio],
+        orderBy: 'nombre ASC');
+  }
+
+  /// Reemplaza las comunidades cacheadas de UN municipio (el resto se conserva).
+  Future<void> saveComunidadesLocal(List<Map<String, dynamic>> items) async {
+    if (items.isEmpty) return;
+    final db = await database;
+    final batch = db.batch();
+    for (final c in items) {
+      final codigoIne = c['codigo_ine']?.toString() ?? '';
+      final idMun = c['id_municipio'];
+      final nombre = c['nombre']?.toString() ?? '';
+      if (codigoIne.isEmpty || idMun == null || nombre.isEmpty) continue;
+      final mun = c['municipio'];
+      batch.insert(
+        'catalogo_comunidades',
+        {
+          'codigo_ine': codigoIne,
+          'id_municipio': idMun,
+          'nombre': nombre,
+          'id_departamento': c['id_departamento'],
+          'id_provincia': c['id_provincia'],
+          'tipo_unidad': c['tipo_unidad'],
+          'personas': c['personas'],
+          'viviendas': c['viviendas'],
+          'hogares': c['hogares'],
+          'lat': c['lat'],
+          'lon': c['lon'],
+          'area_oficial': c['area_oficial'],
+          'personas_por_hogar': c['personas_por_hogar'],
+          'municipio_nombre': mun is Map ? mun['nombre'] : null,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Future<List<Map<String, dynamic>>> getComunidadesLocal(int idMunicipio) async {
+    final db = await database;
+    return db.query('catalogo_comunidades',
+        where: 'id_municipio = ?',
+        whereArgs: [idMunicipio],
+        orderBy: 'nombre ASC');
+  }
+
+  /// Backfill del motivo de rechazo (`observacion_estado`) sobre la cabecera
+  /// V2 ya almacenada. Solo toca esa columna: no altera firma, flags ni
+  /// snapshots — el proximo push del documento no lo reenvia (no viaja).
+  Future<void> actualizarObservacionEstado(String uuid, String valor) async {
+    final db = await database;
+    await db.update(
+      'formularios',
+      {'observacion_estado': valor},
+      where: 'uuid_edan_localidad = ?',
+      whereArgs: [uuid],
+    );
   }
 
   Future<void> saveEstadosEdan(List<Map<String, dynamic>> estados) async {

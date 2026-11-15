@@ -12,6 +12,75 @@ import '../../../../services/sync/edan_sync_engine_v2.dart';
 import '../../../../widgets/custom_text_field.dart';
 import '../../../../services/app_logger_ui.dart';
 
+/// Diálogo para capturar el motivo de rechazo (`observacion_estado`, API v2).
+/// El servidor lo EXIGE cuando el destino es "Rechazado UGR" (422 si falta),
+/// asi que se pide ANTES de llamar la API. Devuelve el texto confirmado (no
+/// vacío) o `null` si el usuario cancela.
+Future<String?> pedirMotivoRechazo(BuildContext context) async {
+  final ctrl = TextEditingController();
+  final resultado = await showDialog<String>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      icon: const Icon(Icons.cancel_outlined, color: AppColors.rechazado),
+      title: const Text('Rechazar localidad'),
+      content: SizedBox(
+        width: 320,
+        // El campo de 4 lineas fijas + teclado causaba overflow de ~33 px
+        // en pantallas pequenas: contenido scrolleable y campo elastico 2-3.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'El responsable verá este motivo en su listado para corregir '
+                'el EDAN.',
+                style: TextStyle(fontSize: 12, color: AppColors.textSecondary),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                minLines: 2,
+                maxLines: 3,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Motivo del rechazo *',
+                  alignLabelWithHint: true,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: AppColors.rechazado),
+          onPressed: () {
+            final t = ctrl.text.trim();
+            if (t.isNotEmpty) Navigator.pop(ctx, t);
+          },
+          child: const Text('Rechazar'),
+        ),
+      ],
+    ),
+  );
+  // IMPORTANTE: NO dispose inmediato. El EditableText del dialogo (con
+  // autofocus) aun puede tener callbacks de foco en cola cuando resuelve el
+  // future; usar el controller ya disposeado lanza
+  // "A TextEditingController was used after being disposed" y corrompe el
+  // arbol de elementos (los asserts en cascada que reportaba el usuario:
+  // _dependents.isEmpty / wrong build scope). Diferir un frame cierra esa
+  // ventana con seguridad.
+  WidgetsBinding.instance.addPostFrameCallback((_) => ctrl.dispose());
+  return resultado;
+}
+
 /// Muestra un diálogo de confirmación antes de eliminar un ítem.
 /// Devuelve `true` si el usuario confirma la eliminación.
 Future<bool> confirmarEliminacion(
@@ -220,9 +289,15 @@ Future<Map<String, String>?> showEdanItemDialog({
     },
   );
 
-  for (final c in controllers.values) {
-    c.dispose();
-  }
+  // Mismo cuidado que pedirMotivoRechazo: los TextFields del dialogo pueden
+  // tener callbacks de foco pendientes al resolver el future; dispose
+  // inmediato => "TextEditingController used after being disposed" + asserts
+  // en cascada. Diferir un frame.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    for (final c in controllers.values) {
+      c.dispose();
+    }
+  });
   return resultado;
 }
 
