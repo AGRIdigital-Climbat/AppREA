@@ -12,6 +12,7 @@ import '../../../providers/reporte_provider.dart';
 import '../../../services/api_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/app_logger_ui.dart';
+import '../../../services/local_paths.dart';
 
 class UgrRecursoTab extends StatefulWidget {
   const UgrRecursoTab({super.key});
@@ -258,7 +259,10 @@ class UgrRecursoTabState extends State<UgrRecursoTab> {
       if (idDoc == null) return;
       final bytes = await ApiService.instance.descargarDocRepositorio(idDoc);
       final dir = await getApplicationDocumentsDirectory();
-      final fileName = doc['nombre_documento'] ?? doc['nombreDocumento'] ?? 'documento_$idDoc.pdf';
+      final fileName = LocalPaths.sanitizarNombreArchivo(
+        (doc['nombre_documento'] ?? doc['nombreDocumento'])?.toString(),
+        fallback: 'documento_$idDoc.pdf',
+      );
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes);
       if (mounted) {

@@ -3,7 +3,10 @@ build/
 .dart_tool/
 .packages
 .pub/
-pubspec.lock
+# Flutter/Dart/Pub usually ignore the lock file, but we commit it: para que
+# el clon de macOS (Xcode) resuelva exactamente las versiones de plugins iOS
+# auditadas (permission_handler_apple, image_picker_ios, geolocator_apple...).
+# pubspec.lock
 
 # Android
 android/.gradle/

@@ -9,6 +9,7 @@ import '../../../services/motor_ia_service.dart';
 import '../../../providers/asistente_ia_provider.dart';
 import '../../../widgets/asistente_ia/asistente_ia_bottom_sheet.dart';
 import '../../../services/app_logger_ui.dart';
+import '../../../services/local_paths.dart';
 
 class UgrGuiaTab extends StatefulWidget {
   const UgrGuiaTab({super.key});
@@ -406,13 +407,27 @@ class _UgrGuiaTabState extends State<UgrGuiaTab>
     try {
       final prefs = await SharedPreferences.getInstance();
       final rutas = prefs.getStringList(_prefsKey) ?? const <String>[];
+      var reubicadas = false;
       for (final r in rutas) {
-        if (!File(r).existsSync()) continue;
+        var ruta = r;
+        if (!File(ruta).existsSync()) {
+          // iOS cambia el UUID del contenedor en cada actualización: el PDF
+          // sigue en `motor_ia/` con el mismo nombre, solo envejeció el
+          // prefijo. Reubicarlo por nombre evita el falso "no descargado".
+          final reubicada = await LocalPaths.resolverRutaLocal(ruta);
+          if (reubicada == null) continue;
+          ruta = reubicada;
+          reubicadas = true;
+        }
         final id = int.tryParse(
-          r.split(RegExp(r'[\\/]')).last.split('_').first,
+          ruta.split(RegExp(r'[\\/]')).last.split('_').first,
         );
         if (id == null || !mounted) continue;
-        setState(() => _rutasDescargados[id] = r);
+        setState(() => _rutasDescargados[id] = ruta);
+      }
+      if (reubicadas) {
+        // Persistir las rutas corregidas: la reparación se hace una sola vez.
+        await _guardarDescargados();
       }
     } catch (_) {}
   }

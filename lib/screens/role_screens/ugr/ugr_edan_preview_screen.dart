@@ -11,6 +11,7 @@ import '../../../services/api_service.dart';
 import '../../../services/auth_service.dart';
 import '../../../services/connectivity_service.dart';
 import '../../../services/database_helper.dart';
+import '../../../services/local_paths.dart';
 import 'crear_usuario_screen.dart';
 import 'ugr_edan_localidad_preview_screen.dart';
 import 'ugr_recurso_upload_screen.dart';
@@ -2060,7 +2061,10 @@ class _UgrEdanPreviewScreenState extends State<UgrEdanPreviewScreen> {
       if (idDoc == null) return;
       final bytes = await ApiService.instance.descargarDocRepositorio(idDoc);
       final dir = await getApplicationDocumentsDirectory();
-      final fileName = doc['nombre_documento'] ?? doc['nombreDocumento'] ?? 'documento_$idDoc.pdf';
+      final fileName = LocalPaths.sanitizarNombreArchivo(
+        (doc['nombre_documento'] ?? doc['nombreDocumento'])?.toString(),
+        fallback: 'documento_$idDoc.pdf',
+      );
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(bytes);
       if (mounted) {

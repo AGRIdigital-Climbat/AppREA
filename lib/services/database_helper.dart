@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/edan.dart';
 import '../models/id_seccion_helper.dart';
 import 'edan_secciones_registry.dart';
+import 'local_paths.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._();
@@ -1112,6 +1113,77 @@ class DatabaseHelper {
     // en forma ruta no se tocan. Corre en cada apertura: es barato y cubre
     // equipos que ya descargaron antes del fix.
     await repararTiposFilaSeccion(db);
+    // iOS reubica la sandbox (`…/Application/<UUID>/`) en cada actualización:
+    // las `ruta_local` absolutas envejecen aunque los bytes sigan en disco.
+    // Reapunta la BD a la ruta vigente antes de que la UI o el sync las lea.
+    try {
+      await repararRutasLocalesPorContenedor(db);
+    } catch (_) {
+      // Nunca tumba el arranque: a lo sumo queda para el próximo open.
+    }
+  }
+
+  /// Reescribe las rutas locales persistidas cuando la ruta guardada ya no
+  /// cuelga del `Documents` vigente pero el archivo sí está en el contenedor
+  /// actual. Típico tras actualizar la app en iOS, donde cambia el UUID del
+  /// contenedor mientras los bytes siguen intactos (Android mantiene sus
+  /// rutas estables, así que allí las filas se saltan por prefijo sin tocar
+  /// disco). Idempotente: cubre también las tablas legacy `foto_pendiente*`.
+  static Future<int> repararRutasLocalesPorContenedor(Database db) async {
+    String docsDir;
+    try {
+      docsDir = (await getApplicationDocumentsDirectory()).path;
+    } catch (_) {
+      return 0; // Tests sin plugin de storage: no se toca la BD.
+    }
+    var reparadas = 0;
+    // (tabla, columna id, columnas de ruta) — tablas legacy pueden no existir.
+    const objetivos = <List<String>>[
+      ['fotografias', 'uuid_fotografia', 'ruta_local'],
+      ['cola_fotos', 'uuid_fotografia', 'ruta_local'],
+      ['foto_pendiente', 'id_foto', 'ruta_local_archivo', 'ruta_descarga'],
+      ['foto_pendiente_v2', 'id_foto', 'ruta_local_archivo'],
+    ];
+    for (final t in objetivos) {
+      try {
+        final cols = t.sublist(2);
+        final filas = await db.query(
+          t[0],
+          columns: [t[1], ...cols],
+        );
+        for (final f in filas) {
+          final id = f[t[1]] as String?;
+          if (id == null || id.isEmpty) continue;
+          var cambio = false;
+          final nuevos = <String, Object?>{};
+          for (final c in cols) {
+            final ruta = f[c] as String?;
+            if (ruta == null || ruta.isEmpty) continue;
+            // Ruta bajo el contenedor vigente: nada que reparar.
+            if (ruta.startsWith(docsDir)) continue;
+            final nueva = await LocalPaths.resolverRutaLocal(ruta);
+            if (nueva == null || nueva == ruta) continue;
+            nuevos[c] = nueva;
+            cambio = true;
+          }
+          if (!cambio) continue;
+          await db.update(
+            t[0],
+            nuevos,
+            where: '${t[1]} = ?',
+            whereArgs: [id],
+          );
+          reparadas++;
+        }
+      } catch (_) {
+        // Tabla inexistente o ilegible: se sigue con la siguiente.
+      }
+    }
+    if (reparadas > 0) {
+      debugPrint('[BD] rutas locales reubicadas tras cambio de contenedor: '
+          '$reparadas');
+    }
+    return reparadas;
   }
 
   /// Mapa TABLA del servidor → RUTA v2 local para `filas_seccion.tipo`.

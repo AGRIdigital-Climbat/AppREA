@@ -74,6 +74,22 @@ class AuthService {
     final hasLoggedIn = _prefs!.getBool('has_logged_in') ?? false;
     if (!hasLoggedIn) {
       _currentToken = null;
+      // En iOS el Keychain SOBREVIVE al desinstalado pero SharedPreferences no:
+      // si el flag de sesion desaparecio y aun hay token/contrasena guardados,
+      // son residuo de una instalacion anterior y se limpian para que un
+      // reinstalo no herede credenciales ni perfil viejo. En Android el
+      // storage privado se borra junto con la app: aqui no habra nada que
+      // borrar y esto es un no-op.
+      try {
+        final token = await _storage.read(key: 'auth_token');
+        final contrasena = await _storage.read(key: 'contrasena');
+        final tieneResiduo = (token != null && token.isNotEmpty) ||
+            (contrasena != null && contrasena.isNotEmpty);
+        if (tieneResiduo) {
+          debugPrint('Credenciales huerfanas de otra instalacion: limpiando');
+          await logout();
+        }
+      } catch (_) {}
       return;
     }
 

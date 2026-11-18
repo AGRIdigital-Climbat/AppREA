@@ -64,6 +64,13 @@ class AsistenteVozService {
     if (!_ttsReady) await initTts();
     if (texto.trim().isEmpty) return;
 
+    // iOS comparte la sesión de audio entre reproducción y grabación: si
+    // quedó una escucha viva, el TTS habla sobre el micro abierto (y el
+    // reconocedor padea el audio). Se cierra la escucha antes de hablar.
+    try {
+      if (_sttInitialized && _stt.isListening) await _stt.stop();
+    } catch (_) {}
+
     // Espera acotada segun la longitud del texto: si el motor TTS nunca
     // dispara el callback de finalizacion, no se bloquea el microfono.
     final espera = (2000 + texto.length * 60).clamp(3000, 60000).toInt();
@@ -136,6 +143,14 @@ class AsistenteVozService {
         return;
       }
     }
+
+    // Si el TTS no llegó a disparar su callback de fin (interrupión de
+    // llamada en iOS), el micro abriría sobre la sesión de reproducción y
+    // speech_to_text fallaría. Se corta el habla pendiente antes de escuchar.
+    try {
+      await _tts.stop();
+    } catch (_) {}
+    _completarHabla();
 
     var finalizado = false;
     void finalizar() {

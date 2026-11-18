@@ -15,6 +15,7 @@ import '../edan/edan_secciones_fuente.dart';
 import '../edan/edan_store_v2.dart';
 import '../edan/edan_uuid_helper.dart';
 import '../edan_secciones_registry.dart';
+import '../local_paths.dart';
 import '../sync_debug_collector.dart';
 import '../sync_debug_config.dart';
 
@@ -3330,16 +3331,29 @@ class EdanSyncEngineV2 {
         final u = g['u'] as String?;
         final ruta = g['ruta'] as String?;
         if (u == null || u.isEmpty || ruta == null || ruta.isEmpty) continue;
+        String? rutaOk;
         try {
-          if (!await File(ruta).exists()) continue;
+          // Contenedor reubicado (actualización de iOS): antes de descartar
+          // se reintenta por nombre; si aparece, se re-encola con la ruta
+          // nueva y se corrige `fotografias`.
+          rutaOk = await LocalPaths.resolverRutaLocal(ruta);
+          if (rutaOk == null) continue;
         } catch (_) {
           continue;
+        }
+        if (rutaOk != ruta) {
+          await db.update(
+            'fotografias',
+            {'ruta_local': rutaOk},
+            where: 'uuid_fotografia = ?',
+            whereArgs: [u],
+          );
         }
         await db.insert(
           'cola_fotos',
           {
             'uuid_fotografia': u,
-            'ruta_local': ruta,
+            'ruta_local': rutaOk,
             'tipo_entidad': g['tipo'],
             'uuid_registro': g['reg'],
             'sha256': g['sha'],
@@ -3415,7 +3429,21 @@ class EdanSyncEngineV2 {
 
     for (final raw in rows) {
       final foto = EdanColaFotoItem.fromMap(raw);
-      final archivo = File(foto.rutaLocal);
+      // iOS reubica el contenedor en cada actualización: si la ruta guardada
+      // ya no está, se reubican los bytes por nombre antes de dar la foto
+      // por perdida, y se persiste la ruta nueva en ambas tablas.
+      final rutaResuelta = await LocalPaths.resolverRutaLocal(foto.rutaLocal);
+      final archivo = File(rutaResuelta ?? foto.rutaLocal);
+      if (rutaResuelta != null && rutaResuelta != foto.rutaLocal) {
+        await _rawUpdate(
+          'UPDATE cola_fotos SET ruta_local = ? WHERE uuid_fotografia = ?',
+          [rutaResuelta, foto.uuidFotografia],
+        );
+        await _rawUpdate(
+          'UPDATE fotografias SET ruta_local = ? WHERE uuid_fotografia = ?',
+          [rutaResuelta, foto.uuidFotografia],
+        );
+      }
       if (!await archivo.exists()) {
         // El archivo se perdió (limpieza del SO, ruta inválida): no se puede
         // subir nunca. Se purga la cola pero el motivo queda registrado en

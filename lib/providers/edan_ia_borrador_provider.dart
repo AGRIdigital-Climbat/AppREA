@@ -209,8 +209,10 @@ class EdanIaVozReal implements EdanIaVozConPistas {
     // agudo al terminar: la secuencia se reconoce sin mirar.
     switch (pista) {
       case EdanPistaVoz.abriendo:
-        await SystemSound.play(SystemSoundType.alert);
-        unawaited(HapticFeedback.mediumImpact());
+        // `SystemSoundType.alert` no suena en iOS (solo Android/macOS): se usa
+        // `click` + vibración fuerte, que llegan en las dos plataformas.
+        await SystemSound.play(SystemSoundType.click);
+        unawaited(HapticFeedback.heavyImpact());
       case EdanPistaVoz.transcribiendo:
         await SystemSound.play(SystemSoundType.click);
         unawaited(HapticFeedback.selectionClick());
@@ -833,7 +835,18 @@ class EdanIaBorradorProvider extends ChangeNotifier {
       }
     }));
 
-    await finDeEscucha.future;
+    // Timeout duro (90 s ≈ listenFor 60 s + margen): en iOS una pasada al
+    // background suspende al reconocedor y el callback de fin nunca llega;
+    // sin techo la UI quedaría pegada en "escuchando" hasta que el usuario
+    // vuelva. Al expirar se corta la escucha y el ciclo cierra como si no
+    // hubiera oído nada (lo transcripto parcial ya se procesó por onResult).
+    try {
+      await finDeEscucha.future.timeout(const Duration(seconds: 90));
+    } on TimeoutException {
+      try {
+        await _voz.detenerEscucha();
+      } catch (_) {}
+    }
     _escuchando = false;
     final hablo = (oido?.trim().isNotEmpty ?? false);
     _transcribiendo = false;
